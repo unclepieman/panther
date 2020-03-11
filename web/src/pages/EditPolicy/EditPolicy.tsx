@@ -27,7 +27,8 @@ import TablePlaceholder from 'Components/TablePlaceholder';
 import { MODALS } from 'Components/utils/Modal';
 import useEditRule from 'Hooks/useEditRule';
 import { extractErrorMessage } from 'Helpers/utils';
-import { usePolicyDetails, useUpdatePolicy } from 'Pages/EditPolicy/graphql/editPolicy.generated';
+import { usePolicyDetails } from './graphql/policyDetails.generated';
+import { useUpdatePolicy } from './graphql/updatePolicy.generated';
 
 interface ApolloMutationData {
   updatePolicy: PolicyDetails;

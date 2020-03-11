@@ -24,7 +24,7 @@ import useRouter from 'Hooks/useRouter';
 import { PolicySummary, ResourceSummary } from 'Generated/schema';
 import ErrorBoundary from 'Components/ErrorBoundary';
 import { extractErrorMessage } from 'Helpers/utils';
-import { useGetOrganizationStats } from './graphql/complianceOverview.generated';
+import { useGetOrganizationStats } from './graphql/getOrganizationStats.generated';
 import { topFailingPoliciesColumns, topFailingResourcesColumns } from './columns';
 import PoliciesBySeverityChart from './PoliciesBySeverityChart';
 import PoliciesByStatusChart from './PoliciesByStatusChart';

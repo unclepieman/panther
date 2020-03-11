@@ -26,11 +26,11 @@ import { Formik } from 'formik';
 import * as Yup from 'yup';
 import { Wizard, WizardPanelWrapper } from 'Components/Wizard';
 import useRouter from 'Hooks/useRouter';
-import { ListLogSourcesDocument } from 'Pages/ListLogSources/LogSourceTable/graphql/logSourceTable.generated';
+import { ListLogSourcesDocument } from 'Pages/ListLogSources/LogSourceTable/graphql/listLogSources.generated';
 import SourceDetailsPanel from './SourceDetailsPanel';
 import CfnLaunchPanel from './CfnLaunchPanel';
 import SuccessPanel from './SuccessPanel';
-import { useAddLogSource } from './graphql/createLogSource.generated';
+import { useAddLogSource } from './graphql/addLogSource.generated';
 
 export interface CreateLogSourceValues {
   integrationLabel: string;

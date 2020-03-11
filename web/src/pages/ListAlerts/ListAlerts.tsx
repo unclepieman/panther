@@ -23,7 +23,7 @@ import { extractErrorMessage } from 'Helpers/utils';
 import useInfiniteScroll from 'Hooks/useInfiniteScroll';
 import { ListAlertsResponse } from 'Generated/schema';
 import ErrorBoundary from 'Components/ErrorBoundary';
-import { useListAlerts } from 'Pages/ListAlerts/graphql/listAlerts.generated';
+import { useListAlerts } from './graphql/listAlerts.generated';
 import ListAlertsTable from './ListAlertsTable';
 import ListAlertsPageSkeleton from './Skeleton';
 import ListAlertsPageEmptyDataFallback from './EmptyDataFallback';

@@ -22,7 +22,7 @@ import { INTEGRATION_TYPES } from 'Source/constants';
 import TablePlaceholder from 'Components/TablePlaceholder';
 import { Alert, Table } from 'pouncejs';
 import { extractErrorMessage } from 'Helpers/utils';
-import { useListLogSources } from './graphql/logSourceTable.generated';
+import { useListLogSources } from './graphql/listLogSources.generated';
 import columns from '../columns';
 
 const LogSourceTable = () => {

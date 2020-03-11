@@ -21,7 +21,7 @@ import { Alert, Box, Card, Flex, Table } from 'pouncejs';
 import ErrorBoundary from 'Components/ErrorBoundary';
 import { Destination } from 'Generated/schema';
 import { extractErrorMessage } from 'Helpers/utils';
-import { useListDestinationsAndDefaults } from 'Pages/Destinations/graphql/destinations.generated';
+import { useListDestinationsAndDefaults } from './graphql/listDestinationsAndDefaults.generated';
 import columns from './columns';
 import DestinationsPageSkeleton from './Skeleton';
 import DestinationsPageEmptyDataFallback from './EmptyDataFallback';

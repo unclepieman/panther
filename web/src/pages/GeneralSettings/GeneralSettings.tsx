@@ -22,10 +22,8 @@ import ErrorBoundary from 'Components/ErrorBoundary';
 import { extractErrorMessage } from 'Helpers/utils';
 import CompanyInformationForm from 'Components/forms/CompanyInformationForm';
 import Panel from 'Components/Panel';
-import {
-  useGetGeneralSettings,
-  useUpdateGeneralSettings,
-} from 'Pages/GeneralSettings/graphql/generalSettings.generated';
+import { useGetGeneralSettings } from './graphql/getGeneralSettings.generated';
+import { useUpdateGeneralSettings } from './graphql/updateGeneralSettings.generated';
 import GeneralSettingsPageSkeleton from './Skeleton';
 
 // Parent container for the general settings section

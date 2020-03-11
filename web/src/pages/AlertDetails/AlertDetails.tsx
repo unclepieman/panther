@@ -25,7 +25,8 @@ import AlertEvents from 'Pages/AlertDetails/AlertDetailsEvents';
 import ErrorBoundary from 'Components/ErrorBoundary';
 import { extractErrorMessage } from 'Helpers/utils';
 import { DEFAULT_LARGE_PAGE_SIZE } from 'Source/constants';
-import { useAlertDetails, useRuleTeaser } from './graphql/alertDetails.generated';
+import { useAlertDetails } from './graphql/alertDetails.generated';
+import { useRuleTeaser } from './graphql/ruleTeaser.generated';
 
 const AlertDetailsPage = () => {
   const { match } = useRouter<{ id: string }>();

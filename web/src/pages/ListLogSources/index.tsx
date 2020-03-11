@@ -18,4 +18,4 @@
 
 export { default } from './ListLogSources';
 export * from './LogSourceTable';
-export * from './LogSourceTable/graphql/logSourceTable.generated';
+export * from './LogSourceTable/graphql/listLogSources.generated';

@@ -27,7 +27,8 @@ import TablePlaceholder from 'Components/TablePlaceholder';
 import { MODALS } from 'Components/utils/Modal';
 import useEditRule from 'Hooks/useEditRule';
 import { extractErrorMessage } from 'Helpers/utils';
-import { useRuleDetails, useUpdateRule } from 'Pages/EditRule/graphql/editRule.generated';
+import { useRuleDetails } from './graphql/ruleDetails.generated';
+import { useUpdateRule } from './graphql/updateRule.generated';
 
 interface ApolloMutationData {
   updateRule: RuleDetails;

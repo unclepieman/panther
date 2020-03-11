@@ -23,7 +23,7 @@ import TablePlaceholder from 'Components/TablePlaceholder';
 import { Alert, Table } from 'pouncejs';
 import { extractErrorMessage } from 'Helpers/utils';
 import columns from '../columns';
-import { useListInfraSources } from './graphql/complianceSourceTable.generated';
+import { useListInfraSources } from './graphql/listInfraSources.generated';
 
 const ComplianceSourceTable = () => {
   const { loading, error, data } = useListInfraSources({

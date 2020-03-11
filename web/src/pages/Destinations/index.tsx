@@ -18,3 +18,4 @@
 
 export { default } from './Destinations';
 export * from './Destinations';
+export * from './graphql/destinations.generated';

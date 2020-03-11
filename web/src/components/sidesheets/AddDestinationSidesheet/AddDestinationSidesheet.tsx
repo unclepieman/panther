@@ -40,7 +40,7 @@ import JiraDestinationForm from 'Components/forms/JiraDestinationForm';
 import GithubDestinationForm from 'Components/forms/GithubDestinationForm';
 import AsanaDestinationForm from 'Components/forms/AsanaDestinationForm';
 
-import { LIST_DESTINATIONS, ListDestinationsQueryData } from 'Pages/Destinations';
+import { ListDestinationsAndDefaultsDocument, ListDestinationsQueryData } from 'Pages/Destinations';
 import { capitalize, extractErrorMessage } from 'Helpers/utils';
 
 const ADD_DESTINATION = gql`
@@ -150,12 +150,12 @@ const AddDestinationSidesheet: React.FC<AddDestinationSidesheetProps> = ({ desti
         update: (proxy, { data }: { data: DestinationMutationData }) => {
           // Read the data from our cache for this query.
           const existingData: ListDestinationsQueryData = proxy.readQuery({
-            query: LIST_DESTINATIONS,
+            query: ListDestinationsAndDefaultsDocument,
           });
 
           // Write our data back to the cache with the new comment in it
           proxy.writeQuery({
-            query: LIST_DESTINATIONS,
+            query: ListDestinationsAndDefaultsDocument,
             data: {
               ...existingData,
               destinations: [data.addDestination, ...existingData.destinations],

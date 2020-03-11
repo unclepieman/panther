@@ -25,7 +25,7 @@ import Auth from '@aws-amplify/auth';
 import { LocationErrorState } from 'Components/utils/ApiErrorFallback';
 import { LIST_REMEDIATIONS } from 'Components/forms/PolicyForm';
 import { logError } from 'Helpers/loggers';
-import { RULE_TEASER } from 'Pages/AlertDetails';
+import { RuleTeaserDocument } from 'Pages/AlertDetails';
 import Storage from 'Helpers/storage';
 import { ERROR_REPORTING_CONSENT_STORAGE_KEY } from 'Source/constants';
 
@@ -37,7 +37,7 @@ const createErrorLink = (history: History<LocationErrorState>) => {
   // still be handled by the component independently)
   const silentFailingOperations = [
     getOperationName(LIST_REMEDIATIONS),
-    getOperationName(RULE_TEASER),
+    getOperationName(RuleTeaserDocument),
   ];
 
   return (onError(({ graphQLErrors, networkError, operation }: ErrorResponse) => {

@@ -17,7 +17,7 @@
  */
 
 import React from 'react';
-import { LIST_POLICIES } from 'Pages/ListPolicies';
+import { ListPoliciesDocument } from 'Pages/ListPolicies';
 import { DeletePolicyInput, PolicySummary, PolicyDetails } from 'Generated/schema';
 
 import { useMutation, gql } from '@apollo/client';
@@ -41,7 +41,7 @@ const DeletePolicyModal: React.FC<DeletePolicyModalProps> = ({ policy }) => {
   const policyDisplayName = policy.displayName || policy.id;
   const mutation = useMutation<boolean, { input: DeletePolicyInput }>(DELETE_POLICY, {
     awaitRefetchQueries: true,
-    refetchQueries: [getOperationName(LIST_POLICIES)],
+    refetchQueries: [getOperationName(ListPoliciesDocument)],
     variables: {
       input: {
         policies: [

@@ -24,7 +24,7 @@ import { SubmitButton } from 'Components/Buttons';
 import useSidesheet from 'Hooks/useSidesheet';
 import { PANTHER_SCHEMA_DOCS_LINK } from 'Source/constants';
 import { UploadPoliciesInput, UploadPoliciesResponse } from 'Generated/schema';
-import { LIST_POLICIES } from 'Pages/ListPolicies';
+import { ListPoliciesDocument } from 'Pages/ListPolicies';
 import { LIST_RULES } from 'Pages/ListRules';
 import { getOperationName } from '@apollo/client/utilities/graphql/getFromAST';
 import { extractErrorMessage } from 'Helpers/utils';
@@ -89,7 +89,7 @@ const PolicyBulkUploadSideSheet: React.FC<PolicyBulkUploadSideSheetProps> = ({ t
       try {
         await bulkUploadPolicies({
           awaitRefetchQueries: true,
-          refetchQueries: [getOperationName(isPolicy ? LIST_POLICIES : LIST_RULES)],
+          refetchQueries: [getOperationName(isPolicy ? ListPoliciesDocument : LIST_RULES)],
           variables: {
             input: {
               data: (reader.result as string).split(',')[1],

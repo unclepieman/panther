@@ -1,0 +1,20 @@
+query ListResources($input: ListResourcesInput, $integrationType: String!) {
+    resources(input: $input) {
+        resources {
+            lastModified
+            type
+            integrationId
+            complianceStatus
+            id
+        }
+        paging {
+            totalPages
+            thisPage
+            totalItems
+        }
+    }
+    integrations(input: { integrationType: $integrationType }) {
+        integrationLabel
+        integrationId
+    }
+}

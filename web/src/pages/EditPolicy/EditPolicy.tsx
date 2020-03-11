@@ -20,91 +20,24 @@ import React from 'react';
 import Panel from 'Components/Panel';
 import { Alert, Button, Card, Box } from 'pouncejs';
 import PolicyForm from 'Components/forms/PolicyForm';
-import { GetPolicyInput, PolicyDetails } from 'Generated/schema';
+import { PolicyDetails } from 'Generated/schema';
 import useModal from 'Hooks/useModal';
-import { useMutation, useQuery, gql } from '@apollo/client';
 import useRouter from 'Hooks/useRouter';
 import TablePlaceholder from 'Components/TablePlaceholder';
 import { MODALS } from 'Components/utils/Modal';
 import useEditRule from 'Hooks/useEditRule';
 import { extractErrorMessage } from 'Helpers/utils';
-
-const POLICY_DETAILS = gql`
-  query PolicyDetails($input: GetPolicyInput!) {
-    policy(input: $input) {
-      autoRemediationId
-      autoRemediationParameters
-      description
-      displayName
-      enabled
-      suppressions
-      id
-      reference
-      resourceTypes
-      runbook
-      severity
-      tags
-      body
-      tests {
-        expectedResult
-        name
-        resource
-        resourceType
-      }
-    }
-  }
-`;
-
-const UPDATE_POLICY = gql`
-  mutation UpdatePolicy($input: CreateOrModifyPolicyInput!) {
-    updatePolicy(input: $input) {
-      autoRemediationId
-      autoRemediationParameters
-      description
-      displayName
-      enabled
-      suppressions
-      id
-      reference
-      resourceTypes
-      runbook
-      severity
-      tags
-      body
-      tests {
-        expectedResult
-        name
-        resource
-        resourceType
-      }
-    }
-  }
-`;
-
-interface ApolloQueryData {
-  policy: PolicyDetails;
-}
-
-interface ApolloQueryInput {
-  input: GetPolicyInput;
-}
+import { usePolicyDetails, useUpdatePolicy } from 'Pages/EditPolicy/graphql/editPolicy.generated';
 
 interface ApolloMutationData {
   updatePolicy: PolicyDetails;
-}
-
-interface ApolloMutationInput {
-  input: GetPolicyInput;
 }
 
 const EditPolicyPage: React.FC = () => {
   const { match } = useRouter<{ id: string }>();
   const { showModal } = useModal();
 
-  const { error: fetchPolicyError, data: queryData, loading: isFetchingPolicy } = useQuery<
-    ApolloQueryData,
-    ApolloQueryInput
-  >(POLICY_DETAILS, {
+  const { error: fetchPolicyError, data: queryData, loading: isFetchingPolicy } = usePolicyDetails({
     fetchPolicy: 'cache-and-network',
     variables: {
       input: {
@@ -113,7 +46,7 @@ const EditPolicyPage: React.FC = () => {
     },
   });
 
-  const mutation = useMutation<ApolloMutationData, ApolloMutationInput>(UPDATE_POLICY);
+  const mutation = useUpdatePolicy();
 
   const { initialValues, handleSubmit, error: updateError } = useEditRule<ApolloMutationData>({
     mutation,

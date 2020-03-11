@@ -17,34 +17,20 @@
  */
 
 import React from 'react';
-import { useQuery, gql } from '@apollo/client';
 import { Integration } from 'Generated/schema';
 import { INTEGRATION_TYPES } from 'Source/constants';
 import TablePlaceholder from 'Components/TablePlaceholder';
 import { Alert, Table } from 'pouncejs';
 import { extractErrorMessage } from 'Helpers/utils';
 import columns from '../columns';
-
-export const LIST_INFRA_SOURCES = gql`
-  query ListInfraSources {
-    integrations(input: { integrationType: "${INTEGRATION_TYPES.AWS_INFRA}" }) {
-        awsAccountId
-        createdAtTime
-        createdBy
-        integrationId
-        integrationLabel
-        integrationType
-        scanEnabled
-        scanIntervalMins
-        scanStatus
-        lastScanEndTime
-      }
-  }
-`;
+import { useListInfraSources } from './graphql/complianceSourceTable.generated';
 
 const ComplianceSourceTable = () => {
-  const { loading, error, data } = useQuery<{ integrations: Integration[] }>(LIST_INFRA_SOURCES, {
+  const { loading, error, data } = useListInfraSources({
     fetchPolicy: 'cache-and-network',
+    variables: {
+      integrationType: INTEGRATION_TYPES.AWS_INFRA,
+    },
   });
 
   if (loading && !data) {

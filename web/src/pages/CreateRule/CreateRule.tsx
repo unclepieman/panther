@@ -21,12 +21,11 @@ import Panel from 'Components/Panel';
 import { Alert, Box } from 'pouncejs';
 import urls from 'Source/urls';
 import RuleForm from 'Components/forms/RuleForm';
-import { GetRuleInput, RuleDetails } from 'Generated/schema';
-
-import { useMutation, gql } from '@apollo/client';
+import { RuleDetails } from 'Generated/schema';
 import { DEFAULT_RULE_FUNCTION } from 'Source/constants';
 import useCreateRule from 'Hooks/useCreateRule';
 import { extractErrorMessage } from 'Helpers/utils';
+import { useCreateRule as useCreateRuleMutation } from './graphql/createRule.generated';
 
 const initialValues: RuleDetails = {
   description: '',
@@ -42,39 +41,12 @@ const initialValues: RuleDetails = {
   tests: [],
 };
 
-const CREATE_RULE = gql`
-  mutation CreateRule($input: CreateOrModifyRuleInput!) {
-    addRule(input: $input) {
-      description
-      displayName
-      enabled
-      id
-      reference
-      logTypes
-      runbook
-      severity
-      tags
-      body
-      tests {
-        expectedResult
-        name
-        resource
-        resourceType
-      }
-    }
-  }
-`;
-
 interface ApolloMutationData {
   addRule: RuleDetails;
 }
 
-interface ApolloMutationInput {
-  input: GetRuleInput;
-}
-
 const CreateRulePage: React.FC = () => {
-  const mutation = useMutation<ApolloMutationData, ApolloMutationInput>(CREATE_RULE);
+  const mutation = useCreateRuleMutation();
 
   const { handleSubmit, error } = useCreateRule<ApolloMutationData>({
     mutation,

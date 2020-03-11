@@ -1,0 +1,14 @@
+query ListInfraSources($integrationType: String! ) {
+    integrations(input: { integrationType: $integrationType }) {
+        awsAccountId
+        createdAtTime
+        createdBy
+        integrationId
+        integrationLabel
+        integrationType
+        scanEnabled
+        scanIntervalMins
+        scanStatus
+        lastScanEndTime
+    }
+}

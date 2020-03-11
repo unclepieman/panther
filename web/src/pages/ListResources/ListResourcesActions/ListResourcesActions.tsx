@@ -20,8 +20,6 @@ import React from 'react';
 import { Alert, Button, Card, Flex, Icon } from 'pouncejs';
 import { INTEGRATION_TYPES, RESOURCE_TYPES } from 'Source/constants';
 import GenerateFiltersGroup from 'Components/utils/GenerateFiltersGroup';
-
-import { useQuery, gql } from '@apollo/client';
 import { ComplianceStatusEnum, ListResourcesInput, Integration } from 'Generated/schema';
 import { capitalize } from 'Helpers/utils';
 import FormikTextInput from 'Components/fields/TextInput';
@@ -31,6 +29,7 @@ import ErrorBoundary from 'Components/ErrorBoundary';
 import pick from 'lodash-es/pick';
 import useRequestParamsWithPagination from 'Hooks/useRequestParamsWithPagination';
 import isEmpty from 'lodash-es/isEmpty';
+import { useListAccountIds } from 'Pages/ListResources';
 
 const statusOptions = Object.values(ComplianceStatusEnum);
 
@@ -78,15 +77,6 @@ export const filters = {
   },
 };
 
-const LIST_ACCOUNT_IDS = gql`
-    query ListAccountIds {
-        integrations(input: { integrationType: "${INTEGRATION_TYPES.AWS_INFRA}"}) {
-            integrationLabel
-            integrationId
-        }
-    }
-`;
-
 // The values of the filters that the resources page will show
 export type ListResourcesFiltersValues = Pick<
   ListResourcesInput,
@@ -111,8 +101,8 @@ const ListResourcesActions: React.FC = () => {
     ListResourcesInput
   >();
 
-  const { error, data } = useQuery<{ integrations: Integration[] }>(LIST_ACCOUNT_IDS, {
-    fetchPolicy: 'cache-first',
+  const { error, data } = useListAccountIds({
+    variables: { integrationType: INTEGRATION_TYPES.AWS_INFRA },
   });
 
   if (data) {

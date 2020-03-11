@@ -18,3 +18,4 @@
 
 export { default } from './AlertDetails';
 export * from './AlertDetails';
+export * from './graphql/alertDetails.generated';

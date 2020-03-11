@@ -21,13 +21,13 @@ import Panel from 'Components/Panel';
 import { Alert, Box } from 'pouncejs';
 import urls from 'Source/urls';
 import PolicyForm from 'Components/forms/PolicyForm';
-import { GetPolicyInput, PolicyDetails, ResourceDetails } from 'Generated/schema';
-import { useMutation, gql } from '@apollo/client';
+import { PolicyDetails, ResourceDetails } from 'Generated/schema';
 import { DEFAULT_POLICY_FUNCTION } from 'Source/constants';
 import useCreateRule from 'Hooks/useCreateRule';
-import { LIST_POLICIES } from 'Pages/ListPolicies';
 import { getOperationName } from '@apollo/client/utilities/graphql/getFromAST';
 import { extractErrorMessage } from 'Helpers/utils';
+import { useCreatePolicy } from 'Pages/CreatePolicy/graphql/createPolicy.generated';
+import { ListPoliciesDocument } from 'Pages/ListPolicies';
 
 const initialValues: PolicyDetails = {
   autoRemediationId: '',
@@ -46,43 +46,13 @@ const initialValues: PolicyDetails = {
   tests: [],
 };
 
-const CREATE_POLICY = gql`
-  mutation CreatePolicy($input: CreateOrModifyPolicyInput!) {
-    addPolicy(input: $input) {
-      autoRemediationId
-      autoRemediationParameters
-      description
-      displayName
-      enabled
-      suppressions
-      id
-      reference
-      resourceTypes
-      runbook
-      severity
-      tags
-      body
-      tests {
-        expectedResult
-        name
-        resource
-        resourceType
-      }
-    }
-  }
-`;
-
 interface ApolloMutationData {
   addPolicy: ResourceDetails;
 }
 
-interface ApolloMutationInput {
-  input: GetPolicyInput;
-}
-
-const EditPolicyPage: React.FC = () => {
-  const mutation = useMutation<ApolloMutationData, ApolloMutationInput>(CREATE_POLICY, {
-    refetchQueries: [getOperationName(LIST_POLICIES)],
+const CreatePolicyPage: React.FC = () => {
+  const mutation = useCreatePolicy({
+    refetchQueries: [getOperationName(ListPoliciesDocument)],
   });
 
   const { handleSubmit, error } = useCreateRule<ApolloMutationData>({
@@ -110,4 +80,4 @@ const EditPolicyPage: React.FC = () => {
   );
 };
 
-export default EditPolicyPage;
+export default CreatePolicyPage;

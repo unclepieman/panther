@@ -1,0 +1,15 @@
+query GetGeneralSettings {
+    generalSettings {
+        displayName
+        email
+        errorReportingConsent
+    }
+}
+
+mutation UpdateGeneralSettings($input: UpdateGeneralSettingsInput!) {
+    updateGeneralSettings(input: $input) {
+        displayName
+        email
+        errorReportingConsent
+    }
+}

@@ -1,0 +1,6 @@
+query ListAccountIds ($integrationType: String!) {
+    integrations(input: { integrationType: $integrationType }) {
+        integrationLabel
+        integrationId
+    }
+}

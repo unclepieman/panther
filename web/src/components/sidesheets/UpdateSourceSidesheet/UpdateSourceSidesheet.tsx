@@ -19,8 +19,8 @@
 import { Heading, SideSheet, useSnackbar } from 'pouncejs';
 import React from 'react';
 import { useMutation, gql } from '@apollo/client';
-import { LIST_INFRA_SOURCES } from 'Pages/ListComplianceSources';
-import { LIST_LOG_SOURCES } from 'Pages/ListLogSources';
+import { ListInfraSourcesDocument } from 'Pages/ListComplianceSources';
+import { ListLogSourcesDocument } from 'Pages/ListLogSources';
 import useSidesheet from 'Hooks/useSidesheet';
 import { Integration, UpdateIntegrationInput } from 'Generated/schema';
 import { extractErrorMessage } from 'Helpers/utils';
@@ -74,7 +74,9 @@ export const UpdateAwsSourcesSidesheet: React.FC<UpdateSourceSidesheetProps> = (
           integrationId: source.integrationId,
         },
       },
-      refetchQueries: [{ query: isInfraSource ? LIST_INFRA_SOURCES : LIST_LOG_SOURCES }],
+      refetchQueries: [
+        { query: isInfraSource ? ListInfraSourcesDocument : ListLogSourcesDocument },
+      ],
     });
 
   return (

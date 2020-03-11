@@ -19,7 +19,8 @@
 import React from 'react';
 import { Destination } from 'Generated/schema';
 import { useMutation, gql } from '@apollo/client';
-import { LIST_DESTINATIONS } from 'Pages/Destinations';
+import { ListDestinationsAndDefaultsDocument } from 'Pages/Destinations';
+
 import BaseConfirmModal from 'Components/modals/BaseConfirmModal';
 
 const DELETE_DESTINATION = gql`
@@ -42,7 +43,7 @@ const DeleteDestinationModal: React.FC<DeleteDestinationModalProps> = ({ destina
     variables: {
       id: destination.outputId,
     },
-    refetchQueries: [{ query: LIST_DESTINATIONS }],
+    refetchQueries: [{ query: ListDestinationsAndDefaultsDocument }],
   });
 
   return (

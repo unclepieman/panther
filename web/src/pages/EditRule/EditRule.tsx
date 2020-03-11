@@ -20,85 +20,24 @@ import React from 'react';
 import Panel from 'Components/Panel';
 import { Alert, Button, Card, Box } from 'pouncejs';
 import RuleForm from 'Components/forms/RuleForm';
-import { GetRuleInput, RuleDetails } from 'Generated/schema';
+import { RuleDetails } from 'Generated/schema';
 import useModal from 'Hooks/useModal';
-import { useMutation, useQuery, gql } from '@apollo/client';
 import useRouter from 'Hooks/useRouter';
 import TablePlaceholder from 'Components/TablePlaceholder';
 import { MODALS } from 'Components/utils/Modal';
 import useEditRule from 'Hooks/useEditRule';
 import { extractErrorMessage } from 'Helpers/utils';
-
-const RULE_DETAILS = gql`
-  query RuleDetails($input: GetRuleInput!) {
-    rule(input: $input) {
-      description
-      displayName
-      enabled
-      id
-      reference
-      logTypes
-      runbook
-      severity
-      tags
-      body
-      tests {
-        expectedResult
-        name
-        resource
-        resourceType
-      }
-    }
-  }
-`;
-
-const UPDATE_RULE = gql`
-  mutation UpdateRule($input: CreateOrModifyRuleInput!) {
-    updateRule(input: $input) {
-      description
-      displayName
-      enabled
-      id
-      reference
-      logTypes
-      runbook
-      severity
-      tags
-      body
-      tests {
-        expectedResult
-        name
-        resource
-        resourceType
-      }
-    }
-  }
-`;
-
-interface ApolloQueryData {
-  rule: RuleDetails;
-}
-
-interface ApolloQueryInput {
-  input: GetRuleInput;
-}
+import { useRuleDetails, useUpdateRule } from 'Pages/EditRule/graphql/editRule.generated';
 
 interface ApolloMutationData {
   updateRule: RuleDetails;
-}
-
-interface ApolloMutationInput {
-  input: GetRuleInput;
 }
 
 const EditRulePage: React.FC = () => {
   const { match } = useRouter<{ id: string }>();
   const { showModal } = useModal();
 
-  const { error: fetchRuleError, data: queryData, loading: isFetchingRule } = useQuery<
-    ApolloQueryData,
-    ApolloQueryInput
-  >(RULE_DETAILS, {
+  const { error: fetchRuleError, data: queryData, loading: isFetchingRule } = useRuleDetails({
     fetchPolicy: 'cache-and-network',
     variables: {
       input: {
@@ -107,7 +46,7 @@ const EditRulePage: React.FC = () => {
     },
   });
 
-  const mutation = useMutation<ApolloMutationData, ApolloMutationInput>(UPDATE_RULE);
+  const mutation = useUpdateRule();
 
   const { initialValues, handleSubmit, error: updateError } = useEditRule<ApolloMutationData>({
     mutation,

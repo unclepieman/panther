@@ -21,12 +21,9 @@ import * as React from 'react';
 import * as Yup from 'yup';
 import {
   ActiveSuppressCount,
-  // ComplianceItem,
   ComplianceStatusCounts,
   Integration,
   OrganizationReportBySeverity,
-  // ResourceDetails,
-  // ResourceSummary,
   ScannedResources,
 } from 'Generated/schema';
 import {

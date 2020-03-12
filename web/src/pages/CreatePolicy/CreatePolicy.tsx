@@ -26,8 +26,8 @@ import { DEFAULT_POLICY_FUNCTION } from 'Source/constants';
 import useCreateRule from 'Hooks/useCreateRule';
 import { getOperationName } from '@apollo/client/utilities/graphql/getFromAST';
 import { extractErrorMessage } from 'Helpers/utils';
-import { useCreatePolicy } from 'Pages/CreatePolicy/graphql/createPolicy.generated';
 import { ListPoliciesDocument } from 'Pages/ListPolicies';
+import { useCreatePolicy } from './graphql/createPolicy.generated';
 
 const initialValues: PolicyDetails = {
   autoRemediationId: '',

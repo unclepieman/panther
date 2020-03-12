@@ -18,7 +18,7 @@
 
 import React from 'react';
 import { Alert, Button, Card, Flex, Icon } from 'pouncejs';
-import { INTEGRATION_TYPES, RESOURCE_TYPES } from 'Source/constants';
+import { RESOURCE_TYPES } from 'Source/constants';
 import GenerateFiltersGroup from 'Components/utils/GenerateFiltersGroup';
 import { ComplianceStatusEnum, ListResourcesInput, Integration } from 'Generated/schema';
 import { capitalize } from 'Helpers/utils';
@@ -101,9 +101,7 @@ const ListResourcesActions: React.FC = () => {
     ListResourcesInput
   >();
 
-  const { error, data } = useListAccountIds({
-    variables: { integrationType: INTEGRATION_TYPES.AWS_INFRA },
-  });
+  const { error, data } = useListAccountIds();
 
   if (data) {
     filters.integrationId.props.items = data.integrations;

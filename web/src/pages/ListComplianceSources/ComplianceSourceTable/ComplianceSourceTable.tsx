@@ -18,7 +18,6 @@
 
 import React from 'react';
 import { Integration } from 'Generated/schema';
-import { INTEGRATION_TYPES } from 'Source/constants';
 import TablePlaceholder from 'Components/TablePlaceholder';
 import { Alert, Table } from 'pouncejs';
 import { extractErrorMessage } from 'Helpers/utils';
@@ -28,9 +27,6 @@ import { useListInfraSources } from './graphql/listInfraSources.generated';
 const ComplianceSourceTable = () => {
   const { loading, error, data } = useListInfraSources({
     fetchPolicy: 'cache-and-network',
-    variables: {
-      integrationType: INTEGRATION_TYPES.AWS_INFRA,
-    },
   });
 
   if (loading && !data) {

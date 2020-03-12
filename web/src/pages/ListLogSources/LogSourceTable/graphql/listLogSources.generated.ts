@@ -5,9 +5,7 @@ import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
 
-export type ListLogSourcesVariables = {
-  integrationType: Types.Scalars['String'];
-};
+export type ListLogSourcesVariables = {};
 
 export type ListLogSources = {
   integrations: Types.Maybe<
@@ -26,8 +24,8 @@ export type ListLogSources = {
 };
 
 export const ListLogSourcesDocument = gql`
-  query ListLogSources($integrationType: String!) {
-    integrations(input: { integrationType: $integrationType }) {
+  query ListLogSources {
+    integrations(input: { integrationType: "aws-s3" }) {
       awsAccountId
       createdAtTime
       integrationId
@@ -50,7 +48,6 @@ export const ListLogSourcesDocument = gql`
  * @example
  * const { data, loading, error } = useListLogSources({
  *   variables: {
- *      integrationType: // value for 'integrationType'
  *   },
  * });
  */

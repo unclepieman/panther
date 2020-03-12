@@ -1,5 +1,5 @@
-query ListLogSources($integrationType: String!) {
-    integrations(input: { integrationType: $integrationType}){
+query ListLogSources {
+    integrations(input: { integrationType: "aws-s3"}){
         awsAccountId
         createdAtTime
         integrationId

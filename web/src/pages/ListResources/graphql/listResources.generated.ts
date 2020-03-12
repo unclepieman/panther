@@ -7,7 +7,6 @@ import * as ApolloReactHooks from '@apollo/client';
 
 export type ListResourcesVariables = {
   input?: Types.Maybe<Types.ListResourcesInput>;
-  integrationType: Types.Scalars['String'];
 };
 
 export type ListResources = {
@@ -28,7 +27,7 @@ export type ListResources = {
 };
 
 export const ListResourcesDocument = gql`
-  query ListResources($input: ListResourcesInput, $integrationType: String!) {
+  query ListResources($input: ListResourcesInput) {
     resources(input: $input) {
       resources {
         lastModified
@@ -43,7 +42,7 @@ export const ListResourcesDocument = gql`
         totalItems
       }
     }
-    integrations(input: { integrationType: $integrationType }) {
+    integrations(input: { integrationType: "aws-scan" }) {
       integrationLabel
       integrationId
     }
@@ -63,7 +62,6 @@ export const ListResourcesDocument = gql`
  * const { data, loading, error } = useListResources({
  *   variables: {
  *      input: // value for 'input'
- *      integrationType: // value for 'integrationType'
  *   },
  * });
  */

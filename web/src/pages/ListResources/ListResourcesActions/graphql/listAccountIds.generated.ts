@@ -5,17 +5,15 @@ import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
 
-export type ListAccountIdsVariables = {
-  integrationType: Types.Scalars['String'];
-};
+export type ListAccountIdsVariables = {};
 
 export type ListAccountIds = {
   integrations: Types.Maybe<Array<Pick<Types.Integration, 'integrationLabel' | 'integrationId'>>>;
 };
 
 export const ListAccountIdsDocument = gql`
-  query ListAccountIds($integrationType: String!) {
-    integrations(input: { integrationType: $integrationType }) {
+  query ListAccountIds {
+    integrations(input: { integrationType: "aws-scan" }) {
       integrationLabel
       integrationId
     }
@@ -34,7 +32,6 @@ export const ListAccountIdsDocument = gql`
  * @example
  * const { data, loading, error } = useListAccountIds({
  *   variables: {
- *      integrationType: // value for 'integrationType'
  *   },
  * });
  */

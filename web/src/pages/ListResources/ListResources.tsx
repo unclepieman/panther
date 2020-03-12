@@ -18,7 +18,7 @@
 
 import React from 'react';
 import { Alert, Box, Card } from 'pouncejs';
-import { DEFAULT_LARGE_PAGE_SIZE, INTEGRATION_TYPES } from 'Source/constants';
+import { DEFAULT_LARGE_PAGE_SIZE } from 'Source/constants';
 import { ListResourcesInput, ListResourcesSortFieldsEnum, SortDirEnum } from 'Generated/schema';
 import { TableControlsPagination } from 'Components/utils/TableControls';
 import {
@@ -46,7 +46,6 @@ const ListResources = () => {
     fetchPolicy: 'cache-and-network',
     variables: {
       input: convertObjArrayValuesToCsv(requestParams),
-      integrationType: INTEGRATION_TYPES.AWS_INFRA,
     },
   });
   if (loading && !data) {

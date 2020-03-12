@@ -1,4 +1,4 @@
-query ListResources($input: ListResourcesInput, $integrationType: String!) {
+query ListResources($input: ListResourcesInput) {
     resources(input: $input) {
         resources {
             lastModified
@@ -13,7 +13,7 @@ query ListResources($input: ListResourcesInput, $integrationType: String!) {
             totalItems
         }
     }
-    integrations(input: { integrationType: $integrationType }) {
+    integrations(input: { integrationType: "aws-scan" }) {
         integrationLabel
         integrationId
     }

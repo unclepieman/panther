@@ -120,28 +120,12 @@ export const formatJSON = (code: { [key: string]: number | string }) =>
 /**
  * Extends the resource by adding an `integrationLabel` field. We define two overloads for this
  * function
- * @param resource A resource
+ * @param resource A resource that can be of type ResourceDetails, ResourceSummary or ComplianceItem
  * @param integrations A list of integrations with at least (integrationId & integrationType)
  */
 
-// function extendResourceWithIntLabel(
-//   resource: ResourceSummary,
-//   integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]
-// ): ResourceSummary & Pick<Integration, 'integrationLabel'>;
-//
-// function extendResourceWithIntLabel(
-//   resource: ResourceDetails,
-//   integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]
-// ): ResourceDetails & Pick<Integration, 'integrationLabel'>;
-//
-// function extendResourceWithIntLabel(
-//   resource: Partial<ComplianceItem>,
-//   integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]
-// ): Partial<ComplianceItem> & Pick<Integration, 'integrationLabel'>;
-
-// TODO: Check why overload isn't working
-function extendResourceWithIntLabel(
-  resource: any,
+export function extendResourceWithIntegrationLabel<T extends { integrationId?: string }>(
+  resource: T,
   integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]
 ) {
   const matchingIntegration = integrations.find(i => i.integrationId === resource.integrationId);
@@ -150,8 +134,6 @@ function extendResourceWithIntLabel(
     integrationLabel: matchingIntegration?.integrationLabel || 'Cannot find account',
   };
 }
-
-export const extendResourceWithIntegrationLabel = extendResourceWithIntLabel;
 
 /**
  * sums up the total number of items based on the active/suppresed count breakdown that the API

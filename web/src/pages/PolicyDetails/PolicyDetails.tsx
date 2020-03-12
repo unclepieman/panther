@@ -18,7 +18,6 @@
 
 import React from 'react';
 import useRouter from 'Hooks/useRouter';
-import { useQuery, gql } from '@apollo/client';
 import {
   ComplianceStatusEnum,
   GetPolicyInput,
@@ -40,70 +39,14 @@ import {
   extractErrorMessage,
 } from 'Helpers/utils';
 import pick from 'lodash-es/pick';
-import { DEFAULT_SMALL_PAGE_SIZE, INTEGRATION_TYPES } from 'Source/constants';
+import { DEFAULT_SMALL_PAGE_SIZE } from 'Source/constants';
 import useRequestParamsWithPagination from 'Hooks/useRequestParamsWithPagination';
 import ErrorBoundary from 'Components/ErrorBoundary';
 import PolicyDetailsTable from './PolicyDetailsTable';
 import PolicyDetailsInfo from './PolicyDetailsInfo';
 import columns from './columns';
 import PolicyDetailsPageSkeleton from './Skeleton';
-
-export const POLICY_DETAILS = gql`
-  query PolicyDetails(
-    $policyDetailsInput: GetPolicyInput!
-    $resourcesForPolicyInput: ResourcesForPolicyInput!
-  ) {
-    policy(input: $policyDetailsInput) {
-      autoRemediationId
-      autoRemediationParameters
-      complianceStatus
-      createdAt
-      description
-      displayName
-      enabled
-      suppressions
-      id
-      lastModified
-      reference
-      resourceTypes
-      runbook
-      severity
-      tags
-    }
-    resourcesForPolicy(input: $resourcesForPolicyInput) {
-      items {
-        errorMessage
-        integrationId
-        lastUpdated
-        policyId
-        resourceId
-        status
-        suppressed
-      }
-      paging {
-        totalItems
-        totalPages
-        thisPage
-      }
-      totals {
-        active {
-          fail
-          pass
-          error
-        }
-        suppressed {
-          fail
-          pass
-          error
-        }
-      }
-    }
-    integrations(input: { integrationType: "${INTEGRATION_TYPES.AWS_INFRA}" }) {
-        integrationId
-        integrationLabel
-    }
-  }
-`;
+import { usePolicyDetails } from './graphql/policyDetails.generated';
 
 interface ApolloQueryData {
   policy: PolicyDetails;
@@ -128,7 +71,7 @@ const PolicyDetailsPage = () => {
     Pick<ResourcesForPolicyInput, typeof acceptedRequestParams[number]>
   >();
 
-  const { error, data, loading } = useQuery<ApolloQueryData, ApolloQueryInput>(POLICY_DETAILS, {
+  const { error, data, loading } = usePolicyDetails({
     fetchPolicy: 'cache-and-network',
     variables: {
       policyDetailsInput: {

@@ -20,15 +20,9 @@ import React from 'react';
 import { Integration } from 'Generated/schema';
 import { ListInfraSourcesDocument } from 'Pages/ListComplianceSources';
 import { ListLogSourcesDocument } from 'Pages/ListLogSources';
-import { useMutation, gql } from '@apollo/client';
 import { INTEGRATION_TYPES } from 'Source/constants';
 import BaseConfirmModal from 'Components/modals/BaseConfirmModal';
-
-const DELETE_SOURCE = gql`
-  mutation DeleteSource($id: ID!) {
-    deleteIntegration(id: $id)
-  }
-`;
+import { useDeleteSource } from './graphql/deleteSource.generated';
 
 export interface DeleteSourceModalProps {
   source: Integration;
@@ -37,7 +31,7 @@ export interface DeleteSourceModalProps {
 const DeleteSourceModal: React.FC<DeleteSourceModalProps> = ({ source }) => {
   const isInfraSource = source.integrationType === INTEGRATION_TYPES.AWS_INFRA;
   const sourceDisplayName = source.integrationLabel || source.integrationId;
-  const mutation = useMutation<boolean, { id: string }>(DELETE_SOURCE, {
+  const mutation = useDeleteSource({
     variables: {
       id: source.integrationId,
     },

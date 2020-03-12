@@ -23,7 +23,7 @@ import { createAuthLink, AUTH_TYPE } from 'aws-appsync-auth-link';
 import { ErrorResponse, onError } from 'apollo-link-error';
 import Auth from '@aws-amplify/auth';
 import { LocationErrorState } from 'Components/utils/ApiErrorFallback';
-import { LIST_REMEDIATIONS } from 'Components/forms/PolicyForm';
+import { ListRemediationsDocument } from 'Components/forms/PolicyForm';
 import { logError } from 'Helpers/loggers';
 import { RuleTeaserDocument } from 'Pages/AlertDetails';
 import Storage from 'Helpers/storage';
@@ -36,7 +36,7 @@ const createErrorLink = (history: History<LocationErrorState>) => {
   // Define the operations that won't trigger any handler actions or be logged anywhere (those can
   // still be handled by the component independently)
   const silentFailingOperations = [
-    getOperationName(LIST_REMEDIATIONS),
+    getOperationName(ListRemediationsDocument),
     getOperationName(RuleTeaserDocument),
   ];
 

@@ -17,21 +17,13 @@
  */
 
 import * as React from 'react';
-import { useMutation, gql } from '@apollo/client';
 import { Alert, Box, useSnackbar } from 'pouncejs';
 import { InviteUserInput } from 'Generated/schema';
-import { LIST_USERS } from 'Pages/Users/ListUsersTable';
+import { ListUsersDocument } from 'Pages/Users/ListUsersTable/graphql/listUsers.generated';
 import { getOperationName } from '@apollo/client/utilities/graphql/getFromAST';
 import { extractErrorMessage } from 'Helpers/utils';
 import BaseUserForm from 'Components/forms/BaseUserForm';
-
-const INVITE_USER = gql`
-  mutation InviteUser($input: InviteUserInput!) {
-    inviteUser(input: $input) {
-      id
-    }
-  }
-`;
+import { useInviteUser } from './graphql/inviteUser.generated';
 
 interface ApolloMutationInput {
   input: InviteUserInput;
@@ -48,9 +40,7 @@ const initialValues = {
 };
 
 const UserInvitationForm: React.FC<UserInvitationFormProps> = ({ onSuccess }) => {
-  const [inviteUser, { error: inviteUserError, data }] = useMutation<boolean, ApolloMutationInput>(
-    INVITE_USER
-  );
+  const [inviteUser, { error: inviteUserError, data }] = useInviteUser();
   const { pushSnackbar } = useSnackbar();
 
   React.useEffect(() => {
@@ -84,7 +74,7 @@ const UserInvitationForm: React.FC<UserInvitationFormProps> = ({ onSuccess }) =>
                 givenName: values.givenName,
               },
             },
-            refetchQueries: [getOperationName(LIST_USERS)],
+            refetchQueries: [getOperationName(ListUsersDocument)],
           });
         }}
       />

@@ -21,12 +21,12 @@ import * as React from 'react';
 import * as Yup from 'yup';
 import {
   ActiveSuppressCount,
-  ComplianceItem,
+  // ComplianceItem,
   ComplianceStatusCounts,
   Integration,
   OrganizationReportBySeverity,
-  ResourceDetails,
-  ResourceSummary,
+  // ResourceDetails,
+  // ResourceSummary,
   ScannedResources,
 } from 'Generated/schema';
 import {
@@ -124,21 +124,22 @@ export const formatJSON = (code: { [key: string]: number | string }) =>
  * @param integrations A list of integrations with at least (integrationId & integrationType)
  */
 
-function extendResourceWithIntLabel(
-  resource: ResourceSummary,
-  integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]
-): ResourceSummary & Pick<Integration, 'integrationLabel'>;
+// function extendResourceWithIntLabel(
+//   resource: ResourceSummary,
+//   integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]
+// ): ResourceSummary & Pick<Integration, 'integrationLabel'>;
+//
+// function extendResourceWithIntLabel(
+//   resource: ResourceDetails,
+//   integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]
+// ): ResourceDetails & Pick<Integration, 'integrationLabel'>;
+//
+// function extendResourceWithIntLabel(
+//   resource: Partial<ComplianceItem>,
+//   integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]
+// ): Partial<ComplianceItem> & Pick<Integration, 'integrationLabel'>;
 
-function extendResourceWithIntLabel(
-  resource: ResourceDetails,
-  integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]
-): ResourceDetails & Pick<Integration, 'integrationLabel'>;
-
-function extendResourceWithIntLabel(
-  resource: ComplianceItem,
-  integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]
-): ComplianceItem & Pick<Integration, 'integrationLabel'>;
-
+// TODO: Check why overload isn't working
 function extendResourceWithIntLabel(
   resource: any,
   integrations: (Partial<Integration> & Pick<Integration, 'integrationId' | 'integrationLabel'>)[]

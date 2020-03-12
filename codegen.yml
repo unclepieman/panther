@@ -4,7 +4,7 @@ generates:
   web/__generated__/schema.tsx:
     plugins:
       - typescript
-    #      - typescript-resolvers
+      - typescript-resolvers
     config:
       scalars:
         AWSEmail: string

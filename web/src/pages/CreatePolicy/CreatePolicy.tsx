@@ -21,7 +21,7 @@ import Panel from 'Components/Panel';
 import { Alert, Box } from 'pouncejs';
 import urls from 'Source/urls';
 import PolicyForm from 'Components/forms/PolicyForm';
-import { PolicyDetails, ResourceDetails } from 'Generated/schema';
+import { PolicyDetails } from 'Generated/schema';
 import { DEFAULT_POLICY_FUNCTION } from 'Source/constants';
 import { getOperationName } from '@apollo/client/utilities/graphql/getFromAST';
 import { extractErrorMessage } from 'Helpers/utils';
@@ -29,7 +29,7 @@ import { ListPoliciesDocument } from 'Pages/ListPolicies';
 import useRouter from 'Hooks/useRouter';
 import { useCreatePolicy } from './graphql/createPolicy.generated';
 
-const initialValues: PolicyDetails = {
+export const initialValues: PolicyDetails = {
   autoRemediationId: '',
   autoRemediationParameters: '{}',
   description: '',
@@ -45,10 +45,6 @@ const initialValues: PolicyDetails = {
   body: DEFAULT_POLICY_FUNCTION,
   tests: [],
 };
-
-interface ApolloMutationData {
-  addPolicy: ResourceDetails;
-}
 
 const CreatePolicyPage: React.FC = () => {
   const { history } = useRouter();

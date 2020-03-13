@@ -41,8 +41,6 @@ import { RuleFormValues } from 'Components/forms/RuleForm';
 import PolicyFormTestResultList from '../BaseRuleFormTestResultList';
 import { useTestPolicy } from './graphql/testPolicy.generated';
 
-export const testEditableFields = ['expectedResult', 'name', 'resource', 'resourceType'] as const;
-
 type MandatoryFormFields = Pick<RuleFormValues, 'body' | 'tests'>;
 type FormFields = MandatoryFormFields &
   Pick<RuleFormValues, 'logTypes'> &

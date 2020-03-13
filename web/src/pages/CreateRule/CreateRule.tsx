@@ -29,7 +29,7 @@ import { getOperationName } from '@apollo/client/utilities';
 import { ListRulesDocument } from 'Pages/ListRules';
 import { useCreateRule } from './graphql/createRule.generated';
 
-const initialValues: RuleDetails = {
+export const initialValues: RuleDetails = {
   description: '',
   displayName: '',
   enabled: true,

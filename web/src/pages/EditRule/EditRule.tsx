@@ -18,25 +18,24 @@
 
 import React from 'react';
 import Panel from 'Components/Panel';
-import { Alert, Button, Card, Box } from 'pouncejs';
+import { Alert, Button, Card, Box, useSnackbar } from 'pouncejs';
 import RuleForm from 'Components/forms/RuleForm';
-import { RuleDetails } from 'Generated/schema';
+import { PolicyDetails } from 'Generated/schema';
 import useModal from 'Hooks/useModal';
 import useRouter from 'Hooks/useRouter';
 import TablePlaceholder from 'Components/TablePlaceholder';
 import { MODALS } from 'Components/utils/Modal';
-import useEditRule from 'Hooks/useEditRule';
-import { extractErrorMessage } from 'Helpers/utils';
+import { extractErrorMessage, formatJSON } from 'Helpers/utils';
+import pick from 'lodash-es/pick';
+import { policyEditableFields } from 'Components/forms/PolicyForm';
+import { initialValues as createRuleInitialValues } from 'Pages/CreateRule';
 import { useRuleDetails } from './graphql/ruleDetails.generated';
 import { useUpdateRule } from './graphql/updateRule.generated';
-
-interface ApolloMutationData {
-  updateRule: RuleDetails;
-}
 
 const EditRulePage: React.FC = () => {
   const { match } = useRouter<{ id: string }>();
   const { showModal } = useModal();
+  const { pushSnackbar } = useSnackbar();
 
   const { error: fetchRuleError, data: queryData, loading: isFetchingRule } = useRuleDetails({
     fetchPolicy: 'cache-and-network',
@@ -47,13 +46,41 @@ const EditRulePage: React.FC = () => {
     },
   });
 
-  const mutation = useUpdateRule();
-
-  const { initialValues, handleSubmit, error: updateError } = useEditRule<ApolloMutationData>({
-    mutation,
-    type: 'rule',
-    rule: queryData?.rule,
+  const [updateRule, { error: updateError }] = useUpdateRule({
+    onCompleted: () =>
+      pushSnackbar({
+        variant: 'success',
+        title: 'Successfully updated policy!',
+      }),
   });
+
+  const handleSubmit = React.useCallback(
+    values => updateRule({ variables: { input: values } }),
+    []
+  );
+
+  const initialValues = React.useMemo(() => {
+    if (queryData) {
+      const { tests, ...otherInitialValues } = pick(
+        queryData.rule,
+        policyEditableFields
+      ) as PolicyDetails;
+
+      // format any JSON returned from the server simply because we are going to display it
+      // within an online web editor. To do that we parse the JSON and re-stringify it using proper
+      // spacings that make it pretty (The server of course doesn't store these spacings when
+      // it stores JSON, that's why we are making those here in the front-end)
+      return {
+        ...otherInitialValues,
+        tests: tests.map(({ resource, ...restTestData }) => ({
+          ...restTestData,
+          resource: formatJSON(JSON.parse(resource)),
+        })),
+      };
+    }
+
+    return createRuleInitialValues;
+  }, [queryData]);
 
   if (isFetchingRule) {
     return (

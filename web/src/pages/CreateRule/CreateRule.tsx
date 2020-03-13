@@ -23,9 +23,11 @@ import urls from 'Source/urls';
 import RuleForm from 'Components/forms/RuleForm';
 import { RuleDetails } from 'Generated/schema';
 import { DEFAULT_RULE_FUNCTION } from 'Source/constants';
-import useCreateRule from 'Hooks/useCreateRule';
 import { extractErrorMessage } from 'Helpers/utils';
-import { useCreateRule as useCreateRuleMutation } from './graphql/createRule.generated';
+import useRouter from 'Hooks/useRouter';
+import { getOperationName } from '@apollo/client/utilities';
+import { ListRulesDocument } from 'Pages/ListRules';
+import { useCreateRule } from './graphql/createRule.generated';
 
 const initialValues: RuleDetails = {
   description: '',
@@ -41,17 +43,17 @@ const initialValues: RuleDetails = {
   tests: [],
 };
 
-interface ApolloMutationData {
-  addRule: RuleDetails;
-}
-
 const CreateRulePage: React.FC = () => {
-  const mutation = useCreateRuleMutation();
-
-  const { handleSubmit, error } = useCreateRule<ApolloMutationData>({
-    mutation,
-    getRedirectUri: data => urls.logAnalysis.rules.details(data.addRule.id),
+  const { history } = useRouter();
+  const [createRule, { error }] = useCreateRule({
+    refetchQueries: [getOperationName(ListRulesDocument)],
+    onCompleted: data => history.push(urls.logAnalysis.rules.details(data.addRule.id)),
   });
+
+  const handleSubmit = React.useCallback(
+    values => createRule({ variables: { input: values } }),
+    []
+  );
 
   return (
     <Box mb={10}>

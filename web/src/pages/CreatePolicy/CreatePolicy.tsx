@@ -23,10 +23,10 @@ import urls from 'Source/urls';
 import PolicyForm from 'Components/forms/PolicyForm';
 import { PolicyDetails, ResourceDetails } from 'Generated/schema';
 import { DEFAULT_POLICY_FUNCTION } from 'Source/constants';
-import useCreateRule from 'Hooks/useCreateRule';
 import { getOperationName } from '@apollo/client/utilities/graphql/getFromAST';
 import { extractErrorMessage } from 'Helpers/utils';
 import { ListPoliciesDocument } from 'Pages/ListPolicies';
+import useRouter from 'Hooks/useRouter';
 import { useCreatePolicy } from './graphql/createPolicy.generated';
 
 const initialValues: PolicyDetails = {
@@ -51,14 +51,16 @@ interface ApolloMutationData {
 }
 
 const CreatePolicyPage: React.FC = () => {
-  const mutation = useCreatePolicy({
+  const { history } = useRouter();
+  const [createPolicy, { error }] = useCreatePolicy({
     refetchQueries: [getOperationName(ListPoliciesDocument)],
+    onCompleted: data => history.push(urls.compliance.policies.details(data.addPolicy.id)),
   });
 
-  const { handleSubmit, error } = useCreateRule<ApolloMutationData>({
-    mutation,
-    getRedirectUri: data => urls.compliance.policies.details(data.addPolicy.id),
-  });
+  const handleSubmit = React.useCallback(
+    values => createPolicy({ variables: { input: values } }),
+    []
+  );
 
   return (
     <Box mb={6}>

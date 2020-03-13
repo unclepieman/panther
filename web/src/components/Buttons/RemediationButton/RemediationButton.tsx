@@ -27,7 +27,7 @@ import { extractErrorMessage } from 'Helpers/utils';
 import {
   useRemediateResource,
   RemediateResourceDocument,
-} from 'Components/Buttons/RemediationButton/graphql/remediateResource.generated';
+} from './graphql/remediateResource.generated';
 
 interface RemediationButtonProps {
   buttonVariant: ButtonProps['variant'];

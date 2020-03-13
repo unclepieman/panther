@@ -29,7 +29,7 @@ import ErrorBoundary from 'Components/ErrorBoundary';
 import pick from 'lodash-es/pick';
 import useRequestParamsWithPagination from 'Hooks/useRequestParamsWithPagination';
 import isEmpty from 'lodash-es/isEmpty';
-import { useListAccountIds } from 'Pages/ListResources';
+import { useListAccountIds } from './graphql/listAccountIds.generated';
 
 const statusOptions = Object.values(ComplianceStatusEnum);
 

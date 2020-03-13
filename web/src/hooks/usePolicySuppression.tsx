@@ -23,7 +23,7 @@ import { ResourceDetailsDocument } from 'Pages/ResourceDetails';
 import { PolicyDetailsDocument } from 'Pages/PolicyDetails';
 import { getOperationName } from '@apollo/client/utilities/graphql/getFromAST';
 import { extractErrorMessage } from 'Helpers/utils';
-import { useSuppressPolicy } from './graphql/suppressPolicies.generated';
+import { useSuppressPolicy } from './graphql/suppressPolicy.generated';
 
 interface UsePolicySuppressionProps {
   /** A list of IDs whose corresponding policies should receive the suppression */

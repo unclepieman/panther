@@ -18,16 +18,11 @@
 
 import * as React from 'react';
 import { Alert, Box, useSnackbar } from 'pouncejs';
-import { InviteUserInput } from 'Generated/schema';
-import { ListUsersDocument } from 'Pages/Users/ListUsersTable/graphql/listUsers.generated';
+import { ListUsersDocument } from 'Pages/Users';
 import { getOperationName } from '@apollo/client/utilities/graphql/getFromAST';
 import { extractErrorMessage } from 'Helpers/utils';
 import BaseUserForm from 'Components/forms/BaseUserForm';
 import { useInviteUser } from './graphql/inviteUser.generated';
-
-interface ApolloMutationInput {
-  input: InviteUserInput;
-}
 
 interface UserInvitationFormProps {
   onSuccess: () => void;

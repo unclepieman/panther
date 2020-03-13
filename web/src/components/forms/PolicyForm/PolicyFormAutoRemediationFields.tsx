@@ -26,10 +26,6 @@ import { PANTHER_SCHEMA_DOCS_LINK } from 'Source/constants';
 import { PolicyFormValues } from './PolicyForm';
 import { useListRemediations } from './graphql/listRemediations.generated';
 
-interface ApolloQueryData {
-  remediations: string;
-}
-
 const PolicyFormAutoRemediationFields: React.FC = () => {
   // Read the values from the "parent" form. We expect a formik to be declared in the upper scope
   // since this is a "partial" form. If no Formik context is found this will error out intentionally

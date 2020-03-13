@@ -18,14 +18,7 @@
 
 import React from 'react';
 import useRouter from 'Hooks/useRouter';
-import {
-  ComplianceStatusEnum,
-  GetResourceInput,
-  Integration,
-  ListComplianceItemsResponse,
-  PoliciesForResourceInput,
-  ResourceDetails,
-} from 'Generated/schema';
+import { ComplianceStatusEnum, PoliciesForResourceInput } from 'Generated/schema';
 import Panel from 'Components/Panel';
 import JsonViewer from 'Components/JsonViewer';
 import useRequestParamsWithPagination from 'Hooks/useRequestParamsWithPagination';
@@ -48,17 +41,6 @@ import ResourceDetailsInfo from './ResourceDetailsInfo';
 import columns from './columns';
 import ResourceDetailsPageSkeleton from './Skeleton';
 import { useResourceDetails } from './graphql/resourceDetails.generated';
-
-interface ApolloQueryData {
-  resource: ResourceDetails;
-  integrations: Integration[];
-  policiesForResource: ListComplianceItemsResponse;
-}
-
-interface ApolloQueryInput {
-  resourceDetailsInput: GetResourceInput;
-  policiesForResourceInput: PoliciesForResourceInput;
-}
 
 const acceptedRequestParams = ['page', 'status', 'pageSize', 'suppressed'] as const;
 

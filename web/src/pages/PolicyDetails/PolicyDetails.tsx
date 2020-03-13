@@ -18,14 +18,7 @@
 
 import React from 'react';
 import useRouter from 'Hooks/useRouter';
-import {
-  ComplianceStatusEnum,
-  GetPolicyInput,
-  Integration,
-  PolicyDetails,
-  ResourcesForPolicyInput,
-  ListComplianceItemsResponse,
-} from 'Generated/schema';
+import { ComplianceStatusEnum, ResourcesForPolicyInput } from 'Generated/schema';
 import { Alert, Box } from 'pouncejs';
 import Panel from 'Components/Panel';
 import {
@@ -47,17 +40,6 @@ import PolicyDetailsInfo from './PolicyDetailsInfo';
 import columns from './columns';
 import PolicyDetailsPageSkeleton from './Skeleton';
 import { usePolicyDetails } from './graphql/policyDetails.generated';
-
-interface ApolloQueryData {
-  policy: PolicyDetails;
-  resourcesForPolicy: ListComplianceItemsResponse;
-  integrations: Integration[];
-}
-
-interface ApolloQueryInput {
-  policyDetailsInput: GetPolicyInput;
-  resourcesForPolicyInput: ResourcesForPolicyInput;
-}
 
 const acceptedRequestParams = ['page', 'status', 'pageSize', 'suppressed'] as const;
 

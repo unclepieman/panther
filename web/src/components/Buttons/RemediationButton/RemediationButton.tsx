@@ -22,7 +22,7 @@ import { Button, ButtonProps, useSnackbar } from 'pouncejs';
 import { getOperationName } from '@apollo/client/utilities/graphql/getFromAST';
 import { ResourceDetailsDocument } from 'Pages/ResourceDetails';
 import { PolicyDetailsDocument } from 'Pages/PolicyDetails';
-import { ResourceDetails, RemediateResourceInput, PolicyDetails } from 'Generated/schema';
+import { ResourceDetails, PolicyDetails } from 'Generated/schema';
 import { extractErrorMessage } from 'Helpers/utils';
 import {
   useRemediateResource,
@@ -33,10 +33,6 @@ interface RemediationButtonProps {
   buttonVariant: ButtonProps['variant'];
   resourceId: ResourceDetails['id'];
   policyId: PolicyDetails['id'];
-}
-
-interface ApolloMutationInput {
-  input: RemediateResourceInput;
 }
 
 const RemediationButton: React.FC<RemediationButtonProps> = ({

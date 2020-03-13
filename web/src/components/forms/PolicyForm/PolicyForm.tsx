@@ -17,26 +17,17 @@
  */
 
 import React from 'react';
-import { PolicyDetails, PolicyUnitTest } from 'Generated/schema';
+import { PolicyUnitTest } from 'Generated/schema';
 import * as Yup from 'yup';
 import { Box, Heading } from 'pouncejs';
 import BaseRuleForm, {
   BaseRuleFormProps,
   BaseRuleFormTestFields as PolicyFormTestFields,
   BaseRuleFormCoreFields,
-  ruleCoreEditableFields,
 } from 'Components/forms/BaseRuleForm';
 import ErrorBoundary from 'Components/ErrorBoundary';
+import { UpdatePolicyVariables } from 'Pages/EditPolicy';
 import PolicyFormAutoRemediationFields from './PolicyFormAutoRemediationFields';
-
-export const policyEditableFields = [
-  ...ruleCoreEditableFields,
-  'autoRemediationId',
-  'autoRemediationParameters',
-  'suppressions',
-  'resourceTypes',
-  'tests',
-] as const;
 
 // The validation checks that Formik will run
 const validationSchema = Yup.object().shape({
@@ -52,7 +43,7 @@ const validationSchema = Yup.object().shape({
     .unique('Test names must be unique', 'name'),
 });
 
-export type PolicyFormValues = Pick<PolicyDetails, typeof policyEditableFields[number]>;
+export type PolicyFormValues = UpdatePolicyVariables['input'];
 export type PolicyFormProps = Pick<
   BaseRuleFormProps<PolicyFormValues>,
   'initialValues' | 'onSubmit'

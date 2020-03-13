@@ -5,11 +5,11 @@ import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
 
-export type PolicyDetailsVariables = {
+export type EditablePolicyDetailsVariables = {
   input: Types.GetPolicyInput;
 };
 
-export type PolicyDetails = {
+export type EditablePolicyDetails = {
   policy: Types.Maybe<
     Pick<
       Types.PolicyDetails,
@@ -38,8 +38,8 @@ export type PolicyDetails = {
   >;
 };
 
-export const PolicyDetailsDocument = gql`
-  query PolicyDetails($input: GetPolicyInput!) {
+export const EditablePolicyDetailsDocument = gql`
+  query EditablePolicyDetails($input: GetPolicyInput!) {
     policy(input: $input) {
       autoRemediationId
       autoRemediationParameters
@@ -65,40 +65,48 @@ export const PolicyDetailsDocument = gql`
 `;
 
 /**
- * __usePolicyDetails__
+ * __useEditablePolicyDetails__
  *
- * To run a query within a React component, call `usePolicyDetails` and pass it any options that fit your needs.
- * When your component renders, `usePolicyDetails` returns an object from Apollo Client that contains loading, error, and data properties
+ * To run a query within a React component, call `useEditablePolicyDetails` and pass it any options that fit your needs.
+ * When your component renders, `useEditablePolicyDetails` returns an object from Apollo Client that contains loading, error, and data properties
  * you can use to render your UI.
  *
  * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
  *
  * @example
- * const { data, loading, error } = usePolicyDetails({
+ * const { data, loading, error } = useEditablePolicyDetails({
  *   variables: {
  *      input: // value for 'input'
  *   },
  * });
  */
-export function usePolicyDetails(
-  baseOptions?: ApolloReactHooks.QueryHookOptions<PolicyDetails, PolicyDetailsVariables>
+export function useEditablePolicyDetails(
+  baseOptions?: ApolloReactHooks.QueryHookOptions<
+    EditablePolicyDetails,
+    EditablePolicyDetailsVariables
+  >
 ) {
-  return ApolloReactHooks.useQuery<PolicyDetails, PolicyDetailsVariables>(
-    PolicyDetailsDocument,
+  return ApolloReactHooks.useQuery<EditablePolicyDetails, EditablePolicyDetailsVariables>(
+    EditablePolicyDetailsDocument,
     baseOptions
   );
 }
-export function usePolicyDetailsLazyQuery(
-  baseOptions?: ApolloReactHooks.LazyQueryHookOptions<PolicyDetails, PolicyDetailsVariables>
+export function useEditablePolicyDetailsLazyQuery(
+  baseOptions?: ApolloReactHooks.LazyQueryHookOptions<
+    EditablePolicyDetails,
+    EditablePolicyDetailsVariables
+  >
 ) {
-  return ApolloReactHooks.useLazyQuery<PolicyDetails, PolicyDetailsVariables>(
-    PolicyDetailsDocument,
+  return ApolloReactHooks.useLazyQuery<EditablePolicyDetails, EditablePolicyDetailsVariables>(
+    EditablePolicyDetailsDocument,
     baseOptions
   );
 }
-export type PolicyDetailsHookResult = ReturnType<typeof usePolicyDetails>;
-export type PolicyDetailsLazyQueryHookResult = ReturnType<typeof usePolicyDetailsLazyQuery>;
-export type PolicyDetailsQueryResult = ApolloReactCommon.QueryResult<
-  PolicyDetails,
-  PolicyDetailsVariables
+export type EditablePolicyDetailsHookResult = ReturnType<typeof useEditablePolicyDetails>;
+export type EditablePolicyDetailsLazyQueryHookResult = ReturnType<
+  typeof useEditablePolicyDetailsLazyQuery
+>;
+export type EditablePolicyDetailsQueryResult = ApolloReactCommon.QueryResult<
+  EditablePolicyDetails,
+  EditablePolicyDetailsVariables
 >;

@@ -19,16 +19,14 @@
 import React from 'react';
 import Panel from 'Components/Panel';
 import { Alert, Button, Card, Box, useSnackbar } from 'pouncejs';
-import PolicyForm, { policyEditableFields } from 'Components/forms/PolicyForm';
-import { PolicyDetails } from 'Generated/schema';
+import PolicyForm from 'Components/forms/PolicyForm';
 import { initialValues as createPolicyInitialValues } from 'Pages/CreatePolicy';
 import useModal from 'Hooks/useModal';
 import useRouter from 'Hooks/useRouter';
 import TablePlaceholder from 'Components/TablePlaceholder';
 import { MODALS } from 'Components/utils/Modal';
-import pick from 'lodash-es/pick';
 import { extractErrorMessage, formatJSON } from 'Helpers/utils';
-import { usePolicyDetails } from './graphql/policyDetails.generated';
+import { useEditablePolicyDetails } from './graphql/editablePolicyDetails.generated';
 import { useUpdatePolicy } from './graphql/updatePolicy.generated';
 
 const EditPolicyPage: React.FC = () => {
@@ -36,7 +34,11 @@ const EditPolicyPage: React.FC = () => {
   const { showModal } = useModal();
   const { pushSnackbar } = useSnackbar();
 
-  const { error: fetchPolicyError, data: queryData, loading: isFetchingPolicy } = usePolicyDetails({
+  const {
+    error: fetchPolicyError,
+    data: queryData,
+    loading: isFetchingPolicy,
+  } = useEditablePolicyDetails({
     fetchPolicy: 'cache-and-network',
     variables: {
       input: {
@@ -60,19 +62,15 @@ const EditPolicyPage: React.FC = () => {
 
   const initialValues = React.useMemo(() => {
     if (queryData) {
-      const { tests, autoRemediationParameters, ...otherInitialValues } = pick(
-        queryData.policy,
-        policyEditableFields
-      ) as PolicyDetails;
-
       // format any JSON returned from the server simply because we are going to display it
       // within an online web editor. To do that we parse the JSON and re-stringify it using proper
       // spacings that make it pretty (The server of course doesn't store these spacings when
       // it stores JSON, that's why we are making those here in the front-end)
+      const { policy } = queryData;
       return {
-        ...otherInitialValues,
-        autoRemediationParameters: formatJSON(JSON.parse(autoRemediationParameters)),
-        tests: tests.map(({ resource, ...restTestData }) => ({
+        ...policy,
+        autoRemediationParameters: formatJSON(JSON.parse(policy.autoRemediationParameters)),
+        tests: policy.tests.map(({ resource, ...restTestData }) => ({
           ...restTestData,
           resource: formatJSON(JSON.parse(resource)),
         })),

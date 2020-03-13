@@ -20,16 +20,13 @@ import React from 'react';
 import Panel from 'Components/Panel';
 import { Alert, Button, Card, Box, useSnackbar } from 'pouncejs';
 import RuleForm from 'Components/forms/RuleForm';
-import { PolicyDetails } from 'Generated/schema';
 import useModal from 'Hooks/useModal';
 import useRouter from 'Hooks/useRouter';
 import TablePlaceholder from 'Components/TablePlaceholder';
 import { MODALS } from 'Components/utils/Modal';
 import { extractErrorMessage, formatJSON } from 'Helpers/utils';
-import pick from 'lodash-es/pick';
-import { policyEditableFields } from 'Components/forms/PolicyForm';
 import { initialValues as createRuleInitialValues } from 'Pages/CreateRule';
-import { useRuleDetails } from './graphql/ruleDetails.generated';
+import { useEditableRuleDetails } from './graphql/editableRuleDetails.generated';
 import { useUpdateRule } from './graphql/updateRule.generated';
 
 const EditRulePage: React.FC = () => {
@@ -37,7 +34,11 @@ const EditRulePage: React.FC = () => {
   const { showModal } = useModal();
   const { pushSnackbar } = useSnackbar();
 
-  const { error: fetchRuleError, data: queryData, loading: isFetchingRule } = useRuleDetails({
+  const {
+    error: fetchRuleError,
+    data: queryData,
+    loading: isFetchingRule,
+  } = useEditableRuleDetails({
     fetchPolicy: 'cache-and-network',
     variables: {
       input: {
@@ -61,18 +62,14 @@ const EditRulePage: React.FC = () => {
 
   const initialValues = React.useMemo(() => {
     if (queryData) {
-      const { tests, ...otherInitialValues } = pick(
-        queryData.rule,
-        policyEditableFields
-      ) as PolicyDetails;
-
       // format any JSON returned from the server simply because we are going to display it
       // within an online web editor. To do that we parse the JSON and re-stringify it using proper
       // spacings that make it pretty (The server of course doesn't store these spacings when
       // it stores JSON, that's why we are making those here in the front-end)
+      const { rule } = queryData;
       return {
-        ...otherInitialValues,
-        tests: tests.map(({ resource, ...restTestData }) => ({
+        ...rule,
+        tests: rule.tests.map(({ resource, ...restTestData }) => ({
           ...restTestData,
           resource: formatJSON(JSON.parse(resource)),
         })),

@@ -17,18 +17,16 @@
  */
 
 import React from 'react';
-import { RuleDetails, PolicyUnitTest } from 'Generated/schema';
+import { PolicyUnitTest } from 'Generated/schema';
 import * as Yup from 'yup';
 import { Box } from 'pouncejs';
 import ErrorBoundary from 'Components/ErrorBoundary';
 import BaseRuleForm, {
   BaseRuleFormProps,
-  ruleCoreEditableFields,
   BaseRuleFormCoreFields,
   BaseRuleFormTestFields,
 } from 'Components/forms/BaseRuleForm';
-
-export const ruleEditableFields = [...ruleCoreEditableFields, 'logTypes', 'tests'] as const;
+import { UpdateRuleVariables } from 'Pages/EditRule';
 
 // The validation checks that Formik will run
 const validationSchema = Yup.object().shape({
@@ -47,7 +45,7 @@ const validationSchema = Yup.object().shape({
     .unique('Test names must be unique', 'name'),
 });
 
-export type RuleFormValues = Pick<RuleDetails, typeof ruleEditableFields[number]>;
+export type RuleFormValues = UpdateRuleVariables['input'];
 export type RuleFormProps = Pick<BaseRuleFormProps<RuleFormValues>, 'initialValues' | 'onSubmit'>;
 
 const RuleForm: React.FC<RuleFormProps> = ({ initialValues, onSubmit }) => {

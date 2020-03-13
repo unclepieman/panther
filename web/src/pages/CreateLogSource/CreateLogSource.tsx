@@ -26,7 +26,7 @@ import { Formik } from 'formik';
 import * as Yup from 'yup';
 import { Wizard, WizardPanelWrapper } from 'Components/Wizard';
 import useRouter from 'Hooks/useRouter';
-import { ListLogSourcesDocument } from 'Pages/ListLogSources/LogSourceTable/graphql/listLogSources.generated';
+import { ListLogSourcesDocument } from 'Pages/ListLogSources';
 import SourceDetailsPanel from './SourceDetailsPanel';
 import CfnLaunchPanel from './CfnLaunchPanel';
 import SuccessPanel from './SuccessPanel';

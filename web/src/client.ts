@@ -16,11 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ApolloClient, ApolloLink, createHttpLink, InMemoryCache } from '@apollo/client';
+import { ApolloClient, ApolloLink, InMemoryCache } from '@apollo/client';
 import { getOperationName, getMainDefinition } from '@apollo/client/utilities/graphql/getFromAST';
 import { OperationDefinitionNode } from 'graphql';
 import { History } from 'history';
-import { createAuthLink, AUTH_TYPE } from 'aws-appsync-auth-link';
+import { createAuthLink, AUTH_TYPE, AuthOptions } from 'aws-appsync-auth-link';
+import { createSubscriptionHandshakeLink } from 'aws-appsync-subscription-link';
 import { ErrorResponse, onError } from 'apollo-link-error';
 import Auth from '@aws-amplify/auth';
 import { LocationErrorState } from 'Components/utils/ApiErrorFallback';
@@ -75,16 +76,7 @@ const createErrorLink = (history: History<LocationErrorState>) => {
   }) as unknown) as ApolloLink;
 };
 
-/**
- * Typical HTTP link to add the GraphQL URL to query
- */
-const httpLink = createHttpLink({ uri: process.env.WEB_APPLICATION_GRAPHQL_API_ENDPOINT });
-
-/**
- * This link is here to add the necessary headers present for AMAZON_COGNITO_USER_POOLS
- * authentication. It essentially signs the Authorization header with a JWT token
- */
-const authLink = (createAuthLink({
+const config = {
   region: process.env.AWS_REGION,
   url: process.env.WEB_APPLICATION_GRAPHQL_API_ENDPOINT,
   auth: {
@@ -93,15 +85,22 @@ const authLink = (createAuthLink({
         .then(session => session.getIdToken().getJwtToken())
         .catch(() => null),
     type: AUTH_TYPE.AMAZON_COGNITO_USER_POOLS,
-  },
-}) as unknown) as ApolloLink;
+  } as AuthOptions,
+};
+
+/**
+ * This link is here to add the necessary headers present for AMAZON_COGNITO_USER_POOLS
+ * authentication. It essentially signs the Authorization header with a JWT token
+ */
+const authLink = (createAuthLink(config) as unknown) as ApolloLink;
+const subscriptionLink = (createSubscriptionHandshakeLink(config) as unknown) as ApolloLink;
 
 /**
  * A function that will create an ApolloClient given a specific instance of a history
  */
 const createApolloClient = (history: History<LocationErrorState>) =>
   new ApolloClient({
-    link: ApolloLink.from([cleanParamsLink, createErrorLink(history), authLink, httpLink]),
+    link: ApolloLink.from([cleanParamsLink, createErrorLink(history), authLink, subscriptionLink]),
     cache: new InMemoryCache({
       typePolicies: {
         Query: {

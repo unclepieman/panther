@@ -26,15 +26,39 @@ import columns from './columns';
 import DestinationsPageSkeleton from './Skeleton';
 import DestinationsPageEmptyDataFallback from './EmptyDataFallback';
 import DestinationCreateButton from './CreateButton';
+import {
+  SubscribeToDestinationCreations,
+  SubscribeToDestinationCreationsDocument,
+} from './graphql/subscribeToDestinations.generated';
+import {
+  SubscribeToDestinationUpdates,
+  SubscribeToDestinationUpdatesDocument,
+} from './graphql/subscribeToDestinationUpdates.generated';
 
 export interface ListDestinationsQueryData {
   destinations: Destination[];
 }
 
 const ListDestinations = () => {
-  const { loading, error, data } = useListDestinationsAndDefaults({
+  const { loading, error, data, subscribeToMore } = useListDestinationsAndDefaults({
     fetchPolicy: 'cache-and-network',
   });
+
+  React.useEffect(() => {
+    subscribeToMore<SubscribeToDestinationCreations>({
+      document: SubscribeToDestinationCreationsDocument,
+      updateQuery: (prev, { subscriptionData }) => {
+        return {
+          ...prev,
+          destinations: [subscriptionData.data.addedDestination, ...prev.destinations],
+        };
+      },
+    });
+
+    subscribeToMore<SubscribeToDestinationUpdates>({
+      document: SubscribeToDestinationUpdatesDocument,
+    });
+  }, []);
 
   if (loading && !data) {
     return <DestinationsPageSkeleton />;

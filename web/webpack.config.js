@@ -199,6 +199,7 @@ module.exports = {
       // the same version
       'aws-sdk': path.resolve(__dirname, '../node_modules/aws-sdk'),
       'apollo-link': path.resolve(__dirname, '../node_modules/@apollo/client'),
+      'apollo-client': path.resolve(__dirname, '../node_modules/@apollo/client'),
     },
   },
   plugins: [

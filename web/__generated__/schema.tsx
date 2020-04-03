@@ -920,6 +920,12 @@ export type SqsConfigInput = {
   queueUrl: Scalars['String'];
 };
 
+export type Subscription = {
+  __typename?: 'Subscription';
+  addedDestination?: Maybe<Destination>;
+  updatedDestination?: Maybe<Destination>;
+};
+
 export type SuppressPoliciesInput = {
   policyIds: Array<Maybe<Scalars['ID']>>;
   resourcePatterns: Array<Maybe<Scalars['String']>>;
@@ -1183,6 +1189,7 @@ export type ResolversTypes = {
   UpdateUserInput: UpdateUserInput;
   UploadPoliciesInput: UploadPoliciesInput;
   UploadPoliciesResponse: ResolverTypeWrapper<UploadPoliciesResponse>;
+  Subscription: ResolverTypeWrapper<{}>;
   AccountTypeEnum: AccountTypeEnum;
 };
 
@@ -1293,6 +1300,7 @@ export type ResolversParentTypes = {
   UpdateUserInput: UpdateUserInput;
   UploadPoliciesInput: UploadPoliciesInput;
   UploadPoliciesResponse: UploadPoliciesResponse;
+  Subscription: {};
   AccountTypeEnum: AccountTypeEnum;
 };
 
@@ -2126,6 +2134,24 @@ export type SqsConfigResolvers<
   __isTypeOf?: isTypeOfResolverFn<ParentType>;
 };
 
+export type SubscriptionResolvers<
+  ContextType = any,
+  ParentType extends ResolversParentTypes['Subscription'] = ResolversParentTypes['Subscription']
+> = {
+  addedDestination?: SubscriptionResolver<
+    Maybe<ResolversTypes['Destination']>,
+    'addedDestination',
+    ParentType,
+    ContextType
+  >;
+  updatedDestination?: SubscriptionResolver<
+    Maybe<ResolversTypes['Destination']>,
+    'updatedDestination',
+    ParentType,
+    ContextType
+  >;
+};
+
 export type TestPolicyResponseResolvers<
   ContextType = any,
   ParentType extends ResolversParentTypes['TestPolicyResponse'] = ResolversParentTypes['TestPolicyResponse']
@@ -2215,6 +2241,7 @@ export type Resolvers<ContextType = any> = {
   SlackConfig?: SlackConfigResolvers<ContextType>;
   SnsConfig?: SnsConfigResolvers<ContextType>;
   SqsConfig?: SqsConfigResolvers<ContextType>;
+  Subscription?: SubscriptionResolvers<ContextType>;
   TestPolicyResponse?: TestPolicyResponseResolvers<ContextType>;
   UploadPoliciesResponse?: UploadPoliciesResponseResolvers<ContextType>;
   User?: UserResolvers<ContextType>;

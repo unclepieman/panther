@@ -6,6 +6,7 @@ scalar AWSJSON
 schema {
   query: Query
   mutation: Mutation
+  subscription: Subscription
 }
 
 type Mutation {
@@ -60,6 +61,11 @@ type Query {
   rule(input: GetRuleInput!): RuleDetails
   rules(input: ListRulesInput): ListRulesResponse
   users: [User!]!
+}
+
+type Subscription {
+  addedDestination: Destination @aws_subscribe(mutations: ["addDestination"])
+  updatedDestination: Destination @aws_subscribe(mutations: ["updateDestination"])
 }
 
 input GetComplianceIntegrationTemplateInput {

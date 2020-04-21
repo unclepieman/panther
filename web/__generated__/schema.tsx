@@ -273,6 +273,11 @@ export type GetComplianceIntegrationTemplateInput = {
   cweEnabled?: Maybe<Scalars['Boolean']>;
 };
 
+export type GetGlobalModuleInput = {
+  globalId: Scalars['ID'];
+  versionId?: Maybe<Scalars['ID']>;
+};
+
 export type GetLogIntegrationTemplateInput = {
   awsAccountId: Scalars['String'];
   integrationLabel: Scalars['String'];
@@ -305,6 +310,25 @@ export type GithubConfig = {
 export type GithubConfigInput = {
   repoName: Scalars['String'];
   token: Scalars['String'];
+};
+
+export type GlobalModuleDetails = {
+  __typename?: 'GlobalModuleDetails';
+  actionDelaySeconds?: Maybe<Scalars['Int']>;
+  body?: Maybe<Scalars['String']>;
+  createdAt?: Maybe<Scalars['AWSDateTime']>;
+  createdBy?: Maybe<Scalars['ID']>;
+  description?: Maybe<Scalars['String']>;
+  displayName?: Maybe<Scalars['String']>;
+  enabled?: Maybe<Scalars['Boolean']>;
+  id: Scalars['ID'];
+  lastModified?: Maybe<Scalars['AWSDateTime']>;
+  lastModifiedBy?: Maybe<Scalars['ID']>;
+  reference?: Maybe<Scalars['String']>;
+  runbook?: Maybe<Scalars['String']>;
+  tags?: Maybe<Array<Maybe<Scalars['String']>>>;
+  tests?: Maybe<Array<Maybe<PolicyUnitTest>>>;
+  versionId?: Maybe<Scalars['ID']>;
 };
 
 export type IntegrationItemHealthStatus = {
@@ -744,6 +768,7 @@ export type Query = {
   resource?: Maybe<ResourceDetails>;
   resources?: Maybe<ListResourcesResponse>;
   resourcesForPolicy?: Maybe<ListComplianceItemsResponse>;
+  globalModule?: Maybe<GlobalModuleDetails>;
   policy?: Maybe<PolicyDetails>;
   policies?: Maybe<ListPoliciesResponse>;
   policiesForResource?: Maybe<ListComplianceItemsResponse>;
@@ -793,6 +818,10 @@ export type QueryResourcesArgs = {
 
 export type QueryResourcesForPolicyArgs = {
   input: ResourcesForPolicyInput;
+};
+
+export type QueryGlobalModuleArgs = {
+  input: GetGlobalModuleInput;
 };
 
 export type QueryPolicyArgs = {
@@ -1145,9 +1174,11 @@ export type ResolversTypes = {
   ComplianceItem: ResolverTypeWrapper<ComplianceItem>;
   ActiveSuppressCount: ResolverTypeWrapper<ActiveSuppressCount>;
   ComplianceStatusCounts: ResolverTypeWrapper<ComplianceStatusCounts>;
+  GetGlobalModuleInput: GetGlobalModuleInput;
+  GlobalModuleDetails: ResolverTypeWrapper<GlobalModuleDetails>;
+  PolicyUnitTest: ResolverTypeWrapper<PolicyUnitTest>;
   GetPolicyInput: GetPolicyInput;
   PolicyDetails: ResolverTypeWrapper<PolicyDetails>;
-  PolicyUnitTest: ResolverTypeWrapper<PolicyUnitTest>;
   ListPoliciesInput: ListPoliciesInput;
   ListPoliciesSortFieldsEnum: ListPoliciesSortFieldsEnum;
   ListPoliciesResponse: ResolverTypeWrapper<ListPoliciesResponse>;
@@ -1255,9 +1286,11 @@ export type ResolversParentTypes = {
   ComplianceItem: ComplianceItem;
   ActiveSuppressCount: ActiveSuppressCount;
   ComplianceStatusCounts: ComplianceStatusCounts;
+  GetGlobalModuleInput: GetGlobalModuleInput;
+  GlobalModuleDetails: GlobalModuleDetails;
+  PolicyUnitTest: PolicyUnitTest;
   GetPolicyInput: GetPolicyInput;
   PolicyDetails: PolicyDetails;
-  PolicyUnitTest: PolicyUnitTest;
   ListPoliciesInput: ListPoliciesInput;
   ListPoliciesSortFieldsEnum: ListPoliciesSortFieldsEnum;
   ListPoliciesResponse: ListPoliciesResponse;
@@ -1494,6 +1527,28 @@ export type GithubConfigResolvers<
 > = {
   repoName?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   token?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
+  __isTypeOf?: isTypeOfResolverFn<ParentType>;
+};
+
+export type GlobalModuleDetailsResolvers<
+  ContextType = any,
+  ParentType extends ResolversParentTypes['GlobalModuleDetails'] = ResolversParentTypes['GlobalModuleDetails']
+> = {
+  actionDelaySeconds?: Resolver<Maybe<ResolversTypes['Int']>, ParentType, ContextType>;
+  body?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  createdAt?: Resolver<Maybe<ResolversTypes['AWSDateTime']>, ParentType, ContextType>;
+  createdBy?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
+  description?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  displayName?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  enabled?: Resolver<Maybe<ResolversTypes['Boolean']>, ParentType, ContextType>;
+  id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
+  lastModified?: Resolver<Maybe<ResolversTypes['AWSDateTime']>, ParentType, ContextType>;
+  lastModifiedBy?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
+  reference?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  runbook?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  tags?: Resolver<Maybe<Array<Maybe<ResolversTypes['String']>>>, ParentType, ContextType>;
+  tests?: Resolver<Maybe<Array<Maybe<ResolversTypes['PolicyUnitTest']>>>, ParentType, ContextType>;
+  versionId?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
   __isTypeOf?: isTypeOfResolverFn<ParentType>;
 };
 
@@ -1980,6 +2035,12 @@ export type QueryResolvers<
     ContextType,
     RequireFields<QueryResourcesForPolicyArgs, 'input'>
   >;
+  globalModule?: Resolver<
+    Maybe<ResolversTypes['GlobalModuleDetails']>,
+    ParentType,
+    ContextType,
+    RequireFields<QueryGlobalModuleArgs, 'input'>
+  >;
   policy?: Resolver<
     Maybe<ResolversTypes['PolicyDetails']>,
     ParentType,
@@ -2202,6 +2263,7 @@ export type Resolvers<ContextType = any> = {
   DestinationConfig?: DestinationConfigResolvers<ContextType>;
   GeneralSettings?: GeneralSettingsResolvers<ContextType>;
   GithubConfig?: GithubConfigResolvers<ContextType>;
+  GlobalModuleDetails?: GlobalModuleDetailsResolvers<ContextType>;
   IntegrationItemHealthStatus?: IntegrationItemHealthStatusResolvers<ContextType>;
   IntegrationTemplate?: IntegrationTemplateResolvers<ContextType>;
   JiraConfig?: JiraConfigResolvers<ContextType>;

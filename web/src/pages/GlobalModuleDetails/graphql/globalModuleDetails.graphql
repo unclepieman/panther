@@ -1,0 +1,5 @@
+query GlobalModuleDetails($globalModuleDetailsInput: GetGlobalModuleInput!) {
+  globalModule(input: $globalModuleDetailsInput) {
+    ...GlobalModuleTeaser
+  }
+}

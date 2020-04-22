@@ -28,7 +28,6 @@ import { useGlobalModuleDetails } from './graphql/globalModuleDetails.generated'
 const GlobalModuleDetailsPage = () => {
   const { match } = useRouter<{ id: string }>();
 
-  console.log('match', match);
   const { error, data, loading } = useGlobalModuleDetails({
     fetchPolicy: 'cache-and-network',
     variables: {
@@ -42,7 +41,6 @@ const GlobalModuleDetailsPage = () => {
     return <GlobalModuleDetailsPageSkeleton />;
   }
 
-  console.log('GLOBAL MODULE', data);
   if (error) {
     return (
       <Alert

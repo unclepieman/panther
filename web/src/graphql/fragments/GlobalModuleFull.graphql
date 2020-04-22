@@ -1,0 +1,4 @@
+fragment GlobalModuleFull on GlobalModuleDetails {
+  ...GlobalModuleTeaser
+  body
+}

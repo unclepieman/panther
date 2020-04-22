@@ -1447,6 +1447,38 @@ Resources:
             $util.error($ctx.result.body, "$statusCode", $input)
         #end
 
+  UpdateGlobalModuleResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: updateGlobalModule
+      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
+        $util.qr($input.put("userId", $ctx.identity.sub))
+        {
+          "version": "2018-05-29",
+          "method": "POST",
+          "resourcePath": "/v1/global/update",
+          "params": {
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": $util.toJson($input)
+          }
+        }
+      ResponseMappingTemplate: |
+        #set ($statusCode = $ctx.result.statusCode)
+        #if($statusCode == 200)
+            $ctx.result.body
+        #elseif($statusCode >= 400 && $statusCode < 500)
+            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
+        #else
+            $util.error($ctx.result.body, "$statusCode", $input)
+        #end
+
   ListAlertsResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: GraphQLSchema

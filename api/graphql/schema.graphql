@@ -33,6 +33,7 @@ type Mutation {
   updateRule(input: CreateOrModifyRuleInput!): RuleDetails
   updateUser(input: UpdateUserInput!): User!
   uploadPolicies(input: UploadPoliciesInput!): UploadPoliciesResponse
+  updateGlobalModule(input: CreateOrModifyGlobalModuleInput!): GlobalModuleDetails
 }
 
 type Query {
@@ -606,6 +607,12 @@ input GetPolicyInput {
 input GetGlobalModuleInput {
   globalId: ID!
   versionId: ID
+}
+
+input CreateOrModifyGlobalModuleInput {
+  description: String!
+  id: ID!
+  body: String!
 }
 
 input DeletePolicyInput {

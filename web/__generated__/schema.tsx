@@ -144,6 +144,12 @@ export enum ComplianceStatusEnum {
   Pass = 'PASS',
 }
 
+export type CreateOrModifyGlobalModuleInput = {
+  description: Scalars['String'];
+  id: Scalars['ID'];
+  body: Scalars['String'];
+};
+
 export type CreateOrModifyPolicyInput = {
   actionDelaySeconds?: Maybe<Scalars['Int']>;
   alertSuppressSeconds?: Maybe<Scalars['Int']>;
@@ -537,6 +543,7 @@ export type Mutation = {
   updateRule?: Maybe<RuleDetails>;
   updateUser: User;
   uploadPolicies?: Maybe<UploadPoliciesResponse>;
+  updateGlobalModule?: Maybe<GlobalModuleDetails>;
 };
 
 export type MutationAddDestinationArgs = {
@@ -633,6 +640,10 @@ export type MutationUpdateUserArgs = {
 
 export type MutationUploadPoliciesArgs = {
   input: UploadPoliciesInput;
+};
+
+export type MutationUpdateGlobalModuleArgs = {
+  input: CreateOrModifyGlobalModuleInput;
 };
 
 export type OpsgenieConfig = {
@@ -1232,6 +1243,7 @@ export type ResolversTypes = {
   UpdateUserInput: UpdateUserInput;
   UploadPoliciesInput: UploadPoliciesInput;
   UploadPoliciesResponse: ResolverTypeWrapper<UploadPoliciesResponse>;
+  CreateOrModifyGlobalModuleInput: CreateOrModifyGlobalModuleInput;
   AccountTypeEnum: AccountTypeEnum;
 };
 
@@ -1344,6 +1356,7 @@ export type ResolversParentTypes = {
   UpdateUserInput: UpdateUserInput;
   UploadPoliciesInput: UploadPoliciesInput;
   UploadPoliciesResponse: UploadPoliciesResponse;
+  CreateOrModifyGlobalModuleInput: CreateOrModifyGlobalModuleInput;
   AccountTypeEnum: AccountTypeEnum;
 };
 
@@ -1825,6 +1838,12 @@ export type MutationResolvers<
     ParentType,
     ContextType,
     RequireFields<MutationUploadPoliciesArgs, 'input'>
+  >;
+  updateGlobalModule?: Resolver<
+    Maybe<ResolversTypes['GlobalModuleDetails']>,
+    ParentType,
+    ContextType,
+    RequireFields<MutationUpdateGlobalModuleArgs, 'input'>
   >;
 };
 

@@ -1,0 +1,9 @@
+query GlobalModuleDetails($input: GetGlobalModuleInput!) {
+  globalModule(input: $input) {
+    createdAt
+    description
+    id
+    lastModified
+    body
+  }
+}

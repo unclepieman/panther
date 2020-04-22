@@ -1,0 +1,5 @@
+mutation UpdateGlobalModule($input: CreateOrModifyGlobalModuleInput!) {
+  updateGlobalModule(input: $input) {
+    ...GlobalModuleFull
+  }
+}

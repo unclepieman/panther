@@ -543,20 +543,13 @@ type PolicyDetails {
 }
 
 type GlobalModuleDetails {
-  actionDelaySeconds: Int
   body: String
   createdAt: AWSDateTime
   createdBy: ID
   description: String
-  displayName: String
-  enabled: Boolean
   id: ID!
   lastModified: AWSDateTime
   lastModifiedBy: ID
-  reference: String
-  runbook: String
-  tags: [String]
-  tests: [PolicyUnitTest]
   versionId: ID
 }
 

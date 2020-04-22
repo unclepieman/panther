@@ -1181,9 +1181,9 @@ export type ResolversTypes = {
   ComplianceStatusCounts: ResolverTypeWrapper<ComplianceStatusCounts>;
   GetGlobalModuleInput: GetGlobalModuleInput;
   GlobalModuleDetails: ResolverTypeWrapper<GlobalModuleDetails>;
-  PolicyUnitTest: ResolverTypeWrapper<PolicyUnitTest>;
   GetPolicyInput: GetPolicyInput;
   PolicyDetails: ResolverTypeWrapper<PolicyDetails>;
+  PolicyUnitTest: ResolverTypeWrapper<PolicyUnitTest>;
   ListPoliciesInput: ListPoliciesInput;
   ListPoliciesSortFieldsEnum: ListPoliciesSortFieldsEnum;
   ListPoliciesResponse: ResolverTypeWrapper<ListPoliciesResponse>;
@@ -1294,9 +1294,9 @@ export type ResolversParentTypes = {
   ComplianceStatusCounts: ComplianceStatusCounts;
   GetGlobalModuleInput: GetGlobalModuleInput;
   GlobalModuleDetails: GlobalModuleDetails;
-  PolicyUnitTest: PolicyUnitTest;
   GetPolicyInput: GetPolicyInput;
   PolicyDetails: PolicyDetails;
+  PolicyUnitTest: PolicyUnitTest;
   ListPoliciesInput: ListPoliciesInput;
   ListPoliciesSortFieldsEnum: ListPoliciesSortFieldsEnum;
   ListPoliciesResponse: ListPoliciesResponse;

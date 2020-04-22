@@ -1,14 +1,14 @@
-# Nginx Logs
+# NGINX
 
 [Nginx](https://www.nginx.com/) is a powerful open source web server. Nginx log formats are configurable, and Panther supports the NCSA combined log format for access logs.
 
-| Log Type       | Reference                                              |
-| -------------- | ------------------------------------------------------ |
-| `Nginx.Access` | http://nginx.org/en/docs/http/ngx_http_log_module.html |
+| Log Type | Reference |
+| :--- | :--- |
+| `Nginx.Access` | [http://nginx.org/en/docs/http/ngx\_http\_log\_module.html](http://nginx.org/en/docs/http/ngx_http_log_module.html) |
 
 ## Nginx.Access
 
-```json
+```javascript
 {
     "remoteAddr": {
         "type": "string"
@@ -62,3 +62,4 @@
     }
 }
 ```
+

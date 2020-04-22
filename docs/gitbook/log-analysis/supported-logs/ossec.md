@@ -1,14 +1,14 @@
-# OSSEC Logs
+# OSSEC
 
 [OSSEC](https://www.ossec.net/) is a widely used open source host intrusion detection system. Panther supports the JSON `alerts.json` log file format for OSSEC EventInfo alerts.
 
-| Log Type          | Reference                                           |
-| ----------------- | --------------------------------------------------- |
-| `OSSEC.EventInfo` | https://www.ossec.net/docs/docs/formats/alerts.html |
+| Log Type | Reference |
+| :--- | :--- |
+| `OSSEC.EventInfo` | [https://www.ossec.net/docs/docs/formats/alerts.html](https://www.ossec.net/docs/docs/formats/alerts.html) |
 
 ## OSSEC.EventInfo
 
-```json
+```javascript
 {
     "id": {
         "type": "string"
@@ -135,7 +135,7 @@
 
 ### Decoder
 
-```json
+```javascript
 {
     "accumulate": {
         "type": "integer"
@@ -157,7 +157,7 @@
 
 ### FileDiff
 
-```json
+```javascript
 {
     "gowner_after": {
         "type": "string"
@@ -197,7 +197,7 @@
 
 ### Rule
 
-```json
+```javascript
 {
     "comment": {
         "type": "string"
@@ -243,3 +243,4 @@
     }
 }
 ```
+

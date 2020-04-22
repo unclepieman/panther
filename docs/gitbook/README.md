@@ -1,46 +1,54 @@
 # Home
 
-## Overview
+Panther detects threats with log data, improves cloud security posture, and powers investigations with a robust data warehouse.
 
-Panther is a cloud-native platform for detecting threats, improving cloud security posture, and powering investigations.
+![Architecture](.gitbook/assets/panther_graphic_flow%20%281%29.jpg)
 
-Security teams can use Panther for:
+Its main components are:
 
-|         Use Case         | Description                                                                               |
-| :----------------------: | ----------------------------------------------------------------------------------------- |
-|  Continuous Monitoring   | Analyze logs in real-time and identify suspicious activity that could indicate a breach   |
-|       Alert Triage       | Pivot across all of your security data to understand the full context of an alert         |
-|      Searching IOCs      | Quickly search for matches against IOCs using standardized data fields                    |
+* [Log Analysis](log-processing/) for collecting, parsing, and analyzing security data
+* [Cloud Security](scanning/) identifying misconfigurations in AWS accounts and improving security posture
+* [Historical Search](historical-search/) for analytics on normalized log data, generated alerts, and common indicators
+
+## Benefits
+
+* Built on serverless technologies for high scale at low cost
+* Python-based real-time detections
+* SQL-based historical queries
+* Low-latency alerting and remediation
+* Simple deployments using infrastructure as code
+* Secure, least-privilege, and encrypted infrastructure deployed within your AWS account
+
+## Use Cases
+
+Teams use Panther for:
+
+| Use Case | Description |
+| :---: | :--- |
+| Continuous Monitoring | Analyze logs in real-time and identify suspicious activity that could indicate a breach |
+| Alert Triage | Pivot across all of your security data to understand the full context of an alert |
+| Searching IOCs | Quickly search for matches against IOCs using standardized data fields |
 | Securing Cloud Resources | Identify misconfigurations, achieve compliance, and model security best practices in code |
-
-## Architecture
-
-![Architecture](.gitbook/assets/panther_graphic_flow.jpg)
-
-The three main components are:
-
-* **Log Analysis** to centralize, parse, and analyze log data with Python
-* **Cloud Security** to scan AWS accounts, detect misconfigurations, and improve cloud security posture
-* **Historical Search** for analytics on collected log data and alerts
-
-The benefits of Panther include:
-
-- Flexible Python-based detections
-- Built on serverless technologies for high scale at low cost
-- Near real-time analysis for quick alerting and remediation
-- Simple deployments using infrastructure as code
-- Secure, least-privilege, and encrypted infrastructure deployed within your AWS account
 
 ## Concepts
 
-|         Term         | Meaning                                                                               |
-| :----------------------: | ----------------------------------------------------------------------------------------- |
-| Event   | A normalized log from sources such as CloudTrail, Osquery, or Suricata   |
-| Rule       | A Python function to detect suspicious activity         |
-| Alert   | A notification to the team when a policy has failed or a rule has triggered  |
+| Term | Meaning |
+| :---: | :--- |
+| Event | A normalized log from sources such as CloudTrail, Osquery, or Suricata |
+| Rule | A Python function to detect suspicious activity |
+| Alert | A notification to the team when a policy has failed or a rule has triggered |
 | Policy | A Python function representing the desired secure state of a resource |
-| Resource      | A cloud entity, such as an IAM user, virtual machine, or data bucket                    |
+| Resource | A cloud entity, such as an IAM user, virtual machine, or data bucket |
 
 ## Get Started!
 
-To get set up with Panther, continue to the [Quick Start](quick-start.md) on the next page.
+To get set up with Panther, continue to the [quick start](quick-start.md)!
+
+## Enterprise
+
+For teams needing 24x7 support, advanced analysis packs \(PCI, MITRE ATT&CK\), RBAC, and SSO, please reach out to us at `contact@runpanther.io` to learn more about Panther Enterprise.
+
+### Hosted
+
+For teams that need Panther hosted in single-tenant SaaS environment, please reach out to us at `contact@runpanther.io`.
+

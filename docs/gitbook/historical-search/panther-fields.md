@@ -1,4 +1,4 @@
-# Panther's Standard Fields
+# Panther Fields
 
 Panther log processing appends some fields to all log records.
 
@@ -6,9 +6,9 @@ These fields provide standard names for attributes over all data sources allowin
 
 For example, each data source has a name for the time an event occurred but each data source will likely not name the attribute the same nor is it guaranteed that the associated time has a time zone consistent with other data sources.
 
-The Panther attribute `p_event_time` (described below) is mapped to each data source's corresponding event time, and normalized to UTC.
+The Panther attribute `p_event_time` \(described below\) is mapped to each data source's corresponding event time, and normalized to UTC.
 
-In this way you can query over multiple data sources joining and ordering by "p_event_time" to properly align and correlate the data despite the disparate schemas of each data source.
+In this way you can query over multiple data sources joining and ordering by "p\_event\_time" to properly align and correlate the data despite the disparate schemas of each data source.
 
 {% hint style="info" %}
 All appended standard fields begin with "p\_".
@@ -18,12 +18,12 @@ All appended standard fields begin with "p\_".
 
 The fields below are appended to all log records:
 
-| Field Name   | Type      | Description                                                                      |
-| ------------ | --------- | -------------------------------------------------------------------------------- |
-| `p_log_type`   | `string`    | The type of log.                                                                 |
-| `p_row_id`     | `string`    | Unique id (UUID) for the row.                                                    |
+| Field Name | Type | Description |
+| :--- | :--- | :--- |
+| `p_log_type` | `string` | The type of log. |
+| `p_row_id` | `string` | Unique id \(UUID\) for the row. |
 | `p_event_time` | `timestamp` | The associated event time for the log type is copied here and normalized to UTC. |
-| `p_parse_time` | `timestamp` | The current time when the event was parsed normalized to UTC.                    |
+| `p_parse_time` | `timestamp` | The current time when the event was parsed normalized to UTC. |
 
 {% hint style="info" %}
 If an event does not have a timestamp, then `p_event_time` will be set to `p_parse_time`, which is the time the event was parsed.
@@ -39,18 +39,18 @@ To allow this question to be answered over all data sources the "any" fields bel
 
 The `all_logs` Athena view is provided over all data sources to make queries easy for users to find activity for an indicator in a single query.
 
-| Field Name             | Type             | Description                                                    |
-| ---------------------- | ---------------- | -------------------------------------------------------------- |
-| `p_any_ip_addresses`     | `array<string>` | List of ip addresses (v4 or v6 in string form) related to row. |
-| `p_any_domain_names`     | `array<string>` | List of domain names related to row.                           |
-| `p_any_aws_account_ids`  | `array<string>` | List of was account ids related to row.                        |
-| `p_any_aws_instance_ids` | `array<string>` | List of was instance ids related to row.                       |
-| `p_any_aws_arns`         | `array<string>` | List of arns related to row.                                   |
-| `p_any_aws_tags`         | `array<string>` | List of tags related to row as "key:value" pairs.              |
-| `p_any_md5_hashes`       | `array<string>` | List of MD5 hashes related to row.                             |
-| `p_any_sha1_hashes`      | `array<string>` | List of SHA1 hashes related to row.                            |
+| Field Name | Type | Description |
+| :--- | :--- | :--- |
+| `p_any_ip_addresses` | `array<string>` | List of ip addresses \(v4 or v6 in string form\) related to row. |
+| `p_any_domain_names` | `array<string>` | List of domain names related to row. |
+| `p_any_aws_account_ids` | `array<string>` | List of was account ids related to row. |
+| `p_any_aws_instance_ids` | `array<string>` | List of was instance ids related to row. |
+| `p_any_aws_arns` | `array<string>` | List of arns related to row. |
+| `p_any_aws_tags` | `array<string>` | List of tags related to row as "key:value" pairs. |
+| `p_any_md5_hashes` | `array<string>` | List of MD5 hashes related to row. |
+| `p_any_sha1_hashes` | `array<string>` | List of SHA1 hashes related to row. |
 
-## The "all_logs" Athena View
+## The "all\_logs" Athena View
 
 Panther manages an Athena view over all data sources with standard fields.
 
@@ -70,7 +70,7 @@ From this information you can then explore the particular logs where activity is
 
 ## Standard Fields in Rules
 
-The Panther standard fields can be used in rules. For example, this rule triggers when any
-GuardDuty alert is on a resource tagged as 'critical':
+The Panther standard fields can be used in rules. For example, this rule triggers when any GuardDuty alert is on a resource tagged as 'critical':
 
-![Example Panther Rule](../.gitbook/assets/PantherStandardFieldRule.png)
+![Example Panther Rule](../.gitbook/assets/pantherstandardfieldrule.png)
+

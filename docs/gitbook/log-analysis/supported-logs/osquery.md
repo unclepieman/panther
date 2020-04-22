@@ -1,17 +1,17 @@
-# Osquery Logs
+# Osquery
 
-[Osquery](osquery.io) is an [open source tool](https://github.com/osquery/osquery) for SQL powered operating system instrumentation, monitoring, and analytics. It's helpful for collecting data such as installed users, applications, processes, files, system logs, and much more.
+[Osquery](https://github.com/panther-labs/panther/tree/b8135c7fb7246151397f96754929cc763f403ef2/docs/gitbook/log-analysis/supported-logs/osquery.io) is an [open source tool](https://github.com/osquery/osquery) for SQL powered operating system instrumentation, monitoring, and analytics. It's helpful for collecting data such as installed users, applications, processes, files, system logs, and much more.
 
-| Log Type               | Reference                                                                    |
-| ---------------------- | ---------------------------------------------------------------------------- |
-| `Osquery.Batch`        | https://osquery.readthedocs.io/en/stable/deployment/logging/#batch-format    |
-| `Osquery.Differential` | https://osquery.readthedocs.io/en/stable/deployment/logging/#event-format    |
-| `Osquery.Snapshot`     | https://osquery.readthedocs.io/en/stable/deployment/logging/#snapshot-format |
-| `Osquery.Status`       | https://osquery.readthedocs.io/en/stable/deployment/logging/#status-logs     |
+| Log Type | Reference |
+| :--- | :--- |
+| `Osquery.Batch` | [https://osquery.readthedocs.io/en/stable/deployment/logging/\#batch-format](https://osquery.readthedocs.io/en/stable/deployment/logging/#batch-format) |
+| `Osquery.Differential` | [https://osquery.readthedocs.io/en/stable/deployment/logging/\#event-format](https://osquery.readthedocs.io/en/stable/deployment/logging/#event-format) |
+| `Osquery.Snapshot` | [https://osquery.readthedocs.io/en/stable/deployment/logging/\#snapshot-format](https://osquery.readthedocs.io/en/stable/deployment/logging/#snapshot-format) |
+| `Osquery.Status` | [https://osquery.readthedocs.io/en/stable/deployment/logging/\#status-logs](https://osquery.readthedocs.io/en/stable/deployment/logging/#status-logs) |
 
 ## Osquery.Batch
 
-```json
+```javascript
 {
     "calendarTime": {
         "$schema": "http://json-schema.org/draft-04/schema#",
@@ -74,7 +74,8 @@
 ```
 
 ### BatchDiffResults
-```json
+
+```javascript
 {
     "added": {
         "items": {
@@ -103,7 +104,7 @@
 
 ## Osquery.Differential
 
-```json
+```javascript
 {
     "action": {
         "type": "string"
@@ -183,7 +184,7 @@
 
 ## Osquery.Status
 
-```json
+```javascript
 {
     "calendarTime": {
         "$schema": "http://json-schema.org/draft-04/schema#",
@@ -255,7 +256,7 @@
 
 ### Osquery.Snapshot
 
-```json
+```javascript
 {
     "action": {
         "type": "string"
@@ -326,3 +327,4 @@
     }
 }
 ```
+

@@ -1,16 +1,15 @@
-# Syslogs
+# Syslog
 
 [Syslog](https://en.wikipedia.org/wiki/Syslog) is a protocol for message logging. It has become the standard logging solution on Unix-like systems.
 
-| Log Type          | Reference                                              |
-| ----------------- | ------------------------------------------------------ |
-| `Syslog.RFC3164`  | https://tools.ietf.org/html/rfc3164                    |
-| `Syslog.RFC5424`  | https://tools.ietf.org/html/rfc5424                    |
-
+| Log Type | Reference |
+| :--- | :--- |
+| `Syslog.RFC3164` | [https://tools.ietf.org/html/rfc3164](https://tools.ietf.org/html/rfc3164) |
+| `Syslog.RFC5424` | [https://tools.ietf.org/html/rfc5424](https://tools.ietf.org/html/rfc5424) |
 
 ## Syslog.RFC3164
 
-```json
+```javascript
 {
     "priority": {
         "type": "integer"
@@ -70,7 +69,7 @@
 
 ## Syslog.RFC5424
 
-```json
+```javascript
 {
     "priority": {
         "type": "integer"
@@ -143,3 +142,4 @@
     }
 }
 ```
+

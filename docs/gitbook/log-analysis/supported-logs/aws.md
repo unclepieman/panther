@@ -1,21 +1,21 @@
-# AWS Logs
+# AWS
 
 AWS contains a variety of critical data sources used to audit API usage, database calls, network traffic, and more.
 
-| Log Type               | Reference                                                                                          |
-| ---------------------- | -------------------------------------------------------------------------------------------------- |
-| `AWS.ALB`              | https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html |
-| `AWS.AuroraMySQLAudit` | https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Auditing.html             |
-| `AWS.CloudTrail`       | https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-event-reference.html         |
-| `AWS.GuardDuty`        | https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_finding-format.html                      |
-| `AWS.S3ServerAccess`   | https://docs.aws.amazon.com/AmazonS3/latest/dev/LogFormat.html                                     |
-| `AWS.VPCFlow`          | https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-records-examples.html                   |
+| Log Type | Reference |
+| :--- | :--- |
+| `AWS.ALB` | [https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html) |
+| `AWS.AuroraMySQLAudit` | [https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Auditing.html](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/AuroraMySQL.Auditing.html) |
+| `AWS.CloudTrail` | [https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-event-reference.html](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-event-reference.html) |
+| `AWS.GuardDuty` | [https://docs.aws.amazon.com/guardduty/latest/ug/guardduty\_finding-format.html](https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_finding-format.html) |
+| `AWS.S3ServerAccess` | [https://docs.aws.amazon.com/AmazonS3/latest/dev/LogFormat.html](https://docs.aws.amazon.com/AmazonS3/latest/dev/LogFormat.html) |
+| `AWS.VPCFlow` | [https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-records-examples.html](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-records-examples.html) |
 
 ## AWS.ALB
 
-The schema below represents AWS Application Load Balancer (ALB) logs:
+The schema below represents AWS Application Load Balancer \(ALB\) logs:
 
-```json
+```javascript
 {
   "type": {
     "type": "string"
@@ -150,7 +150,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ## AWS.CloudTrail
 
-```json
+```javascript
 {
     "additionalEventData": {
         "items": {
@@ -284,7 +284,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ### CloudTrailSessionContextAttributes
 
-```json
+```javascript
 {
     "mfaAuthenticated": {
         "type": "string"
@@ -297,7 +297,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ### CloudTrailUserIdentity
 
-```json
+```javascript
 {
     "type": {
         "type": "string"
@@ -332,7 +332,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ### CloudTrailSessionContext
 
-```json
+```javascript
 {
     "attributes": {
         "$schema": "http://json-schema.org/draft-04/schema#",
@@ -351,7 +351,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ### CloudTrailSessionContextSessionIssuer
 
-```json
+```javascript
 {
     "type": {
         "type": "string"
@@ -373,7 +373,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ### CloudTrailSessionContextWebIDFederationData
 
-```json
+```javascript
 {
     "federatedProvider": {
         "type": "string"
@@ -388,7 +388,8 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 ```
 
 ### CloudTrailResources
-```json
+
+```javascript
 {
     "arn": {
         "type": "string"
@@ -404,7 +405,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ## AWS.S3ServerAccess
 
-```json
+```javascript
 {
     "bucketowner": {
         "type": "string"
@@ -527,7 +528,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ## AWS.VPCFlow
 
-```json
+```javascript
 {
     "version": {
         "type": "integer"
@@ -635,7 +636,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ## AWS.AuroraMySQLAudit
 
-```json
+```javascript
 {
     "timestamp": {
         "$schema": "http://json-schema.org/draft-04/schema#",
@@ -710,7 +711,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ## AWS.GuardDuty
 
-```json
+```javascript
 {
     "schemaVersion": {
         "type": "string"
@@ -801,7 +802,7 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
 
 ### GuardDutyService
 
-```json
+```javascript
 {
     "additionalInfo": {
         "items": {
@@ -838,3 +839,4 @@ The schema below represents AWS Application Load Balancer (ALB) logs:
     }
 }
 ```
+

@@ -40,7 +40,7 @@ const GlobalModuleDetailsInfo: React.FC<GlobalModuleDetailsInfoProps> = ({ globa
             size="large"
             variant="default"
             mr={4}
-            is={Link}
+            as={Link}
             to={urls.settings.globalModule.edit(global.id)}
           >
             Edit
@@ -50,7 +50,7 @@ const GlobalModuleDetailsInfo: React.FC<GlobalModuleDetailsInfoProps> = ({ globa
     >
       <Grid gridTemplateColumns="repeat(2, 1fr)" gridGap={6}>
         <Box my={1}>
-          <Label mb={1} is="div" size="small" color="grey300">
+          <Label mb={1} as="div" size="small" color="grey300">
             ID
           </Label>
           <Text size="medium" color="black">
@@ -58,7 +58,7 @@ const GlobalModuleDetailsInfo: React.FC<GlobalModuleDetailsInfoProps> = ({ globa
           </Text>
         </Box>
         <Box my={1}>
-          <Label mb={1} is="div" size="small" color="grey300">
+          <Label mb={1} as="div" size="small" color="grey300">
             DESCRIPTION
           </Label>
           <Text size="medium" color={global.description ? 'black' : 'grey200'}>
@@ -66,7 +66,7 @@ const GlobalModuleDetailsInfo: React.FC<GlobalModuleDetailsInfoProps> = ({ globa
           </Text>
         </Box>
         <Box my={1}>
-          <Label mb={1} is="div" size="small" color="grey300">
+          <Label mb={1} as="div" size="small" color="grey300">
             CREATED
           </Label>
           <Text size="medium" color="black">
@@ -74,7 +74,7 @@ const GlobalModuleDetailsInfo: React.FC<GlobalModuleDetailsInfoProps> = ({ globa
           </Text>
         </Box>
         <Box my={1}>
-          <Label mb={1} is="div" size="small" color="grey300">
+          <Label mb={1} as="div" size="small" color="grey300">
             LAST MODIFIED
           </Label>
           <Text size="medium" color="black">

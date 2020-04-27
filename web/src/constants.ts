@@ -22,6 +22,10 @@ import { generateDocUrl } from 'Helpers/utils';
 
 export const AWS_ACCOUNT_ID_REGEX = new RegExp('^\\d{12}$');
 
+export const S3_BUCKET_NAME_REGEX = new RegExp(
+  '(?=^.{3,63}$)(?!^(\\d+\\.)+\\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\\-]*[a-z0-9])\\.)*([a-z0-9]|[a-z0-9][a-z0-9\\-]*[a-z0-9])$)'
+);
+
 export const INCLUDE_DIGITS_REGEX = new RegExp('(?=.*[0-9])');
 
 export const INCLUDE_LOWERCASE_REGEX = new RegExp('(?=.*[a-z])');

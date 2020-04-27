@@ -94,6 +94,7 @@ const ComplianceSourceWizard: React.FC<ComplianceSourceWizardProps> = ({
                   </WizardPanelWrapper.Content>
                   <WizardPanelWrapper.Actions>
                     <WizardPanelWrapper.ActionPrev />
+                    <WizardPanelWrapper.ActionSkip />
                     <WizardPanelWrapper.ActionNext disabled={!status.cfnTemplateDownloaded} />
                   </WizardPanelWrapper.Actions>
                 </WizardPanelWrapper>

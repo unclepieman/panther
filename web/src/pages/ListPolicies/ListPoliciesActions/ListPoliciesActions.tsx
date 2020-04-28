@@ -87,6 +87,17 @@ export const filters = {
       },
     },
   },
+  enabled: {
+    component: FormikCombobox,
+    props: {
+      label: 'Enabled',
+      items: [true, false],
+      itemToString: (item: boolean) => (item ? 'Yes' : 'No'),
+      inputProps: {
+        placeholder: 'Choose status...',
+      },
+    },
+  },
   hasRemediation: {
     component: FormikCombobox,
     props: {
@@ -102,7 +113,7 @@ export const filters = {
 
 export type ListPoliciesFiltersValues = Pick<
   ListPoliciesInput,
-  'complianceStatus' | 'tags' | 'severity' | 'resourceTypes' | 'nameContains'
+  'complianceStatus' | 'tags' | 'severity' | 'resourceTypes' | 'nameContains' | 'enabled'
 >;
 
 const ListPoliciesActions: React.FC = () => {

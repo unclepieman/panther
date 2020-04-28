@@ -75,6 +75,17 @@ export const filters = {
       },
     },
   },
+  enabled: {
+    component: FormikCombobox,
+    props: {
+      label: 'Enabled',
+      items: [true, false],
+      itemToString: (item: boolean) => (item ? 'Yes' : 'No'),
+      inputProps: {
+        placeholder: 'Choose if rules are enabled...',
+      },
+    },
+  },
 };
 
 export type ListRulesFiltersValues = Pick<

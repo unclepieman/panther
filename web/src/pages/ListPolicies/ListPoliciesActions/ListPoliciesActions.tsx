@@ -94,7 +94,7 @@ export const filters = {
       items: [true, false],
       itemToString: (item: boolean) => (item ? 'Yes' : 'No'),
       inputProps: {
-        placeholder: 'Choose status...',
+        placeholder: 'Choose if policies are enabled...',
       },
     },
   },

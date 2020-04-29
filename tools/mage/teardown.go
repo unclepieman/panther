@@ -34,6 +34,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/lambda"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sts"
+
 	"github.com/panther-labs/panther/pkg/awsbatch/s3batch"
 )
 

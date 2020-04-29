@@ -19,14 +19,14 @@
 import React from 'react';
 import { GlobalModuleDetails } from 'Generated/schema';
 import * as Yup from 'yup';
-import { Box, Button, Flex } from 'pouncejs';
+import { Box, Button, Flex, Grid, InputElementErrorLabel, InputElementLabel } from 'pouncejs';
 import ErrorBoundary from 'Components/ErrorBoundary';
-import { Formik } from 'formik';
+import { Field, Formik } from 'formik';
 import SubmitButton from 'Components/buttons/SubmitButton/SubmitButton';
 import useRouter from 'Hooks/useRouter';
-import GlobalModuleFormCoreFields, {
-  globalModuleEditableFields,
-} from './GlobalModuleFormCoreFields';
+import FormikTextInput from 'Components/fields/TextInput';
+import FormikTextArea from 'Components/fields/TextArea';
+import FormikEditor from 'Components/fields/Editor';
 
 // The validation checks that Formik will run
 const validationSchema = Yup.object().shape({
@@ -35,26 +35,16 @@ const validationSchema = Yup.object().shape({
   description: Yup.string().required(),
 });
 
-interface BaseGlobalModuleFormProps<GlobalModuleFormValues> {
+const globalModuleEditableFields = ['id', 'body', 'description'] as const;
+
+type GlobalModuleFormValues = Pick<GlobalModuleDetails, typeof globalModuleEditableFields[number]>;
+
+interface GlobalModuleFormProps {
   /** The initial values of the form */
   initialValues: GlobalModuleFormValues;
-
   /** callback for the submission of the form */
   onSubmit: (values: GlobalModuleFormValues) => void;
-
-  /** The validation schema that the form will have */
-  validationSchema: Yup.ObjectSchema<Yup.Shape<object, Partial<GlobalModuleFormValues>>>;
 }
-
-export type GlobalModuleFormValues = Pick<
-  GlobalModuleDetails,
-  typeof globalModuleEditableFields[number]
->;
-
-export type GlobalModuleFormProps = Pick<
-  BaseGlobalModuleFormProps<GlobalModuleFormValues>,
-  'initialValues' | 'onSubmit'
->;
 
 const GlobalModuleForm: React.FC<GlobalModuleFormProps> = ({ initialValues, onSubmit }) => {
   const { history } = useRouter();
@@ -68,10 +58,40 @@ const GlobalModuleForm: React.FC<GlobalModuleFormProps> = ({ initialValues, onSu
           enableReinitialize
           validationSchema={validationSchema}
         >
-          {({ handleSubmit, isSubmitting, isValid, dirty }) => {
+          {({ handleSubmit, isSubmitting, isValid, dirty, errors, touched }) => {
             return (
               <form onSubmit={handleSubmit}>
-                <GlobalModuleFormCoreFields />
+                <Grid gridTemplateColumns="1fr 1fr" gridRowGap={2} gridColumnGap={9}>
+                  <Field
+                    as={FormikTextInput}
+                    label="* ID"
+                    placeholder={`The unique ID of the global`}
+                    name="id"
+                    disabled={initialValues.id}
+                    aria-required
+                  />
+                  <Field
+                    as={FormikTextArea}
+                    label="Description"
+                    placeholder={`Additional context about this global module`}
+                    name="description"
+                  />
+                </Grid>
+                <Box my={6}>
+                  <InputElementLabel htmlFor="enabled">{'Global Function'}</InputElementLabel>
+                  <Field
+                    as={FormikEditor}
+                    placeholder="# Enter the body of the global here..."
+                    name="body"
+                    width="100%"
+                    minLines={16}
+                    mode="python"
+                    aria-required
+                  />
+                  {errors.body && touched.body && (
+                    <InputElementErrorLabel mt={6}>{errors.body}</InputElementErrorLabel>
+                  )}
+                </Box>
                 <Flex borderTop="1px solid" borderColor="grey100" pt={6} mt={10} justify="flex-end">
                   <Flex>
                     <Button variant="default" size="large" onClick={history.goBack} mr={4}>

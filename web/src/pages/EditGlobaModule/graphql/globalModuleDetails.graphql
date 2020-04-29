@@ -1,9 +1,5 @@
 query GlobalModuleDetails($input: GetGlobalModuleInput!) {
   getGlobalPythonModule(input: $input) {
-    createdAt
-    description
-    id
-    lastModified
-    body
+    ...GlobalModuleFull
   }
 }

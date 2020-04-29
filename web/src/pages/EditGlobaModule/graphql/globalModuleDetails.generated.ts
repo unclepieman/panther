@@ -20,6 +20,7 @@
 
 import * as Types from '../../../../__generated__/schema';
 
+import { GlobalModuleFull } from '../../../graphql/fragments/GlobalModuleFull.generated';
 import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
@@ -28,22 +29,15 @@ export type GlobalModuleDetailsVariables = {
   input: Types.GetGlobalModuleInput;
 };
 
-export type GlobalModuleDetails = {
-  getGlobalPythonModule?: Types.Maybe<
-    Pick<Types.GlobalModuleDetails, 'createdAt' | 'description' | 'id' | 'lastModified' | 'body'>
-  >;
-};
+export type GlobalModuleDetails = { getGlobalPythonModule?: Types.Maybe<GlobalModuleFull> };
 
 export const GlobalModuleDetailsDocument = gql`
   query GlobalModuleDetails($input: GetGlobalModuleInput!) {
     getGlobalPythonModule(input: $input) {
-      createdAt
-      description
-      id
-      lastModified
-      body
+      ...GlobalModuleFull
     }
   }
+  ${GlobalModuleFull}
 `;
 
 /**

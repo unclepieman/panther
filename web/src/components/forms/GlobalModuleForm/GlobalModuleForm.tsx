@@ -72,13 +72,7 @@ const GlobalModuleForm: React.FC<GlobalModuleFormProps> = ({ initialValues, onSu
             return (
               <form onSubmit={handleSubmit}>
                 <GlobalModuleFormCoreFields />
-                <Flex
-                  borderTop="1px solid"
-                  borderColor="grey100"
-                  pt={6}
-                  mt={10}
-                  justifyContent="flex-end"
-                >
+                <Flex borderTop="1px solid" borderColor="grey100" pt={6} mt={10} justify="flex-end">
                   <Flex>
                     <Button variant="default" size="large" onClick={history.goBack} mr={4}>
                       Cancel

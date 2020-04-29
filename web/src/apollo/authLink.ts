@@ -1,5 +1,3 @@
-package cloudwatchcf
-
 /**
  * Panther is a Cloud-Native SIEM for the Modern Security Team.
  * Copyright (C) 2020 Panther Labs Inc
@@ -18,24 +16,24 @@ package cloudwatchcf
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-func generateLambdaMetricFilters(resource map[string]interface{}) []*MetricFilter {
-	lambdaName := getResourceProperty("FunctionName", resource)
-	runtime := getResourceProperty("Runtime", resource)
+import Auth from '@aws-amplify/auth';
+import { ApolloLink } from '@apollo/client';
+import { createAuthLink, AUTH_TYPE } from 'aws-appsync-auth-link';
 
-	switch runtime {
-	case "go1.x":
-		return []*MetricFilter{
-			NewGoLambdaErrorMetricFilter(lambdaName),
-			NewGoLambdaWarnMetricFilter(lambdaName),
-			NewLambdaMemoryMetricFilter(lambdaName),
-		}
-	case "python3.7":
-		return []*MetricFilter{
-			NewPythonLambdaErrorMetricFilter(lambdaName),
-			NewPythonLambdaWarnMetricFilter(lambdaName),
-			NewLambdaMemoryMetricFilter(lambdaName),
-		}
-	default:
-		panic("Unknown lambda runtime: " + runtime)
-	}
-}
+/**
+ * This link is here to add the necessary headers present for AMAZON_COGNITO_USER_POOLS
+ * authentication. It essentially signs the Authorization header with a JWT token
+ */
+const authLink = (createAuthLink({
+  region: process.env.AWS_REGION,
+  url: process.env.WEB_APPLICATION_GRAPHQL_API_ENDPOINT,
+  auth: {
+    jwtToken: () =>
+      Auth.currentSession()
+        .then(session => session.getIdToken().getJwtToken())
+        .catch(() => null),
+    type: AUTH_TYPE.AMAZON_COGNITO_USER_POOLS,
+  },
+}) as unknown) as ApolloLink;
+
+export default authLink;

@@ -19,7 +19,6 @@
 import {
   AlertDetails,
   ComplianceIntegration,
-  GlobalModuleDetails,
   LogIntegration,
   PolicyDetails,
   ResourceDetails,
@@ -75,11 +74,7 @@ const urls = {
   settings: {
     home: () => '/settings/',
     general: () => `${urls.settings.home()}general/`,
-    globalModule: {
-      list: () => `${urls.settings.home()}global-module/`,
-      details: (id = 'panther') => `${urls.settings.globalModule.list()}${urlEncode(id)}/`,
-      edit: (id: GlobalModuleDetails['id']) => `${urls.settings.globalModule.details(id)}edit/`,
-    },
+    globalModule: () => `${urls.settings.home()}/module/`,
     users: () => `${urls.settings.home()}users/`,
     destinations: () => `${urls.settings.home()}destinations/`,
   },

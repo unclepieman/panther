@@ -1,5 +1,0 @@
-query GlobalModuleDetails($globalModuleDetailsInput: GetGlobalModuleInput!) {
-  getGlobalPythonModule(input: $globalModuleDetailsInput) {
-    ...GlobalModuleFull
-  }
-}

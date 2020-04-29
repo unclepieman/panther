@@ -24,7 +24,6 @@ import ListResourcesPage from 'Pages/ListResources';
 import ResourceDetailsPage from 'Pages/ResourceDetails';
 import PolicyDetailsPage from 'Pages/PolicyDetails';
 import GeneralSettingsPage from 'Pages/GeneralSettings';
-import GlobalModuleDetails from 'Pages/GlobalModuleDetails';
 import SignInPage from 'Pages/SignIn';
 import DestinationsPage from 'Pages/Destinations';
 import UsersPage from 'Pages/Users';
@@ -162,21 +161,7 @@ const PrimaryPageLayout: React.FunctionComponent = () => {
                 /******************** SETTINGS ******************************/
                 <Redirect exact from={urls.settings.home()} to={urls.settings.general()} />
                 <Route exact path={urls.settings.general()} component={GeneralSettingsPage} />
-                <Route
-                  exact
-                  path={urls.settings.globalModule.details(':id')}
-                  component={GlobalModuleDetails}
-                />
-                <Route
-                  exact
-                  path={urls.settings.globalModule.edit(':id')}
-                  component={EditGlobalModulePage}
-                />
-                <Redirect
-                  exact
-                  from={urls.settings.globalModule.list()}
-                  to={urls.settings.globalModule.details()}
-                />
+                <Route exact path={urls.settings.globalModule()} component={EditGlobalModulePage} />
                 <Route exact path={urls.settings.users()} component={UsersPage} />
                 <Route exact path={urls.settings.destinations()} component={DestinationsPage} />
                 <Route component={Page404} />

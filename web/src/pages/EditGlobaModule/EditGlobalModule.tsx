@@ -21,7 +21,6 @@ import Panel from 'Components/Panel';
 import { Alert, Card, Box, useSnackbar } from 'pouncejs';
 import GlobalModuleForm from 'Components/forms/GlobalModuleForm';
 import { GlobalModuleDetails } from 'Generated/schema';
-import useRouter from 'Hooks/useRouter';
 import TablePlaceholder from 'Components/TablePlaceholder';
 import { extractErrorMessage } from 'Helpers/utils';
 import { useGlobalModuleDetails } from './graphql/globalModuleDetails.generated';
@@ -33,7 +32,6 @@ export const defaultInitialValues: GlobalModuleDetails = {
   body: '',
 };
 const EditGlobalModulePage: React.FC = () => {
-  const { match } = useRouter<{ id: string }>();
   const { pushSnackbar } = useSnackbar();
 
   const {
@@ -44,7 +42,7 @@ const EditGlobalModulePage: React.FC = () => {
     fetchPolicy: 'cache-and-network',
     variables: {
       input: {
-        globalId: match.params.id,
+        globalId: 'panther',
       },
     },
   });

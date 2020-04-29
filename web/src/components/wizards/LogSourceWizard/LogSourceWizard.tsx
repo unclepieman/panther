@@ -111,8 +111,7 @@ const LogSourceWizard: React.FC<LogSourceWizardProps> = ({
                   </WizardPanelWrapper.Content>
                   <WizardPanelWrapper.Actions>
                     <WizardPanelWrapper.ActionPrev />
-                    <WizardPanelWrapper.ActionSkip />
-                    <WizardPanelWrapper.ActionNext disabled={!status.cfnTemplateDownloaded} />
+                    <WizardPanelWrapper.ActionNext />
                   </WizardPanelWrapper.Actions>
                 </WizardPanelWrapper>
               </Wizard.Step>

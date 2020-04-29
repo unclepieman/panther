@@ -29,7 +29,6 @@ interface WizardPanelWrapperComposition {
   Actions: React.FC;
   ActionNext: React.FC<WizardPanelWrapperAction>;
   ActionPrev: React.FC<WizardPanelWrapperAction>;
-  ActionSkip: React.FC<WizardPanelWrapperAction>;
 }
 
 const WizardPanelWrapper: React.FC & WizardPanelWrapperComposition = ({ children }) => {
@@ -70,19 +69,9 @@ const WizardPanelActionNext: React.FC<WizardPanelWrapperAction> = ({ disabled })
   );
 };
 
-const WizardPanelActionSkip: React.FC<WizardPanelWrapperAction> = () => {
-  const { goToNextStep } = useWizardContext();
-  return (
-    <Button size="large" variant="primary" mr={3} onClick={goToNextStep}>
-      Skip
-    </Button>
-  );
-};
-
 WizardPanelWrapper.Content = React.memo(WizardPanelWrapperContent);
 WizardPanelWrapper.Actions = React.memo(WizardPanelWrapperActions);
 WizardPanelWrapper.ActionPrev = React.memo(WizardPanelActionPrev);
 WizardPanelWrapper.ActionNext = React.memo(WizardPanelActionNext);
-WizardPanelWrapper.ActionSkip = React.memo(WizardPanelActionSkip);
 
 export default WizardPanelWrapper;

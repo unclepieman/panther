@@ -133,3 +133,6 @@ export const DEFAULT_LARGE_PAGE_SIZE = 25;
 // The key under which User-related data will be stored in the storage
 export const USER_INFO_STORAGE_KEY = 'panther.user.info';
 export const ERROR_REPORTING_CONSENT_STORAGE_KEY = 'panther.generalSettings.errorReportingConsent';
+
+// Docs URL we use to prompt users for explanations
+export const LOG_ONBOARDING_DOC_URL = `https://docs.runpanther.io/log-processing#sns-notification-setup`;

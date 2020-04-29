@@ -53,7 +53,6 @@ const PolicyDetailsPage = () => {
   >();
 
   const { error, data, loading } = usePolicyDetails({
-    fetchPolicy: 'cache-and-network',
     variables: {
       policyDetailsInput: {
         policyId: match.params.id,

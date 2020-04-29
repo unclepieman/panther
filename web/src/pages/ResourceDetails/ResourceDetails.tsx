@@ -54,7 +54,6 @@ const ResourceDetailsPage = () => {
   >();
 
   const { error, data, loading } = useResourceDetails({
-    fetchPolicy: 'cache-and-network',
     variables: {
       resourceDetailsInput: {
         resourceId: match.params.id,

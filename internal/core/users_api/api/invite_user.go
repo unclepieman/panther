@@ -19,10 +19,19 @@ package api
  */
 
 import (
+	"github.com/aws/aws-sdk-go/aws"
+
 	"github.com/panther-labs/panther/api/lambda/users/models"
+	"github.com/panther-labs/panther/pkg/genericapi"
 )
 
 // InviteUser adds a new user to the Cognito user pool.
 func (API) InviteUser(input *models.InviteUserInput) (*models.InviteUserOutput, error) {
+	if genericapi.ContainsHTML(aws.StringValue(input.FamilyName)) ||
+		genericapi.ContainsHTML(aws.StringValue(input.GivenName)) {
+
+		return nil, &genericapi.InvalidInputError{Message: "Names cannot contain " + genericapi.HTMLCharacterSet}
+	}
+
 	return userGateway.CreateUser(input)
 }

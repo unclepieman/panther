@@ -1,5 +1,3 @@
-package cloudwatchcf
-
 /**
  * Panther is a Cloud-Native SIEM for the Modern Security Team.
  * Copyright (C) 2020 Panther Labs Inc
@@ -18,24 +16,23 @@ package cloudwatchcf
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-func generateLambdaMetricFilters(resource map[string]interface{}) []*MetricFilter {
-	lambdaName := getResourceProperty("FunctionName", resource)
-	runtime := getResourceProperty("Runtime", resource)
+import { ApolloClient, ApolloLink, InMemoryCache } from '@apollo/client';
 
-	switch runtime {
-	case "go1.x":
-		return []*MetricFilter{
-			NewGoLambdaErrorMetricFilter(lambdaName),
-			NewGoLambdaWarnMetricFilter(lambdaName),
-			NewLambdaMemoryMetricFilter(lambdaName),
-		}
-	case "python3.7":
-		return []*MetricFilter{
-			NewPythonLambdaErrorMetricFilter(lambdaName),
-			NewPythonLambdaWarnMetricFilter(lambdaName),
-			NewLambdaMemoryMetricFilter(lambdaName),
-		}
-	default:
-		panic("Unknown lambda runtime: " + runtime)
-	}
-}
+import { History } from 'history';
+import { LocationErrorState } from 'Components/utils/ApiErrorFallback';
+import createErrorLink from './createErrorLink';
+import authLink from './authLink';
+import cleanParamsLink from './cleanParamsLink';
+import httpLink from './httpLink';
+import typePolicies from './typePolicies';
+
+/**
+ * A function that will create an ApolloClient given a specific instance of a history
+ */
+const createApolloClient = (history: History<LocationErrorState>) =>
+  new ApolloClient({
+    link: ApolloLink.from([cleanParamsLink, createErrorLink(history), authLink, httpLink]),
+    cache: new InMemoryCache({ typePolicies }),
+  });
+
+export default createApolloClient;

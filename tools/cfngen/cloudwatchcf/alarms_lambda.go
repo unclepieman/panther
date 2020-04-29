@@ -79,11 +79,16 @@ func generateLambdaAlarms(resource map[string]interface{}, settings *config.Pant
 	// high water mark memory warning from metric filter
 	const memorySizeKey = "MemorySize"
 	var lambdaMem float32
-	// special case for panther-log-processor because it uses !Ref to allow user to set size: read from config file
-	const pantherLogProcessorLambda = "panther-log-processor"
-	if getResourceProperty("FunctionName", resource) == pantherLogProcessorLambda {
+	// special case for panther-log-processor and panther-rules-engine because they uses !Ref to allow user to set size: read from config file
+	// https://github.com/panther-labs/panther/issues/435
+	const (
+		pantherLogProcessorLambda = "panther-log-processor"
+		pantherRulesEngineLambda  = "panther-rules-engine"
+	)
+	switch getResourceProperty("FunctionName", resource) {
+	case pantherLogProcessorLambda, pantherRulesEngineLambda:
 		lambdaMem = (float32)(settings.Infra.LogProcessorLambdaMemorySize)
-	} else {
+	default:
 		lambdaMem = getResourceFloat32Property(memorySizeKey, resource)
 	}
 

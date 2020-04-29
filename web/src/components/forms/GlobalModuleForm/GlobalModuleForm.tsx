@@ -19,7 +19,7 @@
 import React from 'react';
 import { GlobalModuleDetails } from 'Generated/schema';
 import * as Yup from 'yup';
-import { Box, Button, Flex, Grid, InputElementErrorLabel, InputElementLabel } from 'pouncejs';
+import { Box, Button, Flex, Grid, InputElementLabel } from 'pouncejs';
 import ErrorBoundary from 'Components/ErrorBoundary';
 import { Field, Formik } from 'formik';
 import SubmitButton from 'Components/buttons/SubmitButton/SubmitButton';
@@ -58,7 +58,7 @@ const GlobalModuleForm: React.FC<GlobalModuleFormProps> = ({ initialValues, onSu
           enableReinitialize
           validationSchema={validationSchema}
         >
-          {({ handleSubmit, isSubmitting, isValid, dirty, errors, touched }) => {
+          {({ handleSubmit, isSubmitting, isValid, dirty }) => {
             return (
               <form onSubmit={handleSubmit}>
                 <Grid gridTemplateColumns="1fr 1fr" gridRowGap={2} gridColumnGap={9}>
@@ -88,9 +88,6 @@ const GlobalModuleForm: React.FC<GlobalModuleFormProps> = ({ initialValues, onSu
                     mode="python"
                     aria-required
                   />
-                  {errors.body && touched.body && (
-                    <InputElementErrorLabel mt={6}>{errors.body}</InputElementErrorLabel>
-                  )}
                 </Box>
                 <Flex borderTop="1px solid" borderColor="grey100" pt={6} mt={10} justify="flex-end">
                   <Flex>

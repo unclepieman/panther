@@ -1460,7 +1460,7 @@ Resources:
         $util.qr($input.put("userId", $ctx.identity.sub))
         {
           "version": "2018-05-29",
-          "method": "PUT",
+          "method": "POST",
           "resourcePath": "/v1/global/update",
           "params": {
             "headers": {

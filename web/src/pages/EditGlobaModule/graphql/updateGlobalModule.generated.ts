@@ -26,14 +26,14 @@ import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
 
 export type UpdateGlobalModuleVariables = {
-  input: Types.CreateOrModifyGlobalModuleInput;
+  input: Types.ModifyGlobalModuleInput;
 };
 
-export type UpdateGlobalModule = { updateGlobalModule?: Types.Maybe<GlobalModuleFull> };
+export type UpdateGlobalModule = { updateGlobalPythonlModule?: Types.Maybe<GlobalModuleFull> };
 
 export const UpdateGlobalModuleDocument = gql`
-  mutation UpdateGlobalModule($input: CreateOrModifyGlobalModuleInput!) {
-    updateGlobalModule(input: $input) {
+  mutation UpdateGlobalModule($input: ModifyGlobalModuleInput!) {
+    updateGlobalPythonlModule(input: $input) {
       ...GlobalModuleFull
     }
   }

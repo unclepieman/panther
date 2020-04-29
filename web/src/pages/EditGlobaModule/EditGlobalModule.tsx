@@ -64,7 +64,7 @@ const EditGlobalModulePage: React.FC = () => {
 
   const initialValues = React.useMemo(() => {
     if (queryData) {
-      const { id, body, description } = queryData.globalModule;
+      const { id, body, description } = queryData.getGlobalPythonModule;
       return { id, body, description };
     }
 

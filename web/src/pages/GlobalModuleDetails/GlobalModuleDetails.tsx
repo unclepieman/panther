@@ -58,7 +58,7 @@ const GlobalModuleDetailsPage = () => {
   return (
     <article>
       <ErrorBoundary>
-        <GlobalModuleDetailsInfo global={data.globalModule} />
+        <GlobalModuleDetailsInfo global={data.getGlobalPythonModule} />
       </ErrorBoundary>
     </article>
   );

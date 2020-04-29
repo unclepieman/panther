@@ -60,7 +60,7 @@ const GlobalModuleForm: React.FC<GlobalModuleFormProps> = ({ initialValues, onSu
   const { history } = useRouter();
 
   return (
-    <Box is="article">
+    <Box as="article">
       <ErrorBoundary>
         <Formik<GlobalModuleFormValues>
           initialValues={initialValues}

@@ -29,14 +29,14 @@ export type GlobalModuleDetailsVariables = {
 };
 
 export type GlobalModuleDetails = {
-  globalModule?: Types.Maybe<
+  getGlobalPythonModule?: Types.Maybe<
     Pick<Types.GlobalModuleDetails, 'createdAt' | 'description' | 'id' | 'lastModified' | 'body'>
   >;
 };
 
 export const GlobalModuleDetailsDocument = gql`
   query GlobalModuleDetails($input: GetGlobalModuleInput!) {
-    globalModule(input: $input) {
+    getGlobalPythonModule(input: $input) {
       createdAt
       description
       id

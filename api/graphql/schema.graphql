@@ -33,7 +33,7 @@ type Mutation {
   updateRule(input: CreateOrModifyRuleInput!): RuleDetails
   updateUser(input: UpdateUserInput!): User!
   uploadPolicies(input: UploadPoliciesInput!): UploadPoliciesResponse
-  updateGlobalModule(input: CreateOrModifyGlobalModuleInput!): GlobalModuleDetails
+  updateGlobalPythonlModule(input: ModifyGlobalModuleInput!): GlobalModuleDetails
 }
 
 type Query {
@@ -52,7 +52,7 @@ type Query {
   resource(input: GetResourceInput!): ResourceDetails
   resources(input: ListResourcesInput): ListResourcesResponse
   resourcesForPolicy(input: ResourcesForPolicyInput!): ListComplianceItemsResponse
-  globalModule(input: GetGlobalModuleInput!): GlobalModuleDetails
+  getGlobalPythonModule(input: GetGlobalModuleInput!): GlobalModuleDetails
   policy(input: GetPolicyInput!): PolicyDetails
   policies(input: ListPoliciesInput): ListPoliciesResponse
   policiesForResource(input: PoliciesForResourceInput): ListComplianceItemsResponse
@@ -544,10 +544,10 @@ type PolicyDetails {
 }
 
 type GlobalModuleDetails {
-  body: String
+  body: String!
   createdAt: AWSDateTime
   createdBy: ID
-  description: String
+  description: String!
   id: ID!
   lastModified: AWSDateTime
   lastModifiedBy: ID
@@ -603,7 +603,7 @@ input GetGlobalModuleInput {
   versionId: ID
 }
 
-input CreateOrModifyGlobalModuleInput {
+input ModifyGlobalModuleInput {
   description: String!
   id: ID!
   body: String!

@@ -1,4 +1,7 @@
 fragment GlobalModuleFull on GlobalModuleDetails {
-  ...GlobalModuleTeaser
+  createdAt
+  description
+  id
+  lastModified
   body
 }

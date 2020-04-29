@@ -20,15 +20,19 @@
 
 import * as Types from '../../../__generated__/schema';
 
-import { GlobalModuleTeaser } from './GlobalModuleTeaser.generated';
 import gql from 'graphql-tag';
 
-export type GlobalModuleFull = Pick<Types.GlobalModuleDetails, 'body'> & GlobalModuleTeaser;
+export type GlobalModuleFull = Pick<
+  Types.GlobalModuleDetails,
+  'createdAt' | 'description' | 'id' | 'lastModified' | 'body'
+>;
 
 export const GlobalModuleFull = gql`
   fragment GlobalModuleFull on GlobalModuleDetails {
-    ...GlobalModuleTeaser
+    createdAt
+    description
+    id
+    lastModified
     body
   }
-  ${GlobalModuleTeaser}
 `;

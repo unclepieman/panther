@@ -145,12 +145,6 @@ export enum ComplianceStatusEnum {
   Pass = 'PASS',
 }
 
-export type CreateOrModifyGlobalModuleInput = {
-  description: Scalars['String'];
-  id: Scalars['ID'];
-  body: Scalars['String'];
-};
-
 export type CreateOrModifyPolicyInput = {
   actionDelaySeconds?: Maybe<Scalars['Int']>;
   alertSuppressSeconds?: Maybe<Scalars['Int']>;
@@ -321,10 +315,10 @@ export type GithubConfigInput = {
 
 export type GlobalModuleDetails = {
   __typename?: 'GlobalModuleDetails';
-  body?: Maybe<Scalars['String']>;
+  body: Scalars['String'];
   createdAt?: Maybe<Scalars['AWSDateTime']>;
   createdBy?: Maybe<Scalars['ID']>;
-  description?: Maybe<Scalars['String']>;
+  description: Scalars['String'];
   id: Scalars['ID'];
   lastModified?: Maybe<Scalars['AWSDateTime']>;
   lastModifiedBy?: Maybe<Scalars['ID']>;
@@ -502,6 +496,12 @@ export type LogIntegrationHealth = {
   kmsKeyStatus: IntegrationItemHealthStatus;
 };
 
+export type ModifyGlobalModuleInput = {
+  description: Scalars['String'];
+  id: Scalars['ID'];
+  body: Scalars['String'];
+};
+
 export type MsTeamsConfig = {
   __typename?: 'MsTeamsConfig';
   webhookURL: Scalars['String'];
@@ -537,7 +537,7 @@ export type Mutation = {
   updateRule?: Maybe<RuleDetails>;
   updateUser: User;
   uploadPolicies?: Maybe<UploadPoliciesResponse>;
-  updateGlobalModule?: Maybe<GlobalModuleDetails>;
+  updateGlobalPythonlModule?: Maybe<GlobalModuleDetails>;
 };
 
 export type MutationAddDestinationArgs = {
@@ -636,8 +636,8 @@ export type MutationUploadPoliciesArgs = {
   input: UploadPoliciesInput;
 };
 
-export type MutationUpdateGlobalModuleArgs = {
-  input: CreateOrModifyGlobalModuleInput;
+export type MutationUpdateGlobalPythonlModuleArgs = {
+  input: ModifyGlobalModuleInput;
 };
 
 export type OpsgenieConfig = {
@@ -773,7 +773,7 @@ export type Query = {
   resource?: Maybe<ResourceDetails>;
   resources?: Maybe<ListResourcesResponse>;
   resourcesForPolicy?: Maybe<ListComplianceItemsResponse>;
-  globalModule?: Maybe<GlobalModuleDetails>;
+  getGlobalPythonModule?: Maybe<GlobalModuleDetails>;
   policy?: Maybe<PolicyDetails>;
   policies?: Maybe<ListPoliciesResponse>;
   policiesForResource?: Maybe<ListComplianceItemsResponse>;
@@ -825,7 +825,7 @@ export type QueryResourcesForPolicyArgs = {
   input: ResourcesForPolicyInput;
 };
 
-export type QueryGlobalModuleArgs = {
+export type QueryGetGlobalPythonModuleArgs = {
   input: GetGlobalModuleInput;
 };
 
@@ -1237,7 +1237,7 @@ export type ResolversTypes = {
   UpdateUserInput: UpdateUserInput;
   UploadPoliciesInput: UploadPoliciesInput;
   UploadPoliciesResponse: ResolverTypeWrapper<UploadPoliciesResponse>;
-  CreateOrModifyGlobalModuleInput: CreateOrModifyGlobalModuleInput;
+  ModifyGlobalModuleInput: ModifyGlobalModuleInput;
   AccountTypeEnum: AccountTypeEnum;
 };
 
@@ -1350,7 +1350,7 @@ export type ResolversParentTypes = {
   UpdateUserInput: UpdateUserInput;
   UploadPoliciesInput: UploadPoliciesInput;
   UploadPoliciesResponse: UploadPoliciesResponse;
-  CreateOrModifyGlobalModuleInput: CreateOrModifyGlobalModuleInput;
+  ModifyGlobalModuleInput: ModifyGlobalModuleInput;
   AccountTypeEnum: AccountTypeEnum;
 };
 
@@ -1542,10 +1542,10 @@ export type GlobalModuleDetailsResolvers<
   ContextType = any,
   ParentType extends ResolversParentTypes['GlobalModuleDetails'] = ResolversParentTypes['GlobalModuleDetails']
 > = {
-  body?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  body?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   createdAt?: Resolver<Maybe<ResolversTypes['AWSDateTime']>, ParentType, ContextType>;
   createdBy?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
-  description?: Resolver<Maybe<ResolversTypes['String']>, ParentType, ContextType>;
+  description?: Resolver<ResolversTypes['String'], ParentType, ContextType>;
   id?: Resolver<ResolversTypes['ID'], ParentType, ContextType>;
   lastModified?: Resolver<Maybe<ResolversTypes['AWSDateTime']>, ParentType, ContextType>;
   lastModifiedBy?: Resolver<Maybe<ResolversTypes['ID']>, ParentType, ContextType>;
@@ -1827,11 +1827,11 @@ export type MutationResolvers<
     ContextType,
     RequireFields<MutationUploadPoliciesArgs, 'input'>
   >;
-  updateGlobalModule?: Resolver<
+  updateGlobalPythonlModule?: Resolver<
     Maybe<ResolversTypes['GlobalModuleDetails']>,
     ParentType,
     ContextType,
-    RequireFields<MutationUpdateGlobalModuleArgs, 'input'>
+    RequireFields<MutationUpdateGlobalPythonlModuleArgs, 'input'>
   >;
 };
 
@@ -2042,11 +2042,11 @@ export type QueryResolvers<
     ContextType,
     RequireFields<QueryResourcesForPolicyArgs, 'input'>
   >;
-  globalModule?: Resolver<
+  getGlobalPythonModule?: Resolver<
     Maybe<ResolversTypes['GlobalModuleDetails']>,
     ParentType,
     ContextType,
-    RequireFields<QueryGlobalModuleArgs, 'input'>
+    RequireFields<QueryGetGlobalPythonModuleArgs, 'input'>
   >;
   policy?: Resolver<
     Maybe<ResolversTypes['PolicyDetails']>,

@@ -1423,7 +1423,7 @@ Resources:
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
-      FieldName: globalModule
+      FieldName: getGlobalPythonModule
       DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
       RequestMappingTemplate: |
         {
@@ -1453,14 +1453,14 @@ Resources:
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
-      FieldName: updateGlobalModule
+      FieldName: updateGlobalPythonlModule
       DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
       RequestMappingTemplate: |
         #set ($input = $util.defaultIfNull($ctx.args.input, {}))
         $util.qr($input.put("userId", $ctx.identity.sub))
         {
           "version": "2018-05-29",
-          "method": "POST",
+          "method": "PUT",
           "resourcePath": "/v1/global/update",
           "params": {
             "headers": {

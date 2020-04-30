@@ -28,7 +28,7 @@ import (
 // UpdateSettings updates account settings.
 func (API) UpdateSettings(input *models.UpdateSettingsInput) (*models.GeneralSettings, error) {
 	if genericapi.ContainsHTML(aws.StringValue(input.DisplayName)) {
-		return nil, &genericapi.InvalidInputError{Message: "Display name cannot contain " + genericapi.HTMLCharacterSet}
+		return nil, &genericapi.InvalidInputError{Message: "Company name cannot contain " + genericapi.HTMLCharacterSet}
 	}
 
 	return orgTable.Update(input)

@@ -25,7 +25,7 @@ import (
 )
 
 // This is the same set of characters replaced by html.EscapeString
-const HTMLCharacterSet = `<>&"'`
+const HTMLCharacterSet = `'<>&"`
 
 // ContainsHTML is true if the string contains one of the following: < > & " '
 //

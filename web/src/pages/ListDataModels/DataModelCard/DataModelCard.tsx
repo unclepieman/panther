@@ -44,12 +44,16 @@ const DataModelCard: React.FC<DataModelCardProps> = ({ dataModel }) => {
               {dataModel.displayName || dataModel.id}
             </Link>
           </GenericItemCard.Heading>
-          <GenericItemCard.Date date={formatDatetime(dataModel.lastModified)} />
+          <GenericItemCard.HeadingValue label="ID" value={dataModel.id} labelFirst withDivider />
+          <GenericItemCard.HeadingValue
+            value={formatDatetime(dataModel.lastModified)}
+            label="Updated"
+            labelFirst
+          />
           <DataModelCardOptions dataModel={dataModel} />
         </GenericItemCard.Header>
 
         <GenericItemCard.ValuesGroup>
-          <GenericItemCard.Value label="ID" value={dataModel.id} />
           <GenericItemCard.Value
             label="Log Type"
             value={<BulletedValue value={dataModel.logTypes[0]} />}

@@ -20,6 +20,7 @@ package outputs
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io/ioutil"
 	"net/http"
@@ -35,7 +36,7 @@ type mockHTTPClient struct {
 	requestBody  string // Request body is saved here for tests to verify
 }
 
-var requestEndpoint = "https://runpanther.io"
+const requestEndpoint = "https://runpanther.io"
 
 func (m *mockHTTPClient) Do(request *http.Request) (*http.Response, error) {
 	if m.requestError {
@@ -58,7 +59,8 @@ func TestPostInvalidJSON(t *testing.T) {
 		body: body,
 	}
 	c := &HTTPWrapper{httpClient: &mockHTTPClient{}}
-	assert.NotNil(t, c.post(postInput))
+	ctx := context.Background()
+	assert.NotNil(t, c.post(ctx, postInput))
 }
 
 func TestPostErrorSubmittingRequest(t *testing.T) {
@@ -67,7 +69,8 @@ func TestPostErrorSubmittingRequest(t *testing.T) {
 		url:  requestEndpoint,
 		body: map[string]interface{}{"abc": 123},
 	}
-	assert.NotNil(t, c.post(postInput))
+	ctx := context.Background()
+	assert.NotNil(t, c.post(ctx, postInput))
 }
 
 func TestPostNotOk(t *testing.T) {
@@ -76,7 +79,8 @@ func TestPostNotOk(t *testing.T) {
 		url:  requestEndpoint,
 		body: map[string]interface{}{"abc": 123},
 	}
-	assert.NotNil(t, c.post(postInput))
+	ctx := context.Background()
+	assert.NotNil(t, c.post(ctx, postInput))
 }
 
 func TestPostOk(t *testing.T) {
@@ -85,7 +89,13 @@ func TestPostOk(t *testing.T) {
 		url:  requestEndpoint,
 		body: map[string]interface{}{"abc": 123},
 	}
-	assert.Nil(t, c.post(postInput))
+	ctx := context.Background()
+	assert.Equal(t, &AlertDeliveryResponse{
+		StatusCode: 200,
+		Success:    true,
+		Message:    "response",
+		Permanent:  false,
+	}, c.post(ctx, postInput))
 }
 
 func TestPostCreated(t *testing.T) {
@@ -94,5 +104,11 @@ func TestPostCreated(t *testing.T) {
 		url:  requestEndpoint,
 		body: map[string]interface{}{"abc": 123},
 	}
-	assert.Nil(t, c.post(postInput))
+	ctx := context.Background()
+	assert.Equal(t, &AlertDeliveryResponse{
+		StatusCode: 201,
+		Success:    true,
+		Message:    "response",
+		Permanent:  false,
+	}, c.post(ctx, postInput))
 }

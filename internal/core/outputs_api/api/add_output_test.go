@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
 	"github.com/panther-labs/panther/api/lambda/outputs/models"
 	"github.com/panther-labs/panther/internal/core/outputs_api/table"
 )
@@ -43,7 +44,7 @@ func TestAddOutputSameNameAlreadyExists(t *testing.T) {
 	input := &models.AddOutputInput{
 		DisplayName:  aws.String("my-channel"),
 		UserID:       aws.String("userId"),
-		OutputConfig: &models.OutputConfig{Slack: &models.SlackConfig{WebhookURL: aws.String("hooks.slack.com")}},
+		OutputConfig: &models.OutputConfig{Slack: &models.SlackConfig{WebhookURL: "hooks.slack.com"}},
 	}
 
 	result, err := (API{}).AddOutput(input)
@@ -66,7 +67,7 @@ func TestAddOutputPutOutputError(t *testing.T) {
 	input := &models.AddOutputInput{
 		UserID:       aws.String("userId"),
 		DisplayName:  aws.String("my-channel"),
-		OutputConfig: &models.OutputConfig{Slack: &models.SlackConfig{WebhookURL: aws.String("hooks.slack.com")}},
+		OutputConfig: &models.OutputConfig{Slack: &models.SlackConfig{WebhookURL: "hooks.slack.com"}},
 	}
 
 	result, err := (API{}).AddOutput(input)
@@ -90,8 +91,9 @@ func TestAddOutputSlack(t *testing.T) {
 	input := &models.AddOutputInput{
 		UserID:             aws.String("userId"),
 		DisplayName:        aws.String("my-channel"),
-		OutputConfig:       &models.OutputConfig{Slack: &models.SlackConfig{WebhookURL: aws.String("hooks.slack.com")}},
+		OutputConfig:       &models.OutputConfig{Slack: &models.SlackConfig{WebhookURL: "hooks.slack.com"}},
 		DefaultForSeverity: aws.StringSlice([]string{"CRITICAL", "HIGH"}),
+		AlertTypes:         []string{deliverymodel.RuleType, deliverymodel.RuleErrorType, deliverymodel.PolicyType},
 	}
 
 	result, err := (API{}).AddOutput(input)
@@ -102,11 +104,12 @@ func TestAddOutputSlack(t *testing.T) {
 		OutputType:         aws.String("slack"),
 		LastModifiedBy:     aws.String("userId"),
 		CreatedBy:          aws.String("userId"),
-		OutputConfig:       &models.OutputConfig{Slack: &models.SlackConfig{WebhookURL: aws.String("hooks.slack.com")}},
+		OutputConfig:       &models.OutputConfig{Slack: &models.SlackConfig{WebhookURL: ""}},
 		OutputID:           result.OutputID,
 		CreationTime:       result.CreationTime,
 		LastModifiedTime:   result.LastModifiedTime,
 		DefaultForSeverity: aws.StringSlice([]string{"CRITICAL", "HIGH"}),
+		AlertTypes:         []string{deliverymodel.RuleType, deliverymodel.RuleErrorType, deliverymodel.PolicyType},
 	}
 	assert.Equal(t, expected, result)
 
@@ -130,7 +133,8 @@ func TestAddOutputSns(t *testing.T) {
 	input := &models.AddOutputInput{
 		UserID:       aws.String("userId"),
 		DisplayName:  aws.String("my-topic"),
-		OutputConfig: &models.OutputConfig{Sns: &models.SnsConfig{TopicArn: aws.String("arn:aws:sns:us-west-2:123456789012:MyTopic")}},
+		AlertTypes:   []string{deliverymodel.RuleType},
+		OutputConfig: &models.OutputConfig{Sns: &models.SnsConfig{TopicArn: "arn:aws:sns:us-west-2:123456789012:MyTopic"}},
 	}
 
 	result, err := (API{}).AddOutput(input)
@@ -141,7 +145,8 @@ func TestAddOutputSns(t *testing.T) {
 		OutputType:       aws.String("sns"),
 		LastModifiedBy:   aws.String("userId"),
 		CreatedBy:        aws.String("userId"),
-		OutputConfig:     &models.OutputConfig{Sns: &models.SnsConfig{TopicArn: aws.String("arn:aws:sns:us-west-2:123456789012:MyTopic")}},
+		AlertTypes:       []string{deliverymodel.RuleType},
+		OutputConfig:     &models.OutputConfig{Sns: &models.SnsConfig{TopicArn: "arn:aws:sns:us-west-2:123456789012:MyTopic"}},
 		OutputID:         result.OutputID,
 		CreationTime:     result.CreationTime,
 		LastModifiedTime: result.LastModifiedTime,
@@ -165,7 +170,8 @@ func TestAddOutputPagerDuty(t *testing.T) {
 	input := &models.AddOutputInput{
 		UserID:       aws.String("userId"),
 		DisplayName:  aws.String("my-pagerduty-integration"),
-		OutputConfig: &models.OutputConfig{PagerDuty: &models.PagerDutyConfig{IntegrationKey: aws.String("93ee508cbfea4604afe1c77c2d9b5bbd")}},
+		AlertTypes:   []string{deliverymodel.RuleErrorType},
+		OutputConfig: &models.OutputConfig{PagerDuty: &models.PagerDutyConfig{IntegrationKey: "93ee508cbfea4604afe1c77c2d9b5bbd"}},
 	}
 
 	result, err := (API{}).AddOutput(input)
@@ -176,9 +182,10 @@ func TestAddOutputPagerDuty(t *testing.T) {
 		OutputType:     aws.String("pagerduty"),
 		LastModifiedBy: aws.String("userId"),
 		CreatedBy:      aws.String("userId"),
+		AlertTypes:     []string{deliverymodel.RuleErrorType},
 		OutputConfig: &models.OutputConfig{
 			PagerDuty: &models.PagerDutyConfig{
-				IntegrationKey: aws.String("93ee508cbfea4604afe1c77c2d9b5bbd"),
+				IntegrationKey: "",
 			},
 		},
 		OutputID:         result.OutputID,
@@ -204,9 +211,10 @@ func TestAddOutputSqs(t *testing.T) {
 	input := &models.AddOutputInput{
 		UserID:      aws.String("userId"),
 		DisplayName: aws.String("my-queue"),
+		AlertTypes:  []string{deliverymodel.PolicyType},
 		OutputConfig: &models.OutputConfig{
 			Sqs: &models.SqsConfig{
-				QueueURL: aws.String("https://sqs.us-west-2.amazonaws.com/123456789012/test-output"),
+				QueueURL: "https://sqs.us-west-2.amazonaws.com/123456789012/test-output",
 			},
 		},
 	}
@@ -219,9 +227,10 @@ func TestAddOutputSqs(t *testing.T) {
 		OutputType:     aws.String("sqs"),
 		LastModifiedBy: aws.String("userId"),
 		CreatedBy:      aws.String("userId"),
+		AlertTypes:     []string{deliverymodel.PolicyType},
 		OutputConfig: &models.OutputConfig{
 			Sqs: &models.SqsConfig{
-				QueueURL: aws.String("https://sqs.us-west-2.amazonaws.com/123456789012/test-output"),
+				QueueURL: "https://sqs.us-west-2.amazonaws.com/123456789012/test-output",
 			},
 		},
 		OutputID:         result.OutputID,
@@ -247,10 +256,11 @@ func TestAddOutputAsana(t *testing.T) {
 	input := &models.AddOutputInput{
 		UserID:      aws.String("userId"),
 		DisplayName: aws.String("my-asana-destination"),
+		AlertTypes:  []string{deliverymodel.PolicyType},
 		OutputConfig: &models.OutputConfig{
 			Asana: &models.AsanaConfig{
-				PersonalAccessToken: aws.String("0/8c26ac5222d539ca0ad7000000000000"),
-				ProjectGids:         aws.StringSlice([]string{""}),
+				PersonalAccessToken: "0/8c26ac5222d539ca0ad7000000000000",
+				ProjectGids:         []string{""},
 			},
 		},
 	}
@@ -263,10 +273,11 @@ func TestAddOutputAsana(t *testing.T) {
 		OutputType:     aws.String("asana"),
 		LastModifiedBy: aws.String("userId"),
 		CreatedBy:      aws.String("userId"),
+		AlertTypes:     []string{deliverymodel.PolicyType},
 		OutputConfig: &models.OutputConfig{
 			Asana: &models.AsanaConfig{
-				PersonalAccessToken: aws.String("0/8c26ac5222d539ca0ad7000000000000"),
-				ProjectGids:         aws.StringSlice([]string{""}),
+				PersonalAccessToken: "",
+				ProjectGids:         []string{""},
 			},
 		},
 		OutputID:         result.OutputID,

@@ -21,19 +21,19 @@ from io import TextIOWrapper
 from timeit import default_timer
 from typing import Any, Dict, List, Optional, Tuple
 
-import boto3
-
-from .engine import Engine
 from .analysis_api import AnalysisAPIClient
+from .aws_clients import S3_CLIENT
+from .engine import Engine
 from .logging import get_logger
 from .output import MatchedEventsBuffer
-from .rule import Rule
+from .outputs_api import OutputsAPIClient
 
-_S3_CLIENT = boto3.client('s3')
 _LOGGER = get_logger()
-_RULES_ENGINE = Engine(AnalysisAPIClient())
+
+_RULES_ENGINE = Engine(AnalysisAPIClient(), OutputsAPIClient())
 
 
+#  pylint: disable=unsubscriptable-object
 def lambda_handler(event: Dict[str, Any], unused_context: Any) -> Optional[Dict[str, Any]]:
     """Entry point for the Lambda"""
     if 'rules' in event:
@@ -50,44 +50,13 @@ def direct_analysis(request: Dict[str, Any]) -> Dict[str, Any]:
     # Since this is used for testing single rules, it should only ever have one rule
     if len(request['rules']) != 1:
         raise RuntimeError('exactly one rule expected, found {}'.format(len(request['rules'])))
-
     raw_rule = request['rules'][0]
-    # The rule during direct invocation doesn't have a version
-    raw_rule['versionId'] = 'default'
-    rule_exception: Optional[Exception] = None
-    try:
-        test_rule = Rule(raw_rule)
-    except Exception as err:  # pylint: disable=broad-except
-        rule_exception = err
-
-    response: Dict[str, Any] = {'events': []}
+    results = []
     for event in request['events']:
-        result = {
-            'id': event['id'],
-            'matched': [],
-            'notMatched': [],
-            'errored': [],
-        }
-        if rule_exception:
-            result['errored'] = [{
-                'id': raw_rule['id'],
-                'message': str(rule_exception),
-            }]
-            # If rule was invalid, no need to try to run it
+        rule_result = _RULES_ENGINE.analyze_single_rule(raw_rule, event)
+        results.append(rule_result)
 
-        else:
-            rule_result = test_rule.run(event['data'])
-            if rule_result.exception:
-                result['errored'] = [{
-                    'id': raw_rule['id'],
-                    'message': str(rule_result.exception),
-                }]
-            elif rule_result.matched:
-                result['matched'] = [raw_rule['id']]
-            else:
-                result['notMatched'] = [raw_rule['id']]
-
-        response['events'].append(result)
+    response: Dict[str, Any] = {'results': results}
     return response
 
 
@@ -109,7 +78,9 @@ def log_analysis(event: Dict[str, Any]) -> None:
                     continue
 
                 for analysis_result in _RULES_ENGINE.analyze(log_type, json_data):
-                    matches += 1
+                    # The analysis results can be either a. Rule matches b. Rule errors
+                    if not analysis_result.error_message:
+                        matches += 1
                     output_buffer.add_event(analysis_result)
     output_buffer.flush()
     end = default_timer()
@@ -141,6 +112,6 @@ def _load_s3_notifications(records: List[Dict[str, Any]]) -> List[Tuple[str, str
 
 # Returns a TextIOWrapper for the S3 data. This makes sure that we don't have to keep all contents of S3 object in memory
 def _load_contents(bucket: str, key: str) -> TextIOWrapper:
-    response = _S3_CLIENT.get_object(Bucket=bucket, Key=key)
+    response = S3_CLIENT.get_object(Bucket=bucket, Key=key)
     gzipped = GzipFile(None, 'rb', fileobj=response['Body'])
     return TextIOWrapper(gzipped)  # type: ignore

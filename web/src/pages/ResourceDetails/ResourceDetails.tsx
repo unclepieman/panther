@@ -19,23 +19,25 @@
 import React from 'react';
 import useRouter from 'Hooks/useRouter';
 import { ComplianceStatusEnum, PoliciesForResourceInput } from 'Generated/schema';
+import EmptyBoxImg from 'Assets/illustrations/empty-box.svg';
+import NoResultsFound from 'Components/NoResultsFound';
 import Panel from 'Components/Panel';
-import JsonViewer from 'Components/JsonViewer';
 import useRequestParamsWithPagination from 'Hooks/useRequestParamsWithPagination';
 import {
-  convertObjArrayValuesToCsv,
   extendResourceWithIntegrationLabel,
   getComplianceItemsTotalCount,
   extractErrorMessage,
 } from 'Helpers/utils';
-import { Alert, Box } from 'pouncejs';
+import { Alert, Box, Flex, Heading } from 'pouncejs';
 import {
   TableControlsPagination,
   TableControlsComplianceFilter,
 } from 'Components/utils/TableControls';
-import pick from 'lodash-es/pick';
+import pick from 'lodash/pick';
 import ErrorBoundary from 'Components/ErrorBoundary';
+import withSEO from 'Hoc/withSEO';
 import { DEFAULT_SMALL_PAGE_SIZE } from 'Source/constants';
+import ResourceDetailsAttributes from 'Pages/ResourceDetails/ResourceDetailsAttributes';
 import ResourceDetailsTable from './ResourceDetailsTable';
 import ResourceDetailsInfo from './ResourceDetailsInfo';
 import ResourceDetailsPageSkeleton from './Skeleton';
@@ -59,11 +61,11 @@ const ResourceDetailsPage = () => {
       resourceDetailsInput: {
         resourceId: match.params.id,
       },
-      policiesForResourceInput: convertObjArrayValuesToCsv({
+      policiesForResourceInput: {
         ...pick(requestParams, acceptedRequestParams),
         resourceId: match.params.id,
         pageSize: DEFAULT_SMALL_PAGE_SIZE,
-      }),
+      },
     },
   });
 
@@ -73,15 +75,16 @@ const ResourceDetailsPage = () => {
 
   if (error) {
     return (
-      <Alert
-        variant="error"
-        title="Couldn't load resource"
-        description={
-          extractErrorMessage(error) ||
-          "An unknown error occured and we couldn't load the resource details from the server"
-        }
-        mb={6}
-      />
+      <Box mb={6}>
+        <Alert
+          variant="error"
+          title="Couldn't load resource"
+          description={
+            extractErrorMessage(error) ||
+            "An unknown error occured and we couldn't load the resource details from the server"
+          }
+        />
+      </Box>
     );
   }
 
@@ -95,96 +98,107 @@ const ResourceDetailsPage = () => {
     data.listComplianceIntegrations
   );
 
+  const policyResultsExist = policies.length > 0;
+  const arePoliciesFiltered = !!requestParams.status || !!requestParams.suppressed;
+  const resourceHasPolicies = getComplianceItemsTotalCount(totalCounts) > 0;
   return (
     <article>
       <ErrorBoundary>
-        <Box mb={2}>
+        <Box mb={5}>
           <ResourceDetailsInfo resource={enhancedResource} />
         </Box>
       </ErrorBoundary>
-      <Box mb={2}>
-        <Panel size="large" title="Attributes">
-          <JsonViewer data={JSON.parse(enhancedResource.attributes)} />
-        </Panel>
+      <Box mb={5}>
+        <ResourceDetailsAttributes resource={enhancedResource} />
       </Box>
       <Box mb={6}>
         <Panel
-          size="large"
           title="Policies"
           actions={
-            <Box ml={6} mr="auto">
-              <TableControlsComplianceFilter
-                mr={1}
-                count={getComplianceItemsTotalCount(totalCounts)}
-                text="All"
-                isActive={!requestParams.status && !requestParams.suppressed}
-                onClick={() =>
-                  setRequestParamsAndResetPaging({ status: undefined, suppressed: undefined })
-                }
-              />
-              <TableControlsComplianceFilter
-                mr={1}
-                count={totalCounts.active.fail}
-                countColor="red300"
-                text="Failing"
-                isActive={requestParams.status === ComplianceStatusEnum.Fail}
-                onClick={() =>
-                  setRequestParamsAndResetPaging({
-                    status: ComplianceStatusEnum.Fail,
-                    suppressed: undefined,
-                  })
-                }
-              />
-              <TableControlsComplianceFilter
-                mr={1}
-                countColor="green300"
-                count={totalCounts.active.pass}
-                text="Passing"
-                isActive={requestParams.status === ComplianceStatusEnum.Pass}
-                onClick={() =>
-                  setRequestParamsAndResetPaging({
-                    status: ComplianceStatusEnum.Pass,
-                    suppressed: undefined,
-                  })
-                }
-              />
-              <TableControlsComplianceFilter
-                mr={1}
-                countColor="orange300"
-                count={
-                  totalCounts.suppressed.fail +
-                  totalCounts.suppressed.pass +
-                  totalCounts.suppressed.error
-                }
-                text="Ignored"
-                isActive={!requestParams.status && requestParams.suppressed}
-                onClick={() =>
-                  setRequestParamsAndResetPaging({
-                    status: undefined,
-                    suppressed: true,
-                  })
-                }
-              />
-            </Box>
+            resourceHasPolicies && (
+              <Flex spacing={1}>
+                <TableControlsComplianceFilter
+                  mr={1}
+                  count={getComplianceItemsTotalCount(totalCounts)}
+                  text="All"
+                  isActive={!arePoliciesFiltered}
+                  onClick={() => setRequestParamsAndResetPaging({})}
+                />
+                <TableControlsComplianceFilter
+                  mr={1}
+                  count={totalCounts.active.fail}
+                  countColor="red-300"
+                  text="Failing"
+                  isActive={requestParams.status === ComplianceStatusEnum.Fail}
+                  onClick={() =>
+                    setRequestParamsAndResetPaging({
+                      status: ComplianceStatusEnum.Fail,
+                      suppressed: false,
+                    })
+                  }
+                />
+                <TableControlsComplianceFilter
+                  mr={1}
+                  countColor="green-400"
+                  count={totalCounts.active.pass}
+                  text="Passing"
+                  isActive={requestParams.status === ComplianceStatusEnum.Pass}
+                  onClick={() =>
+                    setRequestParamsAndResetPaging({
+                      status: ComplianceStatusEnum.Pass,
+                      suppressed: false,
+                    })
+                  }
+                />
+                <TableControlsComplianceFilter
+                  mr={1}
+                  countColor="yellow-500"
+                  count={
+                    totalCounts.suppressed.fail +
+                    totalCounts.suppressed.pass +
+                    totalCounts.suppressed.error
+                  }
+                  text="Ignored"
+                  isActive={!requestParams.status && requestParams.suppressed}
+                  onClick={() =>
+                    setRequestParamsAndResetPaging({
+                      suppressed: true,
+                    })
+                  }
+                />
+              </Flex>
+            )
           }
         >
           <ErrorBoundary>
-            <ResourceDetailsTable
-              policies={policies}
-              enumerationStartIndex={(pagingData.thisPage - 1) * DEFAULT_SMALL_PAGE_SIZE}
-            />
+            {!policyResultsExist && !arePoliciesFiltered && (
+              <Flex justify="center" align="center" direction="column" my={8} spacing={8}>
+                <img alt="Empty Box Illustration" src={EmptyBoxImg} width="auto" height={200} />
+                <Heading size="small" color="navyblue-100">
+                  This resource doesn{"'"}t have any policies applied to it
+                </Heading>
+              </Flex>
+            )}
+            {!policyResultsExist && arePoliciesFiltered && (
+              <Box my={6}>
+                <NoResultsFound />
+              </Box>
+            )}
+            {policyResultsExist && (
+              <Flex direction="column" spacing={6}>
+                <ResourceDetailsTable policies={policies} />
+                <TableControlsPagination
+                  page={pagingData.thisPage}
+                  totalPages={pagingData.totalPages}
+                  onPageChange={updatePagingParams}
+                />
+              </Flex>
+            )}
           </ErrorBoundary>
-          <Box my={6}>
-            <TableControlsPagination
-              page={pagingData.thisPage}
-              totalPages={pagingData.totalPages}
-              onPageChange={updatePagingParams}
-            />
-          </Box>
         </Panel>
       </Box>
     </article>
   );
 };
 
-export default ResourceDetailsPage;
+export default withSEO({ title: ({ match }) => match.params.id })(ResourceDetailsPage);

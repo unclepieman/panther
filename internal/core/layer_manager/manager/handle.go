@@ -29,14 +29,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/lambda"
 	"go.uber.org/zap"
 
-	analysisoperations "github.com/panther-labs/panther/api/gateway/analysis/client/operations"
-	"github.com/panther-labs/panther/api/gateway/analysis/models"
+	"github.com/panther-labs/panther/api/lambda/analysis/models"
 )
 
 const (
-	layerPath        = "python/lib/python3.7/site-packages/"
-	layerRuntime     = "python3.7"
-	globalModuleName = "panther"
+	layerPath    = "python/lib/python3.7/site-packages/"
+	layerRuntime = "python3.7"
 )
 
 var (
@@ -49,7 +47,7 @@ var (
 // UpdateLayer rebuilds and publishes the layer for the given analysis type.
 // Currently global is the only supported analysis type.
 func UpdateLayer(analysisType string) error {
-	if analysisType != string(models.AnalysisTypeGLOBAL) {
+	if analysisType != string(models.TypeGlobal) {
 		zap.L().Warn("unsupported analysis type", zap.String("type", analysisType))
 		// When we add support for policies/rules, we can use this variable to control which layers are re-created
 		// and from which sources. We can either have entirely separate paths for these, or have some sort of config
@@ -91,20 +89,62 @@ func buildLayer() ([]byte, error) {
 	// TODO: talk to the analysis-api GetEnabledPolicies endpoint and build the layer for policies/rules
 	// be sure to have a means of differentiating the resource/log type of each policy/rule
 
-	// When multiple globals are supported, this can be updated to get a list
-	global, err := analysisClient.Operations.GetGlobal(&analysisoperations.GetGlobalParams{
-		GlobalID:   globalModuleName,
-		HTTPClient: httpClient,
-	})
+	globals, err := listAllGlobals()
 	if err != nil {
-		if _, ok := err.(*analysisoperations.GetGlobalNotFound); ok {
-			// In this case, the global was removed entirely and so we should delete the layer. When multiple globals
-			// are supported, this will be analogous to the last global being deleted.
-			return nil, nil
-		}
 		return nil, err
 	}
-	return packageLayer(map[string]string{globalModuleName: string(global.Payload.Body)})
+
+	// If there are no globals, delete the layer
+	if len(globals) == 0 {
+		return nil, nil
+	}
+
+	zap.L().Debug("getting each global")
+	nameBodyMap := make(map[string]string)
+	// Iterate through each global and retrieve its body
+	for _, globalName := range globals {
+		zap.L().Debug("getting global", zap.String("id", globalName))
+		input := models.LambdaInput{
+			GetGlobal: &models.GetGlobalInput{ID: globalName},
+		}
+		var global models.Global
+
+		if _, err := analysisClient.Invoke(&input, &global); err != nil {
+			return nil, err
+		}
+
+		nameBodyMap[globalName] = global.Body
+	}
+
+	return packageLayer(nameBodyMap)
+}
+
+func listAllGlobals() ([]string, error) {
+	var names []string
+	page := 1
+
+	zap.L().Debug("listing all globals")
+	for {
+		input := models.LambdaInput{
+			ListGlobals: &models.ListGlobalsInput{Page: page},
+		}
+		var globals models.ListGlobalsOutput
+		if _, err := analysisClient.Invoke(&input, &globals); err != nil {
+			return nil, err
+		}
+
+		for _, global := range globals.Globals {
+			names = append(names, global.ID)
+		}
+		if globals.Paging.ThisPage < globals.Paging.TotalPages {
+			page++
+		} else {
+			break
+		}
+	}
+	zap.L().Debug("done listing all globals")
+
+	return names, nil
 }
 
 // packageLayer takes a mapping of filenames to function bodies and constructs a zip archive with the file structure

@@ -1,84 +1,236 @@
 version: 2.1
 
+aliases:
+  - &TEST_PARALLELISM 20
+
 # The images that jobs can have
 executors:
   panther-buildpack:
     docker:
-      - image: pantherlabs/panther-buildpack:1.1.2
+      - image: pantherlabs/panther-buildpack:1.15.0
+        # The images are public, but DockerHub requires authenticated pulls for
+        # higher rate limits. https://circleci.com/docs/2.0/private-images/
+        # TODO: Use ECS instead of DockerHub to host build images
+        auth:
+          username: $DOCKERHUB_USERNAME
+          password: $DOCKERHUB_PASSWORD
 
-# The pool of jobs that that our CI will be able to run
-jobs:
-  mage_test_ci:
-    executor: panther-buildpack
-    resource_class: xlarge
+# Command definitions which can be re-used across multiple jobs
+commands:
+  restore_bin_cache:
     steps:
-      - checkout
-      - restore_cache:
-          name: 'Restore cache: go modules'
-          keys:
-            - gomod2-{{ checksum "go.mod" }}
-      - run:
-          # Start compiling mage in the background while other caches are restoring
-          name: Compile mage (background)
-          command: mage
-          background: true
-      - restore_cache:
-          name: 'Restore cache: npm'
-          keys:
-            - npm-{{ checksum "package-lock.json" }}
-      - restore_cache:
-          name: 'Restore cache: python env'
-          keys:
-            - venv-{{ checksum "requirements.txt" }}
       - restore_cache:
           name: 'Restore cache: .setup binaries'
           keys:
-            - setup-{{ checksum "tools/mage/setup.go" }}
+            # These caches are persisted for 15 days. If you need to reset the cache,
+            # just change the "y" to any other value which hasn't been used recently.
+            - &bin_cache_key setup-y-{{ checksum "tools/mage/setup/setup.go" }}
 
-      - run:
-          # By this point, mage is compiled and all dependencies have been restored from the cache.
-          # "mage setup" will be a no-op unless new dependencies have been introduced.
-          name: Install new dependencies
-          command: mage setup
+  restore_go_cache:
+    steps:
+      - restore_cache:
+          name: 'Restore cache: go modules'
+          keys:
+            - &go_cache_key gomod-y-{{ checksum "go.mod" }}
 
+  restore_npm_cache:
+    steps:
+      - restore_cache:
+          name: 'Restore cache: npm'
+          keys:
+            - &npm_cache_key npm-y-{{ checksum "package-lock.json" }}
+
+  restore_pip_cache:
+    steps:
+      - restore_cache:
+          name: 'Restore cache: python env'
+          keys:
+            - &pip_cache_key venv-y-{{ checksum "requirements.txt" }}
+
+  save_caches:
+    steps:
+      - save_cache:
+          name: 'Save cache: .setup binaries'
+          key: *bin_cache_key
+          paths:
+            - .setup/golangci-lint
+            - .setup/terraform
       - save_cache:
           name: 'Save cache: go modules'
-          key: gomod2-{{ checksum "go.mod" }}
+          key: *go_cache_key
           paths:
+            - /go/bin/goimports
             - /go/pkg/mod
       - save_cache:
           name: 'Save cache: npm'
-          key: npm-{{ checksum "package-lock.json" }}
+          key: *npm_cache_key
           paths:
             - node_modules
       - save_cache:
           name: 'Save cache: python env'
-          key: venv-{{ checksum "requirements.txt" }}
+          key: *pip_cache_key
           paths:
             - .setup/venv
-      - save_cache:
-          name: 'Save cache: .setup binaries'
-          key: setup-{{ checksum "tools/mage/setup.go" }}
-          paths:
-            - .setup/golangci-lint
-            - .setup/swagger
-            - .setup/terraform
 
+  autofmt:
+    steps:
       - run:
-          name: Run test suite
-          command: mage test:ci
+          # Generate source files, fmt the repo, and commit any resulting changes.
+          # If a new commit is pushed, CircleCI will immediately restart the workflow.
+          #
+          # This will not run on the master branch, and to prevent a feedback loop it will also not
+          # run if the last commit that triggered this build was authored by the bot.
+          name: Autofmt
+          command: |
+            if [[ "$CIRCLE_BRANCH" == "master" ]]; then
+                echo "master branch: skipping autofmt"
+                exit 0
+            fi
+
+            if [[ "`git log -1 --pretty=format:'%an'`" == "panther-bot" ]]; then
+                echo "panther-bot made the last commit: skipping autofmt"
+                exit 0
+            fi
+
+            # Run 'mage gen fmt'
+            /tmp/panther/magebin gen fmt
+
+            # Check if any file diffs were produced
+            if [[ -z "$(git diff)" ]]; then
+              exit 0
+            fi;
+
+            # CircleCI docs state that when a PR is from a fork this env variable is set
+            # https://circleci.com/docs/2.0/env-vars/#built-in-environment-variables
+            if [[ -v CIRCLE_PR_USERNAME ]]; then
+                # We cannot commit and push the differences automatically, inform the user.
+                echo "Hey there ${CIRCLE_PR_USERNAME}"
+                echo "Thanks for your contribution to Panther."
+                echo "We tried to auto-generate and format your code and it resulted in file differences."
+                echo "Please run 'mage gen fmt' on your local repo, commit and push the changes, so it can be processed by our CI pipeline."
+                exit 1
+            fi
+
+            git config --global user.email "github-service-account@runpanther.io"
+            git config --global user.name "panther-bot"
+            git add -A .
+            git commit -m "mage gen fmt" || true
+            git push origin $CIRCLE_BRANCH
+
+jobs:
+  setup:
+    # Install dependencies, compile the mage binary, and autofmt.
+    # Subsequent jobs can load libraries from the cache and mage from workspace storage.
+    executor: panther-buildpack
+    resource_class: large
+    steps:
+      - checkout
+      - restore_bin_cache
+      - restore_go_cache
+      - restore_npm_cache
+      - restore_pip_cache
+      - run:
+          # This is the only time 'mage' is invoked directly in CI
+          name: Compile mage binary
+          command: mage -compile /tmp/panther/magebin
+      - run:
+          # "mage setup" will have no effect unless new dependencies have been introduced.
+          name: Install new dependencies
+          command: /tmp/panther/magebin -v setup
+      - save_caches
+      - autofmt
+      - persist_to_workspace:
+          root: /tmp/panther
+          paths:
+            - magebin
+
+  test_cfn:
+    executor: panther-buildpack
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/panther
+      - restore_bin_cache # Terraform
+      - restore_pip_cache # cfn-lint
+      - run:
+          name: mage test:cfn
+          command: /tmp/panther/magebin test:cfn
+
+  test_go:
+    executor: panther-buildpack
+    resource_class: xlarge
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/panther
+      - restore_bin_cache # golangci-lint
+      - restore_go_cache
+      - restore_pip_cache # cfn-flip
+      - run:
+          name: mage test:go
+          command: /tmp/panther/magebin -v test:go
+
+  test_python:
+    executor: panther-buildpack
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/panther
+      - restore_pip_cache
+      - run:
+          name: mage test:python
+          command: /tmp/panther/magebin test:python
+
+  test_web:
+    parallelism: *TEST_PARALLELISM
+    executor: panther-buildpack
+    resource_class: xlarge
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/panther
+      - restore_npm_cache
+      - run:
+          name: mage test:web
+          command: /tmp/panther/magebin -v test:web
 
   npm_audit:
     executor: panther-buildpack
+    resource_class: small
     steps:
       - checkout
       - run:
           name: Audit NPM packages
-          command: npm audit # does not require installing packages first
+          command: npm audit --production # does not require 'npm install'
+
+  bundlesize:
+    executor: panther-buildpack
+    resource_class: xlarge
+    steps:
+      - checkout
+      - restore_npm_cache
+      - run:
+          name: Check bundle size
+          command: npm run bundlesize
 
 workflows:
   version: 2
   pipeline:
     jobs:
-      - mage_test_ci
       - npm_audit
+      - setup
+      - test_cfn:
+          requires:
+            - setup
+      - test_go:
+          requires:
+            - setup
+      - test_python:
+          requires:
+            - setup
+      - test_web:
+          requires:
+            - setup
+      - bundlesize:
+          requires:
+            - setup

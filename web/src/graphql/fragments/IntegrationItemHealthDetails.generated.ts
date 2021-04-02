@@ -16,20 +16,20 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../__generated__/schema';
 
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 
 export type IntegrationItemHealthDetails = Pick<
   Types.IntegrationItemHealthStatus,
-  'healthy' | 'errorMessage'
+  'healthy' | 'message' | 'rawErrorMessage'
 >;
 
 export const IntegrationItemHealthDetails = gql`
   fragment IntegrationItemHealthDetails on IntegrationItemHealthStatus {
     healthy
-    errorMessage
+    message
+    rawErrorMessage
   }
 `;

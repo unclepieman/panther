@@ -21,53 +21,35 @@ package api
 import (
 	"github.com/panther-labs/panther/api/lambda/alerts/models"
 	"github.com/panther-labs/panther/internal/log_analysis/alerts_api/table"
-	"github.com/panther-labs/panther/internal/log_analysis/log_processor/common"
-	"github.com/panther-labs/panther/pkg/gatewayapi"
+	"github.com/panther-labs/panther/internal/log_analysis/alerts_api/utils"
+	"github.com/panther-labs/panther/pkg/genericapi"
 )
 
 // ListAlerts retrieves alert and event details.
-func (API) ListAlerts(input *models.ListAlertsInput) (result *models.ListAlertsOutput, err error) {
-	operation := common.OpLogManager.Start("listAlerts")
-	defer func() {
-		operation.Stop()
-		operation.Log(err)
-	}()
-
+func (api *API) ListAlerts(input *models.ListAlertsInput) (result *models.ListAlertsOutput, err error) {
 	result = &models.ListAlertsOutput{}
 	var alertItems []*table.AlertItem
-	if input.RuleID != nil { // list per specific ruleId
-		alertItems, result.LastEvaluatedKey, err = alertsDB.ListByRule(*input.RuleID, input.ExclusiveStartKey, input.PageSize)
-	} else { // list all alerts time desc order
-		alertItems, result.LastEvaluatedKey, err = alertsDB.ListAll(input.ExclusiveStartKey, input.PageSize)
+
+	// Perform some validation here for items that do not have custom validators implemented
+	if input.CreatedAtAfter != nil && input.CreatedAtBefore != nil && input.CreatedAtBefore.Before(*input.CreatedAtAfter) {
+		return nil, &genericapi.InternalError{Message: "Invalid range, created at 'before' must be greater than 'after'"}
 	}
+
+	if input.EventCountMax != nil && input.EventCountMin != nil && *input.EventCountMax < *input.EventCountMin {
+		return nil, &genericapi.InternalError{Message: "Invalid range, event count 'max' must be greater or equal to 'min'"}
+	}
+
+	// Fetch all alerts. The results will have filters, sorting applied.
+	alertItems, result.LastEvaluatedKey, err = api.alertsDB.ListAll(input)
+
+	// Fetch all rules for alerts
+	alertRules := api.getAlertRules(alertItems)
 	if err != nil {
 		return nil, err
 	}
 
-	result.Alerts = alertItemsToAlertSummary(alertItems)
+	result.Alerts = utils.AlertItemsToSummaries(alertItems, alertRules)
 
-	gatewayapi.ReplaceMapSliceNils(result)
+	genericapi.ReplaceMapSliceNils(result)
 	return result, nil
-}
-
-// alertItemsToAlertSummary converts a DDB Alert Item to an Alert Summary that will be returned by the API
-func alertItemsToAlertSummary(items []*table.AlertItem) []*models.AlertSummary {
-	result := make([]*models.AlertSummary, len(items))
-
-	for i, item := range items {
-		result[i] = &models.AlertSummary{
-			AlertID:         &item.AlertID,
-			RuleID:          &item.RuleID,
-			DedupString:     &item.DedupString,
-			CreationTime:    &item.CreationTime,
-			Severity:        &item.Severity,
-			UpdateTime:      &item.UpdateTime,
-			EventsMatched:   &item.EventCount,
-			RuleDisplayName: item.RuleDisplayName,
-			Title:           getAlertTitle(item),
-			RuleVersion:     &item.RuleVersion,
-		}
-	}
-
-	return result
 }

@@ -19,14 +19,44 @@ package api
  */
 
 import (
+	"go.uber.org/zap"
+
 	"github.com/panther-labs/panther/api/lambda/source/models"
+	"github.com/panther-labs/panther/internal/core/source_api/ddb"
+	"github.com/panther-labs/panther/pkg/genericapi"
 )
 
-// ListIntegrations returns all enabled integrations across each organization.
-//
-// The output of this handler is used to schedule pollers.
-func (API) ListIntegrations(
+var genericListError = &genericapi.InternalError{Message: "Failed to list integrations"}
+
+// ListIntegrations returns all enabled integrations.
+func (api *API) ListIntegrations(
 	input *models.ListIntegrationsInput) ([]*models.SourceIntegration, error) {
 
-	return db.ScanIntegrations(input)
+	integrationItems, err := api.DdbClient.ScanIntegrations(input.IntegrationType)
+	if err != nil {
+		zap.L().Error("failed to list integrations", zap.Error(err))
+		return nil, genericListError
+	}
+
+	result := make([]*models.SourceIntegration, 0, len(integrationItems))
+	for _, item := range integrationItems {
+		if item.IntegrationType == "" {
+			// Due to a previous bug, a deleted integration could be re-created in the DB without
+			// the IntegrationType field. This would break Panther in many places in addition to
+			// breaking Panther upgrades. Skip these sources.
+			continue
+		}
+		integ := ddb.ItemToIntegration(item)
+		// This is required for backwards compatibility
+		// Before https://github.com/panther-labs/panther/issues/2031 , the Compliance sources
+		// didn't have the InputDataBucket and InputDataRoleArn populated
+		if integ.IntegrationType == models.IntegrationTypeAWSScan {
+			if integ.S3Bucket == "" {
+				integ.S3Bucket = api.Config.InputDataBucketName
+				integ.LogProcessingRole = api.Config.InputDataRoleArn
+			}
+		}
+		result = append(result, integ)
+	}
+	return result, nil
 }

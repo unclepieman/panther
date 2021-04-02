@@ -18,18 +18,14 @@
 
 import React from 'react';
 import { Alert, Box, Card } from 'pouncejs';
-import { DEFAULT_LARGE_PAGE_SIZE } from 'Source/constants';
 import { ListResourcesInput, ListResourcesSortFieldsEnum, SortDirEnum } from 'Generated/schema';
 import { TableControlsPagination } from 'Components/utils/TableControls';
-import {
-  convertObjArrayValuesToCsv,
-  encodeParams,
-  extendResourceWithIntegrationLabel,
-  extractErrorMessage,
-} from 'Helpers/utils';
+import { extendResourceWithIntegrationLabel, extractErrorMessage } from 'Helpers/utils';
 import useRequestParamsWithPagination from 'Hooks/useRequestParamsWithPagination';
-import isEmpty from 'lodash-es/isEmpty';
+import isEmpty from 'lodash/isEmpty';
+import withSEO from 'Hoc/withSEO';
 import ErrorBoundary from 'Components/ErrorBoundary';
+import NoResultsFound from 'Components/NoResultsFound';
 import ListResourcesActions from './ListResourcesActions';
 import ListResourcesTable from './ListResourcesTable';
 import ListResourcesPageEmptyDataFallback from './EmptyDataFallback';
@@ -46,7 +42,7 @@ const ListResources = () => {
   const { loading, data, error } = useListResources({
     fetchPolicy: 'cache-and-network',
     variables: {
-      input: encodeParams(convertObjArrayValuesToCsv(requestParams), ['idContains']),
+      input: requestParams,
     },
   });
   if (loading && !data) {
@@ -55,15 +51,16 @@ const ListResources = () => {
 
   if (error) {
     return (
-      <Alert
-        mb={6}
-        variant="error"
-        title="Couldn't load your connected resources"
-        description={
-          extractErrorMessage(error) ||
-          'There was an error when performing your request, please contact support@runpanther.io'
-        }
-      />
+      <Box mb={6}>
+        <Alert
+          variant="error"
+          title="Couldn't load your connected resources"
+          description={
+            extractErrorMessage(error) ||
+            'There was an error when performing your request, please contact support@runpanther.io'
+          }
+        />
+      </Box>
     );
   }
 
@@ -84,14 +81,19 @@ const ListResources = () => {
     <React.Fragment>
       <ListResourcesActions />
       <ErrorBoundary>
-        <Card>
-          <ListResourcesTable
-            enumerationStartIndex={(pagingData.thisPage - 1) * DEFAULT_LARGE_PAGE_SIZE}
-            items={enhancedResourceItems}
-            onSort={updateRequestParamsAndResetPaging}
-            sortBy={requestParams.sortBy || ListResourcesSortFieldsEnum.Id}
-            sortDir={requestParams.sortDir || SortDirEnum.Ascending}
-          />
+        <Card as="section" px={8} py={4} position="relative">
+          {enhancedResourceItems.length ? (
+            <ListResourcesTable
+              items={enhancedResourceItems}
+              onSort={updateRequestParamsAndResetPaging}
+              sortBy={requestParams.sortBy || ListResourcesSortFieldsEnum.Id}
+              sortDir={requestParams.sortDir || SortDirEnum.Ascending}
+            />
+          ) : (
+            <Box my={8}>
+              <NoResultsFound />
+            </Box>
+          )}
         </Card>
       </ErrorBoundary>
       <Box my={6}>
@@ -105,4 +107,4 @@ const ListResources = () => {
   );
 };
 
-export default ListResources;
+export default withSEO({ title: 'Resources' })(ListResources);

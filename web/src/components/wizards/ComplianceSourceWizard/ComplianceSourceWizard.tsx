@@ -17,19 +17,19 @@
  */
 
 import React from 'react';
-import { AWS_ACCOUNT_ID_REGEX, SOURCE_LABEL_REGEX } from 'Source/constants';
-import { Formik } from 'formik';
+import { AWS_ACCOUNT_ID_REGEX, AWS_REGIONS, RESOURCE_TYPES } from 'Source/constants';
+import { Form, Formik } from 'formik';
 import * as Yup from 'yup';
-import { Wizard, WizardPanelWrapper } from 'Components/Wizard';
+import { Wizard } from 'Components/Wizard';
 import { FetchResult } from '@apollo/client';
+import { yupIntegrationLabelValidation } from 'Helpers/utils';
 import StackDeploymentPanel from './StackDeploymentPanel';
-import SuccessPanel from './SuccessPanel';
+import ValidationPanel from './ValidationPanel';
 import SourceConfigurationPanel from './SourceConfigurationPanel';
 
 interface ComplianceSourceWizardProps {
   initialValues: ComplianceSourceWizardValues;
   onSubmit: (values: ComplianceSourceWizardValues) => Promise<FetchResult<any>>;
-  externalErrorMessage?: string;
 }
 
 export interface ComplianceSourceWizardValues {
@@ -38,80 +38,53 @@ export interface ComplianceSourceWizardValues {
   integrationLabel: string;
   cweEnabled: boolean;
   remediationEnabled: boolean;
+  regionIgnoreList: string[];
+  resourceTypeIgnoreList: string[];
 }
 
 const validationSchema = Yup.object().shape<ComplianceSourceWizardValues>({
-  integrationLabel: Yup.string()
-    .matches(SOURCE_LABEL_REGEX, 'Can only include alphanumeric characters, dashes and spaces')
-    .max(32, 'Must be at most 32 characters')
-    .required(),
+  integrationLabel: yupIntegrationLabelValidation,
   awsAccountId: Yup.string()
     .matches(AWS_ACCOUNT_ID_REGEX, 'Must be a valid AWS Account ID')
     .required(),
   cweEnabled: Yup.boolean().required(),
   remediationEnabled: Yup.boolean().required(),
+  regionIgnoreList: Yup.array().of(
+    Yup.string()
+      .oneOf((AWS_REGIONS as unknown) as string[])
+      .required()
+  ),
+  resourceTypeIgnoreList: Yup.array().of(
+    Yup.string()
+      .oneOf((RESOURCE_TYPES as unknown) as string[])
+      .required()
+  ),
 });
-
-const initialStatus = { cfnTemplateDownloaded: false };
 
 const ComplianceSourceWizard: React.FC<ComplianceSourceWizardProps> = ({
   initialValues,
   onSubmit,
-  externalErrorMessage,
 }) => {
   return (
     <Formik<ComplianceSourceWizardValues>
       enableReinitialize
       initialValues={initialValues}
-      initialStatus={initialStatus}
       validationSchema={validationSchema}
       onSubmit={onSubmit}
     >
-      {({ isValid, dirty, handleSubmit, status, setStatus }) => {
-        // We want to reset the error message whenever the user goes back to a previous screen.
-        // That's why we handle it through status in order to manipulate it internally
-        React.useEffect(() => {
-          setStatus({ ...status, errorMessage: externalErrorMessage });
-        }, [externalErrorMessage]);
-
-        return (
-          <form onSubmit={handleSubmit}>
-            <Wizard>
-              <Wizard.Step title="Configure Source" icon="settings">
-                <WizardPanelWrapper>
-                  <WizardPanelWrapper.Content>
-                    <SourceConfigurationPanel />
-                  </WizardPanelWrapper.Content>
-                  <WizardPanelWrapper.Actions>
-                    <WizardPanelWrapper.ActionNext disabled={!dirty || !isValid} />
-                  </WizardPanelWrapper.Actions>
-                </WizardPanelWrapper>
-              </Wizard.Step>
-              <Wizard.Step title="Deploy Stack" icon="upload">
-                <WizardPanelWrapper>
-                  <WizardPanelWrapper.Content>
-                    <StackDeploymentPanel />
-                  </WizardPanelWrapper.Content>
-                  <WizardPanelWrapper.Actions>
-                    <WizardPanelWrapper.ActionPrev />
-                    <WizardPanelWrapper.ActionNext disabled={!status.cfnTemplateDownloaded} />
-                  </WizardPanelWrapper.Actions>
-                </WizardPanelWrapper>
-              </Wizard.Step>
-              <Wizard.Step title="Done!" icon="check">
-                <WizardPanelWrapper>
-                  <WizardPanelWrapper.Content>
-                    <SuccessPanel errorMessage={externalErrorMessage} />
-                  </WizardPanelWrapper.Content>
-                  <WizardPanelWrapper.Actions>
-                    <WizardPanelWrapper.ActionPrev />
-                  </WizardPanelWrapper.Actions>
-                </WizardPanelWrapper>
-              </Wizard.Step>
-            </Wizard>
-          </form>
-        );
-      }}
+      <Form>
+        <Wizard>
+          <Wizard.Step title="Configure Source">
+            <SourceConfigurationPanel />
+          </Wizard.Step>
+          <Wizard.Step title="Setup IAM Roles">
+            <StackDeploymentPanel />
+          </Wizard.Step>
+          <Wizard.Step title="Verify Setup">
+            <ValidationPanel />
+          </Wizard.Step>
+        </Wizard>
+      </Form>
     </Formik>
   );
 };

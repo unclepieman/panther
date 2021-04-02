@@ -19,25 +19,68 @@
 import React from 'react';
 
 import useRouter from 'Hooks/useRouter';
-import { Alert, Box } from 'pouncejs';
-import Panel from 'Components/Panel';
+import { Alert, Box, Flex, Card, TabList, TabPanel, TabPanels, Tabs } from 'pouncejs';
+import { BorderedTab, BorderTabDivider } from 'Components/BorderedTab';
 import { extractErrorMessage } from 'Helpers/utils';
-import ErrorBoundary from 'Components/ErrorBoundary';
-import RuleDetailsPageSkeleton from './Skeleton';
-import RuleDetailsInfo from './RuleDetailsInfo';
-import { useRuleDetails } from './graphql/ruleDetails.generated';
-import RuleDetailsAlertsTable from './RuleDetailsAlertsTable';
+import { DEFAULT_SMALL_PAGE_SIZE } from 'Source/constants';
 
-const RuleDetailsPage = () => {
+import withSEO from 'Hoc/withSEO';
+import invert from 'lodash/invert';
+import useUrlParams from 'Hooks/useUrlParams';
+import ErrorBoundary from 'Components/ErrorBoundary';
+import { AlertTypesEnum } from 'Generated/schema';
+import RuleDetailsPageSkeleton from './Skeleton';
+import ListRuleAlerts from './RuleAlertsListing';
+import RuleDetailsInfo from './RuleDetailsInfo';
+import RuleDetailsBanner from './RuleDetailsBanner';
+import { useGetRuleDetails } from './graphql/getRuleDetails.generated';
+import { useListAlertsForRule } from './graphql/listAlertsForRule.generated';
+
+export interface RuleDetailsPageUrlParams {
+  section?: 'details' | 'matches' | 'errors';
+}
+
+const sectionToTabIndex: Record<RuleDetailsPageUrlParams['section'], number> = {
+  details: 0,
+  matches: 1,
+  errors: 2,
+};
+
+const tabIndexToSection = invert(sectionToTabIndex) as Record<
+  number,
+  RuleDetailsPageUrlParams['section']
+>;
+
+const RuleDetailsPage: React.FC = () => {
   const { match } = useRouter<{ id: string }>();
-  const { error, data, loading } = useRuleDetails({
+  const { urlParams, setUrlParams } = useUrlParams<RuleDetailsPageUrlParams>();
+  const { error, data, loading } = useGetRuleDetails({
     fetchPolicy: 'cache-and-network',
     variables: {
-      ruleDetailsInput: {
-        ruleId: match.params.id,
+      input: {
+        id: match.params.id,
       },
-      alertsForRuleInput: {
+    },
+  });
+
+  const { data: matchesData } = useListAlertsForRule({
+    fetchPolicy: 'cache-and-network',
+    variables: {
+      input: {
+        types: [AlertTypesEnum.Rule],
         ruleId: match.params.id,
+        pageSize: DEFAULT_SMALL_PAGE_SIZE,
+      },
+    },
+  });
+
+  const { data: errorData } = useListAlertsForRule({
+    fetchPolicy: 'cache-and-network',
+    variables: {
+      input: {
+        types: [AlertTypesEnum.RuleError],
+        ruleId: match.params.id,
+        pageSize: DEFAULT_SMALL_PAGE_SIZE,
       },
     },
   });
@@ -48,32 +91,68 @@ const RuleDetailsPage = () => {
 
   if (error) {
     return (
-      <Alert
-        variant="error"
-        title="Couldn't load rule"
-        description={
-          extractErrorMessage(error) ||
-          " An unknown error occured and we couldn't load the rule details from the server"
-        }
-        mb={6}
-      />
+      <Box mb={6} data-testid={`rule-${match.params.id}`}>
+        <Alert
+          variant="error"
+          title="Couldn't load rule"
+          description={
+            extractErrorMessage(error) ||
+            " An unknown error occured and we couldn't load the rule details from the server"
+          }
+        />
+      </Box>
     );
   }
 
   return (
-    <article>
-      <ErrorBoundary>
-        <RuleDetailsInfo rule={data.rule} />
-      </ErrorBoundary>
-      <Box mt={2} mb={6}>
-        <Panel size="large" title="Alerts">
-          <ErrorBoundary>
-            <RuleDetailsAlertsTable alerts={data.alerts.alertSummaries} />
-          </ErrorBoundary>
-        </Panel>
-      </Box>
-    </article>
+    <Box as="article" mb={6}>
+      <Flex direction="column" spacing={6}>
+        <ErrorBoundary>
+          <RuleDetailsBanner rule={data.rule} />
+        </ErrorBoundary>
+        <Card position="relative">
+          <Tabs
+            index={sectionToTabIndex[urlParams.section] || 0}
+            onChange={index => setUrlParams({ section: tabIndexToSection[index] })}
+          >
+            <Box px={2}>
+              <TabList>
+                <BorderedTab>Details</BorderedTab>
+                <BorderedTab>
+                  <Box
+                    data-testid="rule-matches"
+                    opacity={matchesData?.alerts?.alertSummaries.length > 0 ? 1 : 0.5}
+                  >
+                    Rule Matches
+                  </Box>
+                </BorderedTab>
+                <BorderedTab>
+                  <Box
+                    data-testid="rule-errors"
+                    opacity={errorData?.alerts?.alertSummaries.length > 0 ? 1 : 0.5}
+                  >
+                    Rule Errors
+                  </Box>
+                </BorderedTab>
+              </TabList>
+              <BorderTabDivider />
+              <TabPanels>
+                <TabPanel data-testid="rule-details-tabpanel">
+                  <RuleDetailsInfo rule={data.rule} />
+                </TabPanel>
+                <TabPanel data-testid="rule-matches-tabpanel" lazy unmountWhenInactive>
+                  <ListRuleAlerts ruleId={match.params.id} type={AlertTypesEnum.Rule} />
+                </TabPanel>
+                <TabPanel data-testid="rule-errors-tabpanel" lazy unmountWhenInactive>
+                  <ListRuleAlerts ruleId={match.params.id} type={AlertTypesEnum.RuleError} />
+                </TabPanel>
+              </TabPanels>
+            </Box>
+          </Tabs>
+        </Card>
+      </Flex>
+    </Box>
   );
 };
 
-export default RuleDetailsPage;
+export default withSEO({ title: ({ match }) => match.params.id })(RuleDetailsPage);

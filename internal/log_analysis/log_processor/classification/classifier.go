@@ -20,11 +20,9 @@ package classification
 
 import (
 	"container/heap"
-	"runtime/debug"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
@@ -34,7 +32,7 @@ import (
 // ClassifierAPI is the interface for a classifier
 type ClassifierAPI interface {
 	// Classify attempts to classify the provided log line
-	Classify(log string) *ClassifierResult
+	Classify(log string) (*ClassifierResult, error)
 	// aggregate stats
 	Stats() *ClassifierStats
 	// per-parser stats, map of LogType -> stats
@@ -46,17 +44,17 @@ type ClassifierResult struct {
 	// Events contains the parsed events
 	// If the classification process was not successful and the log is from an
 	// unsupported type, this will be nil
-	Events []*parsers.PantherLog
-	// LogType is the identified type of the log
-	LogType *string
+	Events []*parsers.Result
+	// Matched signifies that the classifier matched the log entry
+	Matched bool
+	// NumMiss counts the number for failed classification attempts
+	NumMiss int
 }
 
 // NewClassifier returns a new instance of a ClassifierAPI implementation
-func NewClassifier() ClassifierAPI {
-	parserQueue := &ParserPriorityQueue{}
-	parserQueue.initialize()
+func NewClassifier(parsers map[string]parsers.Interface) ClassifierAPI {
 	return &Classifier{
-		parsers:     parserQueue,
+		parsers:     NewParserPriorityQueue(parsers),
 		parserStats: make(map[string]*ParserStats),
 	}
 }
@@ -79,35 +77,29 @@ func (c *Classifier) ParserStats() map[string]*ParserStats {
 }
 
 // catch panics from parsers, log and continue
-func safeLogParse(parser parsers.LogParser, log string) (parsedEvents []*parsers.PantherLog) {
+func safeLogParse(logType string, parser parsers.Interface, log string) (results []*parsers.Result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			zap.L().Debug("parser panic",
-				zap.String("parser", parser.LogType()),
-				zap.Error(errors.Errorf("%v", r)),
-				zap.String("stacktrace", string(debug.Stack())))
-			parsedEvents = nil // return indicator that parse failed
+			err = errors.Errorf("parser %q panic: %v", logType, r)
+			results = nil
 		}
 	}()
-	parsedEvents, err := parser.Parse(log)
+	results, err = parser.ParseLog(log)
 	if err != nil {
-		zap.L().Debug("parser failed",
-			zap.String("parser", parser.LogType()),
-			zap.Error(err))
-		return nil
+		return nil, err
 	}
-	return parsedEvents
+	return results, nil
 }
 
 // Classify attempts to classify the provided log line
-func (c *Classifier) Classify(log string) *ClassifierResult {
+func (c *Classifier) Classify(log string) (*ClassifierResult, error) {
 	startClassify := time.Now().UTC()
 	// Slice containing the popped queue items
 	var popped []interface{}
 	result := &ClassifierResult{}
 
 	if len(log) == 0 { // likely empty file, nothing to do
-		return result
+		return result, nil
 	}
 
 	// update aggregate stats
@@ -115,47 +107,46 @@ func (c *Classifier) Classify(log string) *ClassifierResult {
 		c.stats.ClassifyTimeMicroseconds = uint64(time.Since(startClassify).Microseconds())
 		c.stats.BytesProcessedCount += uint64(len(log))
 		c.stats.LogLineCount++
-		c.stats.EventCount += uint64(len(result.Events))
-		if len(log) > 0 {
-			if result.LogType == nil {
-				c.stats.ClassificationFailureCount++
-			} else {
-				c.stats.SuccessfullyClassifiedCount++
-			}
+		if result.Matched {
+			c.stats.SuccessfullyClassifiedCount++
+			c.stats.EventCount += uint64(len(result.Events))
+		} else if result.NumMiss != 0 {
+			c.stats.ClassificationFailureCount++
 		}
 	}()
 
 	log = strings.TrimSpace(log) // often the last line has \n only, could happen mid file tho
 
 	if len(log) == 0 { // we count above (because it is a line in the file) then skip
-		return result
+		return result, nil
 	}
 
 	for c.parsers.Len() > 0 {
 		currentItem := c.parsers.Peek()
 
 		startParseTime := time.Now().UTC()
-		parsedEvents := safeLogParse(currentItem.parser, log)
+		logType := currentItem.logType
+		parsedEvents, err := safeLogParse(logType, currentItem.parser, log)
 		endParseTime := time.Now().UTC()
 
-		logType := currentItem.parser.LogType()
-
 		// Parser failed to parse event
-		if parsedEvents == nil {
-			zap.L().Debug("failed to parse event", zap.String("expectedLogType", currentItem.parser.LogType()))
+		if err != nil {
+			zap.L().Debug("failed to parse event", zap.String("expectedLogType", logType), zap.Error(err))
 			// Removing parser from queue
 			popped = append(popped, heap.Pop(c.parsers))
 			// Increasing penalty of the parser
 			// Due to increased penalty the parser will be lower priority in the queue
 			currentItem.penalty++
+			// Increment the number of misses in the result
+			result.NumMiss++
 			// record failure
 			continue
 		}
+		result.Matched = true
 
 		// Since the parsing was successful, remove all penalty from the parser
 		// The parser will be higher priority in the queue
 		currentItem.penalty = 0
-		result.LogType = aws.String(logType)
 		result.Events = parsedEvents
 
 		// update per-parser stats
@@ -172,7 +163,6 @@ func (c *Classifier) Classify(log string) *ClassifierResult {
 		parserStat.BytesProcessedCount += uint64(len(log))
 		parserStat.LogLineCount++
 		parserStat.EventCount += uint64(len(result.Events))
-
 		break
 	}
 
@@ -180,7 +170,10 @@ func (c *Classifier) Classify(log string) *ClassifierResult {
 	for _, item := range popped {
 		heap.Push(c.parsers, item)
 	}
-	return result
+	if !result.Matched {
+		return result, errors.New("failed to classify log line")
+	}
+	return result, nil
 }
 
 // aggregate stats
@@ -193,6 +186,15 @@ type ClassifierStats struct {
 	ClassificationFailureCount  uint64
 }
 
+func (s *ClassifierStats) Add(other *ClassifierStats) {
+	s.ClassifyTimeMicroseconds += other.ClassifyTimeMicroseconds
+	s.BytesProcessedCount += other.BytesProcessedCount
+	s.EventCount += other.EventCount
+	s.SuccessfullyClassifiedCount += other.EventCount
+	s.LogLineCount += other.LogLineCount
+	s.ClassificationFailureCount += other.ClassificationFailureCount
+}
+
 // per parser stats
 type ParserStats struct {
 	ParserTimeMicroseconds uint64 // total time parsing
@@ -200,4 +202,27 @@ type ParserStats struct {
 	LogLineCount           uint64 // input records
 	EventCount             uint64 // output records
 	LogType                string
+}
+
+func (s *ParserStats) Add(other *ParserStats) {
+	s.ParserTimeMicroseconds += other.ParserTimeMicroseconds
+	s.BytesProcessedCount += other.BytesProcessedCount
+	s.EventCount += other.EventCount
+	s.LogLineCount += other.LogLineCount
+}
+
+func MergeParserStats(dst map[string]*ParserStats, src map[string]*ParserStats) {
+	for name, s := range src {
+		if s == nil {
+			continue
+		}
+		d := dst[name]
+		if d == nil {
+			d = &ParserStats{
+				LogType: s.LogType,
+			}
+		}
+		d.Add(s)
+		dst[name] = d
+	}
 }

@@ -16,26 +16,34 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../../__generated__/schema';
 
-import { LogIntegrationDetails } from '../../../graphql/fragments/LogIntegrationDetails.generated';
+import { S3LogIntegrationDetails } from '../../../graphql/fragments/S3LogIntegrationDetails.generated';
+import { SqsLogSourceIntegrationDetails } from '../../../graphql/fragments/SqsLogSourceIntegrationDetails.generated';
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
 
 export type ListLogSourcesVariables = {};
 
-export type ListLogSources = { listLogIntegrations: Array<LogIntegrationDetails> };
+export type ListLogSources = {
+  listLogIntegrations: Array<S3LogIntegrationDetails | SqsLogSourceIntegrationDetails>;
+};
 
 export const ListLogSourcesDocument = gql`
   query ListLogSources {
     listLogIntegrations {
-      ...LogIntegrationDetails
+      ... on S3LogIntegration {
+        ...S3LogIntegrationDetails
+      }
+      ... on SqsLogSourceIntegration {
+        ...SqsLogSourceIntegrationDetails
+      }
     }
   }
-  ${LogIntegrationDetails}
+  ${S3LogIntegrationDetails}
+  ${SqsLogSourceIntegrationDetails}
 `;
 
 /**
@@ -75,3 +83,17 @@ export type ListLogSourcesQueryResult = ApolloReactCommon.QueryResult<
   ListLogSources,
   ListLogSourcesVariables
 >;
+export function mockListLogSources({
+  data,
+  variables,
+  errors,
+}: {
+  data: ListLogSources;
+  variables?: ListLogSourcesVariables;
+  errors?: GraphQLError[];
+}) {
+  return {
+    request: { query: ListLogSourcesDocument, variables },
+    result: { data, errors },
+  };
+}

@@ -22,29 +22,80 @@ Infra:
   # For example, this could be a serverless monitoring/security service.
   BaseLayerVersionArns: ''
 
+  # Allow HTTP(S) ingress access to the web app (ALB) security group from this IP block.
+  # Use 0.0.0.0/0 to allow unrestricted access
+  LoadBalancerSecurityGroupCidr: 0.0.0.0/0
+
+  # These optional settings will allow you to deploy the panther load balancer into a security group
+  # And VPC of your choice. If you set VpcID, you must also set SecurityGroupID and ensure the
+  # subnet IP ranges are valid & available.
+  #
+  # SubnetOneID and SubnetTwoID are optional. These options supersede the SubnetOneIPRange and SubnetTwoIPRange
+  # parameters, if you specify IDs then the IP ranges are ignored.
+  VpcID: ''
+  # These values only take affect if VpcID is specified
+  SecurityGroupID: ''
+  SubnetOneID: ''
+  SubnetTwoID: ''
+  SubnetOneIPRange: '172.31.250.0/26' # By default, this IP range should be available in the default VPC
+  SubnetTwoIPRange: '172.31.251.0/26' # By default, this IP range should be available in the default VPC
+
   # Lambda functions scale memory and CPU together.
   # Those with the smallest memory are slower and cheaper.
   # Those with the larger memory are faster and more expensive.
   # If cost is more of a concern compared to performance, choose
   # a small memory size, however, for extremely large log volumes
   # the larger sizes may be required for adequate performance or large files.
-  LogProcessorLambdaMemorySize: 1024 # 256 - 3008, in 64MB increments
+  # https://aws.amazon.com/lambda/pricing/
+  # Processing capability can be further increased by raising the
+  # Lambda concurrent execution limit from default 1000, see:
+  # https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html
+  LogProcessorLambdaMemorySize: 1024 # 256 - 10240, in 1MB increments
 
-  # Create a Python layer with these pip library versions.
+  # The log processor reads in batches of S3 notifications from an SQS queue.
+  # In order to keep SQS API costs down we default to the largest allowed batch size. However,
+  # if there are large numbers of very large files then the lambda may not
+  # finish the work within the deadline and timeout. If this happening, reduce
+  # this value. If timeouts persist when set to 1, then the files are likely too large to be processed.
+  LogProcessorLambdaSQSReadBatchSize: 10
+
+  # Create a Python layer with these pip library versions for analysis and remediation.
   #
-  # This makes it easy to add your own pip libraries for analysis and remediation.
-  # Natively compiled libraries (e.g. numpy) are not currently supported: build a custom layer instead.
+  # "mage deploy" will download and package these libraries, generating the "out/layer.zip" file.
+  # Natively compiled libraries (e.g. numpy) must be deployed from linux to work correctly, or
+  # you can provide your own custom layer via PythonLayerVersionArn.
   #
   # This setting has no effect if PythonLayerVersionArn is set below.
   PipLayer:
-    - boto3==1.12.24
-    - policyuniverse==1.3.2.1
+    - jsonpath-ng==1.5.2
+    - policyuniverse==1.3.2.2
     - requests==2.23.0
+
+  # Enable provisioned capacity and autoscaling for the key-value Dynamo store available to the Python engines.
+  # You may want to enable this if you make a high volume of requests to the key-value store, but otherwise
+  # the default (pay-per-request) billing is typically cheaper for small-to-medium workloads
+  # This setting can only be changed once every 24 hours
+  KvTableBillingMode: PAY_PER_REQUEST # PROVISIONED or PAY_PER_REQUEST
 
   # Custom layer attached to every Python Lambda function for analysis and remediation.
   #
   # If not specified, a layer is created for you based on the PipLayer setting above.
   PythonLayerVersionArn: ''
+
+  # A managed IAM policy which will be attached to the Python rules-engine and policy-engine.
+  #
+  # This lets your rules and policies interact with any AWS infrastructure you would like.
+  PythonManagedPolicyArn: ''
+
+  # A list of IAM roles which the Python rules-engine and policy-engine will be allowed to assume.
+  #
+  # You could instead create a managed policy and use the PythonManagedPolicyArn setting, above.
+  # But if you just need to assume a role, specifying it here requires no additional infrastructure;
+  # it will update the inline IAM policy for the Python engines.
+  #
+  # For example, you could give the Python engines permission to assume the audit role used for
+  # cloud security scanning.
+  PythonAssumableRoleArns: []
 
 Monitoring:
   # This is the arn for the SNS topic you want associated with Panther system alarms.
@@ -61,12 +112,22 @@ Monitoring:
   TracingMode: ''
 
 Setup:
-  # List of policy/rule sets to install if the existing ruleset is empty
-  # (e.g. when Panther is first deployed).
+  # The company name/email displayed in Settings > General (not used anywhere else today)
+  Company:
+    DisplayName: AwesomeCo
+    Email: user@example.com
+
+  # The first Panther user. If left blank, you will be prompted for this when you deploy.
+  FirstUser:
+    GivenName: ''
+    FamilyName: ''
+    Email: ''
+
+  # List of policy/rule sets to install when Panther is first deployed.
   #
-  # Entries can be URLs or file:// paths that point to a .zip file.
-  # If the analysis-api is non-empty, this setting is ignored and you can instead
-  # use the BulkUpload functionality from the web app to upload new or modified rule sets.
+  # Entries must be URLs that point to a .zip file.
+  # After the first deployment, you can use the BulkUpload functionality from the web app
+  # to upload new or modified rule sets.
   InitialAnalysisSets:
     - https://github.com/panther-labs/panther-analysis/releases/latest/download/panther-analysis-all.zip
 
@@ -77,11 +138,14 @@ Setup:
   # Access logs are sent either to the S3AccessLogsBucket below or a the panther audit bucket created for you.
   EnableS3AccessLogs: true
 
-  # Optionally use an existing S3 bucket for storing S3 access logs.
+  # Optionally use an existing S3 bucket name for storing S3 access logs.
   # If not specified, the generated panther audit logs bucket is used for access logs as well.
   #
   # Has no effect if EnableS3AccessLogs=false above.
   S3AccessLogsBucket: ''
+
+  # If specified, user data is replicated to this bucket arn.
+  DataReplicationBucket: ''
 
   # Whether or not the Panther deployment should automatically onboard itself as a data source.
   OnboardSelf: true

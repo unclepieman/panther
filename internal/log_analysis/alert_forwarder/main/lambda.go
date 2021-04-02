@@ -28,13 +28,40 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/panther-labs/panther/internal/log_analysis/alert_forwarder/forwarder"
+	alertApiModels "github.com/panther-labs/panther/internal/log_analysis/alerts_api/models"
 	"github.com/panther-labs/panther/internal/log_analysis/log_processor/common"
 	"github.com/panther-labs/panther/pkg/lambdalogger"
+	"github.com/panther-labs/panther/pkg/metrics"
 )
+
+var handler *forwarder.Handler
 
 func init() {
 	// Required only once per Lambda container
-	forwarder.Setup()
+	Setup()
+	// TODO: revisit this. Not sure why we need Dimension sets and why just an array of dimensions is not enough
+	metricsLogger := metrics.MustLogger([]metrics.DimensionSet{
+		{
+			"AnalysisType",
+			"Severity",
+		},
+		{
+			"AnalysisType",
+			"AnalysisID",
+		},
+		{
+			"AnalysisType",
+		},
+	})
+	cache := forwarder.NewCache(policyClient)
+	handler = &forwarder.Handler{
+		SqsClient:        sqsClient,
+		DdbClient:        ddbClient,
+		Cache:            cache,
+		AlertingQueueURL: env.AlertingQueueURL,
+		AlertTable:       env.AlertsTable,
+		MetricsLogger:    metricsLogger,
+	}
 }
 
 func main() {
@@ -54,14 +81,14 @@ func reporterHandler(lc *lambdacontext.LambdaContext, event events.DynamoDBEvent
 
 	// Note that if there is an error in processing any of the messages in the batch, the whole batch will be retried.
 	for _, record := range event.Records {
-		oldAlertDedupEvent, unmarshalErr := forwarder.FromDynamodDBAttribute(record.Change.OldImage)
+		oldAlertDedupEvent, unmarshalErr := alertApiModels.FromDynamodDBAttribute(record.Change.OldImage)
 		if unmarshalErr != nil {
 			operation.LogError(errors.Wrapf(err, "failed to unmarshal item"))
 			// continuing since there is nothing we can do here
 			continue
 		}
 
-		newAlertDedupEvent, unmarshalErr := forwarder.FromDynamodDBAttribute(record.Change.NewImage)
+		newAlertDedupEvent, unmarshalErr := alertApiModels.FromDynamodDBAttribute(record.Change.NewImage)
 		if unmarshalErr != nil {
 			operation.LogError(errors.Wrapf(err, "failed to unmarshal item"))
 			// continuing since there is nothing we can do here
@@ -76,7 +103,7 @@ func reporterHandler(lc *lambdacontext.LambdaContext, event events.DynamoDBEvent
 			continue
 		}
 
-		if err = forwarder.Handle(oldAlertDedupEvent, newAlertDedupEvent); err != nil {
+		if err = handler.Do(oldAlertDedupEvent, newAlertDedupEvent); err != nil {
 			return errors.Wrap(err, "encountered issue while handling deduplication event")
 		}
 	}

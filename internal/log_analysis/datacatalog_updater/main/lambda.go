@@ -21,85 +21,108 @@ package main
 import (
 	"context"
 
-	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-lambda-go/lambdacontext"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/athena"
 	"github.com/aws/aws-sdk-go/service/glue"
-	"github.com/aws/aws-sdk-go/service/glue/glueiface"
-	jsoniter "github.com/json-iterator/go"
-	"github.com/pkg/errors"
+	lambdaclient "github.com/aws/aws-sdk-go/service/lambda"
+	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/kelseyhightower/envconfig"
 	"go.uber.org/zap"
 
-	"github.com/panther-labs/panther/api/lambda/core/log_analysis/log_processor/models"
-	"github.com/panther-labs/panther/internal/log_analysis/log_processor/common"
-	"github.com/panther-labs/panther/pkg/awsglue"
+	"github.com/panther-labs/panther/internal/compliance/snapshotlogs"
+	"github.com/panther-labs/panther/internal/core/logtypesapi"
+	"github.com/panther-labs/panther/internal/log_analysis/datacatalog_updater/datacatalog"
+	"github.com/panther-labs/panther/internal/log_analysis/log_processor/logtypes"
+	"github.com/panther-labs/panther/internal/log_analysis/log_processor/registry"
+	"github.com/panther-labs/panther/pkg/awsretry"
 	"github.com/panther-labs/panther/pkg/lambdalogger"
+	"github.com/panther-labs/panther/pkg/stringset"
 )
+
+// The panther-datacatalog-updater lambda is responsible for managing Glue partitions as data is created.
 
 const (
 	maxRetries = 20 // setting Max Retries to a higher number - we'd like to retry VERY hard before failing.
 )
 
-var (
-	glueClient glueiface.GlueAPI = glue.New(session.Must(session.NewSession(aws.NewConfig().WithMaxRetries(maxRetries))))
-	// partitionPrefixCache is a cache that stores all the prefixes of the partitions we have created
-	// The cache is used to avoid attempts to create the same partitions in Glue table
-	partitionPrefixCache = make(map[string]struct{})
-)
-
 func main() {
-	lambda.Start(handle)
-}
+	// nolint: maligned
+	config := struct {
+		AthenaWorkgroup     string `required:"true" split_words:"true"`
+		SyncWorkersPerTable int    `default:"10" split_words:"true"`
+		QueueURL            string `required:"true" split_words:"true"`
+		ProcessedDataBucket string `split_words:"true"`
+		Debug               bool   `split_words:"true"`
+	}{}
+	envconfig.MustProcess("", &config)
 
-func handle(ctx context.Context, event events.SQSEvent) (err error) {
-	lc, _ := lambdalogger.ConfigureGlobal(ctx, nil)
-	operation := common.OpLogManager.Start(lc.InvokedFunctionArn, common.OpLogLambdaServiceDim).WithMemUsed(lambdacontext.MemoryLimitInMB)
-	defer func() {
-		operation.Stop().Log(err, zap.Int("sqsMessageCount", len(event.Records)))
-	}()
-	err = process(event)
-	return err
-}
+	logger := lambdalogger.Config{
+		Debug:     config.Debug,
+		Namespace: "log_analysis",
+		Component: "datacatalog_updater",
+	}.MustBuild()
 
-func process(event events.SQSEvent) error {
-	for _, record := range event.Records {
-		zap.L().Debug("processing record", zap.String("content", record.Body))
-		notification := &models.S3Notification{}
-		if err := jsoniter.UnmarshalFromString(record.Body, notification); err != nil {
-			zap.L().Error("failed to unmarshal record", zap.Error(errors.WithStack(err)))
-			continue
-		}
+	// For compatibility in case some part of the code still uses zap.L()
+	zap.ReplaceGlobals(logger)
 
-		if len(notification.Records) == 0 { // indications of a bug someplace
-			zap.L().Warn("no s3 event notifications in message",
-				zap.String("message", record.Body))
-			continue
-		}
+	awsSession := session.Must(session.NewSession()) // use default retries for fetching creds, avoids hangs!
+	clientsSession := awsSession.Copy(
+		request.WithRetryer(
+			aws.NewConfig().WithMaxRetries(maxRetries),
+			awsretry.NewConnectionErrRetryer(maxRetries),
+		),
+	)
 
-		for _, eventRecord := range notification.Records {
-			gluePartition, err := awsglue.GetPartitionFromS3(eventRecord.S3.Bucket.Name, eventRecord.S3.Object.Key)
-			if err != nil {
-				zap.L().Error("failed to get partition information from notification",
-					zap.Any("notification", notification), zap.Error(errors.WithStack(err)))
-				continue
-			}
+	lambdaClient := lambdaclient.New(clientsSession)
 
-			// already done?
-			partitionLocation := gluePartition.GetPartitionLocation()
-			if _, ok := partitionPrefixCache[partitionLocation]; ok {
-				zap.L().Debug("partition has already been created")
-				continue
-			}
-
-			err = gluePartition.CreatePartition(glueClient)
-			if err != nil {
-				err = errors.Wrapf(err, "failed to create partition: %#v", notification)
-				return err
-			}
-			partitionPrefixCache[partitionLocation] = struct{}{} // remember
-		}
+	logtypesAPI := &logtypesapi.LogTypesAPILambdaClient{
+		LambdaName: logtypesapi.LambdaName,
+		LambdaAPI:  lambdaClient,
 	}
-	return nil
+
+	apiResolver := &logtypesapi.Resolver{
+		LogTypesAPI:    logtypesAPI,
+		NativeLogTypes: logtypes.MustMerge("native", registry.NativeLogTypes(), snapshotlogs.LogTypes()),
+	}
+
+	// Also include the cloud-security logs since they are not yet exported as managed schemas.
+	chainResolver := logtypes.ChainResolvers(apiResolver, snapshotlogs.Resolver())
+
+	// Log cases where a log type failed to resolve. Almost certainly something is amiss in the DDB.
+	resolver := logtypes.ResolverFunc(func(ctx context.Context, name string) (logtypes.Entry, error) {
+		entry, err := chainResolver.Resolve(ctx, name)
+		if err != nil {
+			return nil, err
+		}
+		if entry == nil {
+			// if a logType is not found, this indicates bad data ... log/alarm
+			lambdalogger.FromContext(ctx).Error("cannot resolve logType", zap.String("logType", name))
+			return nil, nil
+		}
+		return entry, nil
+	})
+
+	handler := datacatalog.LambdaHandler{
+		ProcessedDataBucket: config.ProcessedDataBucket,
+		QueueURL:            config.QueueURL,
+		AthenaWorkgroup:     config.AthenaWorkgroup,
+		ListAvailableLogTypes: func(ctx context.Context) ([]string, error) {
+			reply, err := logtypesAPI.ListAvailableLogTypes(ctx)
+			if err != nil {
+				return nil, err
+			}
+			// append in snapshot logs which are always onboarded
+			return stringset.Append(reply.LogTypes, logtypes.CollectNames(snapshotlogs.LogTypes())...), nil
+		},
+		GlueClient:   glue.New(clientsSession),
+		Resolver:     resolver,
+		AthenaClient: athena.New(clientsSession),
+		SQSClient:    sqs.New(clientsSession),
+		Logger:       logger,
+	}
+
+	lambda.StartHandler(&handler)
 }

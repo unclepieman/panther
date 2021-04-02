@@ -64,64 +64,71 @@ func TestDescribeConfigurationRecorderStatusError(t *testing.T) {
 func TestBuildConfigServiceSnapshot(t *testing.T) {
 	mockSvc := awstest.BuildMockConfigServiceSvcAll()
 
-	out := buildConfigServiceSnapshot(
+	out, err := buildConfigServiceSnapshot(
 		mockSvc,
 		awstest.ExampleDescribeConfigurationRecorders.ConfigurationRecorders[0],
 		"us-west-2",
+		nil,
 	)
+	assert.NoError(t, err)
 	assert.NotEmpty(t, out)
 }
 
 func TestBuildConfigServiceSnapshotError(t *testing.T) {
 	mockSvc := awstest.BuildMockConfigServiceSvcAllError()
 
-	out := buildConfigServiceSnapshot(
+	out, err := buildConfigServiceSnapshot(
 		mockSvc,
 		awstest.ExampleDescribeConfigurationRecorders.ConfigurationRecorders[0],
 		"us-west-2",
+		nil,
 	)
-	assert.NotEmpty(t, out)
+	assert.Error(t, err)
+	assert.Empty(t, out)
 }
 
 func TestPollConfigServices(t *testing.T) {
 	awstest.MockConfigServiceForSetup = awstest.BuildMockConfigServiceSvcAll()
 
 	ConfigServiceClientFunc = awstest.SetupMockConfigService
+	GetServiceRegionsFunc = GetServiceRegionsTest
 
-	resources, err := PollConfigServices(&awsmodels.ResourcePollerInput{
+	resources, marker, err := PollConfigServices(&awsmodels.ResourcePollerInput{
 		AuthSource:          &awstest.ExampleAuthSource,
 		AuthSourceParsedARN: awstest.ExampleAuthSourceParsedARN,
 		IntegrationID:       awstest.ExampleIntegrationID,
-		Regions:             awstest.ExampleRegions,
+		Region:              awstest.ExampleRegion,
 		Timestamp:           &awstest.ExampleTime,
 	})
 
 	require.NoError(t, err)
+	assert.Nil(t, marker)
 	assert.NotEmpty(t, resources)
 
 	assert.IsType(t, &awsmodels.ConfigService{}, resources[0].Attributes)
 	assert.Regexp(
-		t, regexp.MustCompile(`123456789012\:.*\:AWS.Config.Recorder`), string(resources[0].ID),
+		t, regexp.MustCompile(`123456789012:.*:AWS.Config.Recorder`), resources[0].ID,
 	)
 
 	assert.IsType(t, &awsmodels.ConfigServiceMeta{}, resources[len(resources)-1].Attributes)
-	assert.Equal(t, "123456789012::AWS.Config.Recorder.Meta", string(resources[len(resources)-1].ID))
+	assert.Equal(t, "123456789012::AWS.Config.Recorder.Meta", resources[len(resources)-1].ID)
 }
 
 func TestPollConfigServicesError(t *testing.T) {
+	resetCache()
 	awstest.MockConfigServiceForSetup = awstest.BuildMockConfigServiceSvcAllError()
 
 	ConfigServiceClientFunc = awstest.SetupMockConfigService
 
-	resources, err := PollConfigServices(&awsmodels.ResourcePollerInput{
+	resources, marker, err := PollConfigServices(&awsmodels.ResourcePollerInput{
 		AuthSource:          &awstest.ExampleAuthSource,
 		AuthSourceParsedARN: awstest.ExampleAuthSourceParsedARN,
 		IntegrationID:       awstest.ExampleIntegrationID,
-		Regions:             awstest.ExampleRegions,
+		Region:              awstest.ExampleRegion,
 		Timestamp:           &awstest.ExampleTime,
 	})
 
-	require.NoError(t, err)
-	// The meta resource should still send.
-	assert.Len(t, resources, 1)
+	require.Error(t, err)
+	assert.Nil(t, marker)
+	assert.Len(t, resources, 0)
 }

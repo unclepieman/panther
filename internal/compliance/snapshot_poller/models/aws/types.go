@@ -19,10 +19,13 @@ package aws
  */
 
 import (
-	"github.com/aws/aws-sdk-go/aws/arn"
-	"github.com/go-openapi/strfmt"
+	"regexp"
+	"strings"
+	"time"
 
-	resourcesapimodels "github.com/panther-labs/panther/api/gateway/resources/models"
+	"github.com/aws/aws-sdk-go/aws/arn"
+
+	resourcesapimodels "github.com/panther-labs/panther/api/lambda/resources/models"
 )
 
 // Used to populate the GenericAWSResource.Region field for global AWS resources
@@ -32,9 +35,9 @@ const GlobalRegion = "global"
 // probably exist in a more global package but for now since this is the only poller it will exist
 // here.
 type GenericResource struct {
-	ResourceID   *string          `json:"ResourceId"`   // A panther wide unique identifier
-	ResourceType *string          `json:"ResourceType"` // A panther defined resource type
-	TimeCreated  *strfmt.DateTime `json:"TimeCreated"`  // A standardized format for when the resource was created
+	ResourceID   *string    `json:"ResourceId"`   // A panther wide unique identifier
+	ResourceType *string    `json:"ResourceType"` // A panther defined resource type
+	TimeCreated  *time.Time `json:"TimeCreated"`  // A standardized format for when the resource was created
 }
 
 // GenericAWSResource contains information that is standard across AWS resources
@@ -63,12 +66,48 @@ type GenericAWSResource struct {
 
 // ResourcePollerInput contains the metadata to request AWS resource info.
 type ResourcePollerInput struct {
-	AuthSource          *string
-	AuthSourceParsedARN arn.ARN
-	IntegrationID       *string
-	Regions             []*string
-	Timestamp           *strfmt.DateTime
+	AuthSource              *string
+	AuthSourceParsedARN     arn.ARN
+	IntegrationID           *string
+	Region                  *string
+	Timestamp               *time.Time
+	NextPageToken           *string
+	RegionIgnoreList        []string
+	ResourceTypeIgnoreList  []string
+	ResourceRegexIgnoreList []string
+	CompiledRegexIgnoreList []*regexp.Regexp
+}
+
+func (r *ResourcePollerInput) CompileRegex() error {
+	r.CompiledRegexIgnoreList = make([]*regexp.Regexp, 0, len(r.ResourceRegexIgnoreList))
+
+	for _, glob := range r.ResourceRegexIgnoreList {
+		if glob == "" {
+			continue
+		}
+		// First,  escape any regex special characters
+		escaped := regexp.QuoteMeta(glob)
+
+		// Wildcards in the original pattern are now escaped literals - convert back
+		// NOTE: currently no way for user to specify a glob that would match a literal '*'
+		regex := "^" + strings.ReplaceAll(escaped, `\*`, `.*`) + "$"
+		compiledGlob, err := regexp.Compile(regex)
+		if err != nil {
+			return err
+		}
+		r.CompiledRegexIgnoreList = append(r.CompiledRegexIgnoreList, compiledGlob)
+	}
+	return nil
+}
+
+func (r *ResourcePollerInput) ShouldIgnoreResource(resourceID string) (ignore bool) {
+	for _, compiledRegex := range r.CompiledRegexIgnoreList {
+		if compiledRegex.MatchString(resourceID) {
+			return true
+		}
+	}
+	return false
 }
 
 // ResourcePoller represents a function to poll a specific AWS resource.
-type ResourcePoller func(input *ResourcePollerInput) ([]*resourcesapimodels.AddResourceEntry, error)
+type ResourcePoller func(input *ResourcePollerInput) ([]resourcesapimodels.AddResourceEntry, *string, error)

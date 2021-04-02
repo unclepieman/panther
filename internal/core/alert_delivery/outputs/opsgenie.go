@@ -19,14 +19,17 @@ package outputs
  */
 
 import (
-	"github.com/aws/aws-sdk-go/aws"
+	"context"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	jsoniter "github.com/json-iterator/go"
+
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
-var (
-	opsgenieEndpoint = "https://api.opsgenie.com/v2/alerts"
+const (
+	OpsgenieServiceRegionUS = "US"
+	OpsgenieServiceRegionEU = "EU"
 )
 
 var pantherToOpsGeniePriority = map[string]string{
@@ -39,30 +42,34 @@ var pantherToOpsGeniePriority = map[string]string{
 
 // Opsgenie alert send an alert.
 func (client *OutputClient) Opsgenie(
-	alert *alertmodels.Alert, config *outputmodels.OpsgenieConfig) *AlertDeliveryError {
+	ctx context.Context, alert *deliverymodel.Alert, config *outputModels.OpsgenieConfig) *AlertDeliveryResponse {
 
-	tagsItem := aws.StringValueSlice(alert.Tags)
-
-	description := "<strong>Description:</strong> " + aws.StringValue(alert.PolicyDescription)
+	description := "<strong>Description:</strong> " + alert.AnalysisDescription
 	link := "\n<a href=\"" + generateURL(alert) + "\">Click here to view in the Panther UI</a>"
-	runBook := "\n <strong>Runbook:</strong> " + aws.StringValue(alert.Runbook)
-	severity := "\n <strong>Severity:</strong> " + aws.StringValue(alert.Severity)
+	runBook := "\n <strong>Runbook:</strong> " + alert.Runbook
+	severity := "\n <strong>Severity:</strong> " + alert.Severity
+
+	// Best effort attempt to marshal Alert Context
+	marshaledContext, _ := jsoniter.MarshalToString(alert.Context)
+	alertContext := "\n <strong>AlertContext:</strong> " + marshaledContext
 
 	opsgenieRequest := map[string]interface{}{
 		"message":     generateAlertTitle(alert),
-		"description": description + link + runBook + severity,
-		"tags":        tagsItem,
-		"priority":    pantherToOpsGeniePriority[aws.StringValue(alert.Severity)],
+		"description": description + link + runBook + severity + alertContext,
+		"tags":        alert.Tags,
+		"priority":    pantherToOpsGeniePriority[alert.Severity],
 	}
-	authorization := "GenieKey " + *config.APIKey
+	authorization := "GenieKey " + config.APIKey
 	requestHeader := map[string]string{
 		AuthorizationHTTPHeader: authorization,
 	}
 
+	requestEndpoint := GetOpsGenieRegionalEndpoint(config.ServiceRegion)
+
 	postInput := &PostInput{
-		url:     opsgenieEndpoint,
+		url:     requestEndpoint,
 		body:    opsgenieRequest,
 		headers: requestHeader,
 	}
-	return client.httpWrapper.post(postInput)
+	return client.httpWrapper.post(ctx, postInput)
 }

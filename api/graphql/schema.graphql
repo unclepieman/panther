@@ -1,7 +1,8 @@
 scalar AWSEmail
-scalar AWSTimestamp
 scalar AWSDateTime
+scalar AWSTimestamp
 scalar AWSJSON
+scalar Long
 
 schema {
   query: Query
@@ -9,35 +10,51 @@ schema {
 }
 
 type Mutation {
+  addCustomLog(input: AddOrUpdateCustomLogInput!): GetCustomLogOutput!
+  addDataModel(input: AddOrUpdateDataModelInput!): DataModel!
   addDestination(input: DestinationInput!): Destination
   addComplianceIntegration(input: AddComplianceIntegrationInput!): ComplianceIntegration!
-  addLogIntegration(input: AddLogIntegrationInput!): LogIntegration!
-  addPolicy(input: CreateOrModifyPolicyInput!): PolicyDetails
-  addRule(input: CreateOrModifyRuleInput!): RuleDetails
+  addS3LogIntegration(input: AddS3LogIntegrationInput!): S3LogIntegration!
+  addSqsLogIntegration(input: AddSqsLogIntegrationInput!): SqsLogSourceIntegration!
+  addPolicy(input: AddPolicyInput!): Policy!
+  addRule(input: AddRuleInput!): Rule!
+  addGlobalPythonModule(input: AddGlobalPythonModuleInput!): GlobalPythonModule!
+  deleteDataModel(input: DeleteDataModelInput!): Boolean
+  deleteDetections(input: DeleteDetectionInput!): Boolean
   deleteDestination(id: ID!): Boolean
   deleteComplianceIntegration(id: ID!): Boolean
+  deleteCustomLog(input: DeleteCustomLogInput): DeleteCustomLogOutput!
   deleteLogIntegration(id: ID!): Boolean
-  deletePolicy(input: DeletePolicyInput!): Boolean
-  deleteRule(input: DeleteRuleInput!): Boolean
+  deleteGlobalPythonModule(input: DeleteGlobalPythonModuleInput!): Boolean
   deleteUser(id: ID!): Boolean
   inviteUser(input: InviteUserInput): User!
   remediateResource(input: RemediateResourceInput!): Boolean
+  deliverAlert(input: DeliverAlertInput!): AlertSummary!
   resetUserPassword(id: ID!): User!
   suppressPolicies(input: SuppressPoliciesInput!): Boolean
-  testPolicy(input: TestPolicyInput): TestPolicyResponse
+  testPolicy(input: TestPolicyInput!): TestPolicyResponse!
+  testRule(input: TestRuleInput!): TestRuleResponse!
+  updateAlertStatus(input: UpdateAlertStatusInput!): [AlertSummary!]!
+  updateDataModel(input: AddOrUpdateDataModelInput!): DataModel!
+  updateCustomLog(input: AddOrUpdateCustomLogInput!): GetCustomLogOutput!
   updateDestination(input: DestinationInput!): Destination
   updateComplianceIntegration(input: UpdateComplianceIntegrationInput!): ComplianceIntegration!
-  updateLogIntegration(input: UpdateLogIntegrationInput!): LogIntegration!
+  updateS3LogIntegration(input: UpdateS3LogIntegrationInput!): S3LogIntegration!
+  updateSqsLogIntegration(input: UpdateSqsLogIntegrationInput!): SqsLogSourceIntegration!
   updateGeneralSettings(input: UpdateGeneralSettingsInput!): GeneralSettings!
-  updatePolicy(input: CreateOrModifyPolicyInput!): PolicyDetails
-  updateRule(input: CreateOrModifyRuleInput!): RuleDetails
+  updatePolicy(input: UpdatePolicyInput!): Policy!
+  updateRule(input: UpdateRuleInput!): Rule!
   updateUser(input: UpdateUserInput!): User!
-  uploadPolicies(input: UploadPoliciesInput!): UploadPoliciesResponse
+  uploadDetections(input: UploadDetectionsInput!): UploadDetectionsResponse
+  updateGlobalPythonlModule(input: ModifyGlobalPythonModuleInput!): GlobalPythonModule!
+  updateAnalysisPack(input: UpdateAnalysisPackInput!): AnalysisPack!
 }
 
 type Query {
   alert(input: GetAlertInput!): AlertDetails
   alerts(input: ListAlertsInput): ListAlertsResponse
+  detections(input: ListDetectionsInput): ListDetectionsResponse!
+  sendTestAlert(input: SendTestAlertInput!): [DeliveryResponse]!
   destination(id: ID!): Destination
   destinations: [Destination]
   generalSettings: GeneralSettings!
@@ -45,21 +62,126 @@ type Query {
   getComplianceIntegrationTemplate(
     input: GetComplianceIntegrationTemplateInput!
   ): IntegrationTemplate!
-  getLogIntegration(id: ID!): LogIntegration!
-  getLogIntegrationTemplate(input: GetLogIntegrationTemplateInput!): IntegrationTemplate!
+  getDataModel(id: ID!): DataModel
+  getS3LogIntegration(id: ID!): S3LogIntegration!
+  getS3LogIntegrationTemplate(input: GetS3LogIntegrationTemplateInput!): IntegrationTemplate!
+  getSqsLogIntegration(id: ID!): SqsLogSourceIntegration!
   remediations: AWSJSON
   resource(input: GetResourceInput!): ResourceDetails
   resources(input: ListResourcesInput): ListResourcesResponse
   resourcesForPolicy(input: ResourcesForPolicyInput!): ListComplianceItemsResponse
-  policy(input: GetPolicyInput!): PolicyDetails
-  policies(input: ListPoliciesInput): ListPoliciesResponse
+  getGlobalPythonModule(input: GetGlobalPythonModuleInput!): GlobalPythonModule!
+  policy(input: GetPolicyInput!): Policy
   policiesForResource(input: PoliciesForResourceInput): ListComplianceItemsResponse
+  listAvailableLogTypes: ListAvailableLogTypesResponse!
   listComplianceIntegrations: [ComplianceIntegration!]!
+  listDataModels(input: ListDataModelsInput!): ListDataModelsResponse!
   listLogIntegrations: [LogIntegration!]!
+  listAnalysisPacks(input: ListAnalysisPacksInput) : ListAnalysisPacksResponse!
   organizationStats(input: OrganizationStatsInput): OrganizationStatsResponse
-  rule(input: GetRuleInput!): RuleDetails
-  rules(input: ListRulesInput): ListRulesResponse
+  getLogAnalysisMetrics(input: LogAnalysisMetricsInput!): LogAnalysisMetricsResponse!
+  rule(input: GetRuleInput!): Rule
+  getAnalysisPack(id: ID!): AnalysisPack!
+  listGlobalPythonModules(input: ListGlobalPythonModuleInput!): ListGlobalPythonModulesResponse!
   users: [User!]!
+  getCustomLog(input: GetCustomLogInput!): GetCustomLogOutput!
+  listCustomLogs: [CustomLogRecord!]!
+}
+
+input ListAnalysisPacksInput {
+  enabled: Boolean
+  updateAvailable: Boolean
+  nameContains: String
+  sortDir: SortDirEnum # defaults to `ascending`
+  # Paging
+  pageSize: Int # defaults to `25`
+  page: Int # defaults to `1`
+}
+
+input AnalysisPackVersionInput {
+  id: Int!
+  semVer: String!
+}
+
+input UpdateAnalysisPackInput {
+  enabled: Boolean
+  id: ID!
+  versionId: Int
+}
+
+input ListDetectionsInput {
+  # Policy Only
+  complianceStatus: ComplianceStatusEnum
+  hasRemediation: Boolean
+  resourceTypes: [String!]
+
+  # Rule Only
+  logTypes: [String!]
+
+  # Common
+  analysisTypes: [DetectionTypeEnum!]
+  nameContains: String
+  enabled: Boolean
+  severity: [SeverityEnum!]
+  createdBy: String
+  lastModifiedBy: String
+  initialSet: Boolean
+  tags: [String!]
+  sortBy: ListDetectionsSortFieldsEnum # defaults to `id`
+  sortDir: SortDirEnum # defaults to `ascending`
+  pageSize: Int # defaults to `25`
+  page: Int # defaults to `1`
+}
+
+input DeleteEntry {
+  id: ID!
+}
+
+input DataModelMappingInput {
+  name: String!
+  path: String
+  method: String
+}
+
+input AddOrUpdateDataModelInput {
+  displayName: String!
+  id: ID!
+  enabled: Boolean!
+  logTypes: [String!]!
+  mappings: [DataModelMappingInput!]!
+  body: String
+}
+
+input ListDataModelsInput {
+  enabled: Boolean
+  nameContains: String
+  logTypes: [String!]
+  sortBy: ListDataModelsSortFieldsEnum
+  sortDir: SortDirEnum
+  page: Int
+  pageSize: Int
+}
+
+input DeleteDataModelInput {
+  dataModels: [DeleteEntry!]!
+}
+
+input DeleteCustomLogInput {
+  logType: String!
+  revision: Int!
+}
+
+input AddOrUpdateCustomLogInput {
+  revision: Int
+  logType: String!
+  description: String!
+  referenceURL: String!
+  logSpec: String!
+}
+
+input GetCustomLogInput {
+  logType: String!
+  revision: Int
 }
 
 input GetComplianceIntegrationTemplateInput {
@@ -69,19 +191,30 @@ input GetComplianceIntegrationTemplateInput {
   cweEnabled: Boolean
 }
 
-input GetLogIntegrationTemplateInput {
+input GetS3LogIntegrationTemplateInput {
   awsAccountId: String!
   integrationLabel: String!
   s3Bucket: String!
-  s3Prefix: String
   kmsKey: String
-  logTypes: [String!]!
+  managedBucketNotifications: Boolean!
 }
 
 input ListAlertsInput {
   ruleId: ID
-  pageSize: Int
+  pageSize: Int # defaults to `25`
   exclusiveStartKey: String
+  severity: [SeverityEnum]
+  logTypes: [String!]
+  resourceTypes: [String!]
+  types: [AlertTypesEnum!]
+  nameContains: String
+  createdAtBefore: AWSDateTime
+  createdAtAfter: AWSDateTime
+  status: [AlertStatusesEnum]
+  eventCountMin: Int
+  eventCountMax: Int
+  sortBy: ListAlertsSortFieldsEnum # defaults to `createdAt`
+  sortDir: SortDirEnum # defaults to `descending` (always on `createdAt` field)
 }
 
 input GetAlertInput {
@@ -90,14 +223,73 @@ input GetAlertInput {
   eventsExclusiveStartKey: String
 }
 
+type ListDetectionsResponse {
+  detections: [Detection!]!
+  paging: PagingData!
+}
+type ListAnalysisPacksResponse {
+  packs: [AnalysisPack!]!
+  paging: PagingData!
+}
+
+type DataModelMapping {
+  name: String!
+  path: String
+  method: String
+}
+
+type DataModel {
+  displayName: String!
+  id: ID!
+  enabled: Boolean!
+  logTypes: [String!]!
+  mappings: [DataModelMapping!]!
+  body: String
+  createdAt: AWSDateTime!
+  lastModified: AWSDateTime!
+}
+
+type ListDataModelsResponse {
+  models: [DataModel!]!
+  paging: PagingData!
+}
+
+type CustomLogOutput {
+  error: Error
+  record: CustomLogRecord
+}
+
+type DeleteCustomLogOutput {
+  error: Error
+}
+
+type ListAvailableLogTypesResponse {
+  logTypes: [String!]!
+}
+
+type GetCustomLogOutput {
+  error: Error
+  record: CustomLogRecord
+}
+
+type CustomLogRecord {
+  logType: String!
+  revision: Int!
+  updatedAt: String!
+  description: String!
+  referenceURL: String!
+  logSpec: String!
+}
+
 type IntegrationTemplate {
   body: String!
   stackName: String!
 }
 
 type IntegrationItemHealthStatus {
-  healthy: Boolean
-  errorMessage: String
+  healthy: Boolean!
+  message: String!
+  rawErrorMessage: String
 }
 
 type ComplianceIntegrationHealth {
@@ -106,22 +298,93 @@ type ComplianceIntegrationHealth {
   remediationRoleStatus: IntegrationItemHealthStatus!
 }
 
-type LogIntegrationHealth {
+type S3LogIntegrationHealth {
   processingRoleStatus: IntegrationItemHealthStatus!
   s3BucketStatus: IntegrationItemHealthStatus!
   kmsKeyStatus: IntegrationItemHealthStatus!
+  getObjectStatus: IntegrationItemHealthStatus # can be null for sources created in Panther<1.16
+  bucketNotificationsStatus: IntegrationItemHealthStatus
 }
 
-type AlertDetails {
-  alertId: ID!
+type SqsLogIntegrationHealth {
+  sqsStatus: IntegrationItemHealthStatus
+}
+
+type AlertSummaryPolicyInfo {
+  policyId: ID
+  resourceId: String
+  policySourceId: String!
+  resourceTypes: [String!]!
+}
+
+type AlertSummaryRuleInfo {
   ruleId: ID
-  title: String!
-  creationTime: AWSDateTime!
-  updateTime: AWSDateTime!
+  logTypes: [String!]!
   eventsMatched: Int!
+}
+
+type AlertDetailsRuleInfo {
+  ruleId: ID
+  logTypes: [String!]!
+  eventsMatched: Int!
+  dedupString: String!
   events: [AWSJSON!]!
   eventsLastEvaluatedKey: String
-  dedupString: String!
+}
+
+union AlertSummaryDetectionInfo = AlertSummaryRuleInfo | AlertSummaryPolicyInfo
+union AlertDetailsDetectionInfo = AlertDetailsRuleInfo | AlertSummaryPolicyInfo
+
+interface Alert {
+  alertId: ID!
+  creationTime: AWSDateTime!
+  deliveryResponses: [DeliveryResponse]!
+  severity: SeverityEnum!
+  status: AlertStatusesEnum!
+  title: String!
+  type: AlertTypesEnum!
+  lastUpdatedBy: ID # gets mapped to a User in the frontend
+  lastUpdatedByTime: AWSDateTime # stores the timestamp of the last person who modified the Alert
+  updateTime: AWSDateTime! # stores the timestamp from an update from a dedup event
+}
+
+type AlertDetails implements Alert {
+  alertId: ID!
+  creationTime: AWSDateTime!
+  deliveryResponses: [DeliveryResponse]!
+  severity: SeverityEnum!
+  status: AlertStatusesEnum!
+  title: String!
+  type: AlertTypesEnum!
+  lastUpdatedBy: ID # gets mapped to a User in the frontend
+  lastUpdatedByTime: AWSDateTime # stores the timestamp of the last person who modified the Alert
+  updateTime: AWSDateTime! # stores the timestamp from an update from a dedup event
+  detection: AlertDetailsDetectionInfo!
+  description: String
+  reference: String
+  runbook: String
+}
+
+type AlertSummary implements Alert {
+  alertId: ID!
+  creationTime: AWSDateTime!
+  deliveryResponses: [DeliveryResponse]!
+  type: AlertTypesEnum!
+  severity: SeverityEnum!
+  status: AlertStatusesEnum!
+  title: String!
+  lastUpdatedBy: ID # gets mapped to a User in the frontend
+  lastUpdatedByTime: AWSDateTime # stores the timestamp of the last person who modified the Alert
+  updateTime: AWSDateTime! # stores the timestamp from an update from a dedup event
+  detection: AlertSummaryDetectionInfo!
+}
+
+type DeliveryResponse {
+  outputId: ID!
+  message: String!
+  statusCode: Int!
+  success: Boolean!
+  dispatchedAt: AWSDateTime!
 }
 
 type ListAlertsResponse {
@@ -129,91 +392,149 @@ type ListAlertsResponse {
   lastEvaluatedKey: String
 }
 
-type AlertSummary {
-  alertId: String!
-  creationTime: AWSDateTime!
-  eventsMatched: Int!
-  title: String!
-  updateTime: AWSDateTime!
-  ruleId: String
-  severity: SeverityEnum
+input DeliverAlertInput {
+  alertId: ID!
+  outputIds: [ID!]!
 }
 
-input ListRulesInput {
-  nameContains: String
-  enabled: Boolean
-  logTypes: String # Comma-separated string
-  severity: SeverityEnum
-  tags: String # Comma-separated string
-  # Sorting
-  sortBy: ListRulesSortFieldsEnum # defaults to `id`
-  sortDir: SortDirEnum # defaults to `ascending`
-  # Paging
-  pageSize: Int # defaults to `25`
-  page: Int # defaults to `1`
+input UpdateAlertStatusInput {
+  alertIds: [ID!]!
+  status: AlertStatusesEnum!
 }
 
-input CreateOrModifyRuleInput {
+input SendTestAlertInput {
+  outputIds: [ID!]!
+}
+
+input AddRuleInput {
   body: String!
+  dedupPeriodMinutes: Int!
+  threshold: Int!
   description: String
   displayName: String
   enabled: Boolean!
   id: ID!
+  logTypes: [String!]
+  outputIds: [ID!]
   reference: String
-  logTypes: [String]
   runbook: String
   severity: SeverityEnum!
-  dedupPeriodMinutes: Int!
-  tags: [String]
-  tests: [PolicyUnitTestInput] # Rule and Policy share the same tests structure
+  tags: [String!]
+  tests: [DetectionTestDefinitionInput!]
 }
 
-input GetRuleInput {
-  ruleId: ID!
-  versionId: ID
-}
-
-input DeleteRuleInput {
-  rules: [DeleteRuleInputItem!]!
-}
-
-input DeleteRuleInputItem {
-  id: ID!
-}
-
-type RuleSummary {
-  displayName: String
-  enabled: Boolean
-  id: ID!
-  lastModified: AWSDateTime
-  logTypes: [String]
-  severity: SeverityEnum
-  tags: [String]
-}
-
-type ListRulesResponse {
-  paging: PagingData
-  rules: [RuleSummary]
-}
-
-type RuleDetails {
+input UpdateRuleInput {
   body: String
-  createdAt: AWSDateTime
-  createdBy: ID
+  dedupPeriodMinutes: Int
+  threshold: Int
   description: String
   displayName: String
   enabled: Boolean
-  id: String!
-  lastModified: AWSDateTime
-  lastModifiedBy: ID
-  logTypes: [String]
+  id: ID!
+  logTypes: [String!]
+  outputIds: [ID!]
   reference: String
   runbook: String
   severity: SeverityEnum
-  dedupPeriodMinutes: Int!
-  tags: [String]
-  tests: [PolicyUnitTest] # Policy and Rule have the same tests structure so we reuse the struct here
+  tags: [String!]
+  tests: [DetectionTestDefinitionInput!]
+}
+
+input GetRuleInput {
+  id: ID!
   versionId: ID
+}
+
+input DeleteDetectionInput {
+  detections: [DeleteEntry!]!
+}
+
+interface Detection {
+  body: String!
+  createdAt: AWSDateTime!
+  createdBy: ID
+  description: String
+  displayName: String
+  enabled: Boolean!
+  id: ID!
+  lastModified: AWSDateTime
+  lastModifiedBy: ID
+  outputIds: [ID!]!
+  reference: String
+  runbook: String
+  severity: SeverityEnum!
+  tags: [String!]!
+  tests: [DetectionTestDefinition!]!
+  versionId: ID
+  analysisType: DetectionTypeEnum!
+}
+
+type Rule implements Detection {
+  body: String!
+  createdAt: AWSDateTime!
+  createdBy: ID
+  dedupPeriodMinutes: Int!
+  threshold: Int!
+  description: String
+  displayName: String
+  enabled: Boolean!
+  id: ID!
+  lastModified: AWSDateTime
+  lastModifiedBy: ID
+  logTypes: [String!]
+  outputIds: [ID!]!
+  reference: String
+  runbook: String
+  severity: SeverityEnum!
+  tags: [String!]!
+  tests: [DetectionTestDefinition!]!
+  versionId: ID
+  analysisType: DetectionTypeEnum!
+}
+
+type AnalysisPackVersion {
+  id: Int!
+  semVer: String!
+}
+
+type AnalysisPackDefinition {
+  # This is an array Detection['id'] that are related to the pack
+  IDs: [ID!]
+}
+
+type AnalysisPackTypes {
+  GLOBAL: Int
+  RULE: Int
+  DATAMODEL: Int
+  POLICY: Int
+}
+
+type AnalysisPack {
+  id: ID!
+  enabled: Boolean!
+  updateAvailable: Boolean!
+
+  description: String!
+  displayName: String!
+  packVersion: AnalysisPackVersion!
+  availableVersions: [AnalysisPackVersion!]!
+
+  createdBy: ID!
+  lastModifiedBy: ID!
+  createdAt: AWSDateTime!
+  lastModified: AWSDateTime!
+
+  packDefinition: AnalysisPackDefinition!
+  packTypes: AnalysisPackTypes!
+
+  enumeration: AnalysisPackEnumeration!
+}
+
+type AnalysisPackEnumeration {
+  paging: PagingData!
+  detections: [Detection!]!
+  models: [DataModel!]!
+  globals: [GlobalPythonModule!]!
 }
 
 input SuppressPoliciesInput {
@@ -268,6 +589,13 @@ input OrganizationStatsInput {
   limitTopFailing: Int
 }
 
+input LogAnalysisMetricsInput {
+  intervalMinutes: Int!
+  fromDate: AWSDateTime!
+  toDate: AWSDateTime!
+  metricNames: [String!]!
+}
+
 type ComplianceStatusCounts {
   error: Int
   fail: Int
@@ -294,27 +622,80 @@ type ScannedResources {
 type OrganizationStatsResponse {
   appliedPolicies: OrganizationReportBySeverity
   scannedResources: ScannedResources
-  topFailingPolicies: [PolicySummary]
-  topFailingResources: [ResourceSummary]
+  topFailingPolicies: [Policy!]!
+  topFailingResources: [ResourceSummary!]!
+}
+
+type LongSeries {
+  label: String!
+  values: [Long!]!
+}
+
+type LongSeriesData {
+  timestamps: [AWSDateTime!]!
+  series: [LongSeries!]!
+}
+
+type FloatSeries {
+  label: String!
+  values: [Float!]!
+}
+
+type FloatSeriesData {
+  timestamps: [AWSDateTime!]!
+  series: [FloatSeries!]!
+}
+
+type SingleValue {
+  label: String!
+  value: Int!
+}
+
+type LogAnalysisMetricsResponse {
+  eventsProcessed: LongSeriesData!
+  alertsBySeverity: LongSeriesData!
+  """
+  TODO: uncomment when event latency data are fixed (PR #2509, Ticket #2492)
+  eventsLatency: FloatSeriesData!
+  """
+  totalAlertsDelta: [SingleValue!]!
+  alertsByRuleID: [SingleValue!]!
+  fromDate: AWSDateTime!
+  toDate: AWSDateTime!
+  intervalMinutes: Int!
 }
 
 input UpdateGeneralSettingsInput {
   displayName: String
   email: String
   errorReportingConsent: Boolean
+  analyticsConsent: Boolean
 }
 
 type GeneralSettings {
   displayName: String
   email: String
   errorReportingConsent: Boolean
+  analyticsConsent: Boolean
 }
 
 input TestPolicyInput {
-  body: String
-  resourceTypes: [String]
-  analysisType: AnalysisTypeEnum
-  tests: [PolicyUnitTestInput!]
+  body: String!
+  resourceTypes: [String!]!
+  tests: [DetectionTestDefinitionInput!]!
+}
+
+input TestRuleInput {
+  body: String!
+  logTypes: [String!]!
+  tests: [DetectionTestDefinitionInput!]!
+}
+
+type SqsConfig {
+  logTypes: [String!]!
+  allowedPrincipalArns: [String]
+  allowedSourceArns: [String]
+  queueUrl: String!
 }
 
 type ComplianceIntegration {
@@ -325,22 +706,49 @@ type ComplianceIntegration {
   integrationLabel: String!
   cweEnabled: Boolean
   remediationEnabled: Boolean
+  regionIgnoreList: [String!]
+  resourceTypeIgnoreList: [String!]
   health: ComplianceIntegrationHealth!
   stackName: String!
 }
 
-type LogIntegration {
+union LogIntegration = S3LogIntegration | SqsLogSourceIntegration
+
+type S3PrefixLogTypes {
+  prefix: String!
+  logTypes: [String!]!
+}
+type S3LogIntegration {
   awsAccountId: String!
   createdAtTime: AWSDateTime!
   createdBy: ID!
   integrationId: ID!
+  integrationType: String!
   integrationLabel: String!
+  lastEventReceived: AWSDateTime
   s3Bucket: String!
   s3Prefix: String
   kmsKey: String
-  logTypes: [String!]!
-  health: LogIntegrationHealth!
+  s3PrefixLogTypes: [S3PrefixLogTypes!]!
+  managedBucketNotifications: Boolean!
+  notificationsConfigurationSucceeded: Boolean!
+  health: S3LogIntegrationHealth!
   stackName: String!
+}
+
+type ManagedS3Resources {
+  topicARN: String
+}
+
+type SqsLogSourceIntegration {
+  createdAtTime: AWSDateTime!
+  createdBy: ID!
+  integrationId: ID!
+  integrationLabel: String!
+  integrationType: String!
+  lastEventReceived: AWSDateTime
+  sqsConfig: SqsConfig!
+  health: SqsLogIntegrationHealth!
 }
 
 input AddComplianceIntegrationInput {
@@ -348,15 +756,33 @@ input AddComplianceIntegrationInput {
   integrationLabel: String!
   remediationEnabled: Boolean
   cweEnabled: Boolean
+  regionIgnoreList: [String!]
+  resourceTypeIgnoreList: [String!]
 }
 
-input AddLogIntegrationInput {
+input S3PrefixLogTypesInput {
+  prefix: String!
+  logTypes: [String!]!
+}
+
+input AddS3LogIntegrationInput {
   awsAccountId: String!
   integrationLabel: String!
   s3Bucket: String!
   kmsKey: String
-  s3Prefix: String
+  s3PrefixLogTypes: [S3PrefixLogTypesInput!]!
+  managedBucketNotifications: Boolean!
+}
+
+input SqsLogConfigInput {
   logTypes: [String!]!
+  allowedPrincipalArns: [String]!
+  allowedSourceArns: [String]!
+}
+
+input AddSqsLogIntegrationInput {
+  integrationLabel: String!
+  sqsConfig: SqsLogConfigInput!
 }
 
 input UpdateComplianceIntegrationInput {
@@ -364,20 +790,22 @@ input UpdateComplianceIntegrationInput {
   integrationLabel: String
   cweEnabled: Boolean
   remediationEnabled: Boolean
+  regionIgnoreList: [String!]
+  resourceTypeIgnoreList: [String!]
 }
 
-input UpdateLogIntegrationInput {
+input UpdateS3LogIntegrationInput {
   integrationId: String!
   integrationLabel: String
   s3Bucket: String
   kmsKey: String
-  s3Prefix: String
-  logTypes: [String!]
+  s3PrefixLogTypes: [S3PrefixLogTypesInput!]
 }
 
-type ListPoliciesResponse {
-  paging: PagingData
-  policies: [PolicySummary]
+input UpdateSqsLogIntegrationInput {
+  integrationId: String!
+  integrationLabel: String!
+  sqsConfig: SqsLogConfigInput!
 }
 
 type ListResourcesResponse {
@@ -396,26 +824,29 @@ type Destination {
   outputConfig: DestinationConfig!
   verificationStatus: String
   defaultForSeverity: [SeverityEnum]!
+  alertTypes: [AlertTypesEnum!]!
 }
 
 type DestinationConfig {
   slack: SlackConfig
   sns: SnsConfig
-  sqs: SqsConfig
+  sqs: SqsDestinationConfig
   pagerDuty: PagerDutyConfig
   github: GithubConfig
   jira: JiraConfig
   opsgenie: OpsgenieConfig
   msTeams: MsTeamsConfig
   asana: AsanaConfig
+  customWebhook: CustomWebhookConfig
 }
 
-type SqsConfig {
+type SqsDestinationConfig {
   queueUrl: String!
 }
 
 type OpsgenieConfig {
   apiKey: String!
+  serviceRegion: OpsgenieServiceRegionEnum!
 }
 
 type MsTeamsConfig {
@@ -428,12 +859,17 @@ type JiraConfig {
   userName: String!
   apiKey: String!
   assigneeId: String
-  issueType: JiraIssueTypesEnum
+  issueType: String!
+  labels: [String!]!
 }
 
 type AsanaConfig {
   personalAccessToken: String!
   projectGids: [String!]!
+}
+
+type CustomWebhookConfig {
+  webhookURL: String!
 }
 
 type GithubConfig {
@@ -459,26 +895,29 @@ input DestinationInput {
   outputConfig: DestinationConfigInput!
   outputType: String!
   defaultForSeverity: [SeverityEnum]!
+  alertTypes: [AlertTypesEnum]!
 }
 
 input DestinationConfigInput {
   slack: SlackConfigInput
   sns: SnsConfigInput
-  sqs: SQSConfigInput
+  sqs: SqsConfigInput
   pagerDuty: PagerDutyConfigInput
   github: GithubConfigInput
   jira: JiraConfigInput
   opsgenie: OpsgenieConfigInput
   msTeams: MsTeamsConfigInput
   asana: AsanaConfigInput
+  customWebhook: CustomWebhookConfigInput
 }
 
-input SQSConfigInput {
+input SqsConfigInput {
   queueUrl: String!
 }
 
 input OpsgenieConfigInput {
   apiKey: String!
+  serviceRegion: OpsgenieServiceRegionEnum!
 }
 
 input MsTeamsConfigInput {
@@ -491,12 +930,17 @@ input JiraConfigInput {
   userName: String!
   apiKey: String!
   assigneeId: String
-  issueType: JiraIssueTypesEnum
+  issueType: String!
+  labels: [String!]
 }
 
 input AsanaConfigInput {
   personalAccessToken: String!
   projectGids: [String!]!
+}
+
+input CustomWebhookConfigInput {
+  webhookURL: String!
 }
 
 input GithubConfigInput {
@@ -516,29 +960,42 @@ input PagerDutyConfigInput {
   integrationKey: String!
 }
 
-type PolicyDetails {
-  actionDelaySeconds: Int
-  alertSuppressSeconds: Int
+type Policy implements Detection {
   autoRemediationId: ID
   autoRemediationParameters: AWSJSON
+  body: String!
   complianceStatus: ComplianceStatusEnum
-  body: String
-  createdAt: AWSDateTime
+  createdAt: AWSDateTime!
   createdBy: ID
   description: String
   displayName: String
-  enabled: Boolean
-  suppressions: [String]
+  enabled: Boolean!
   id: ID!
   lastModified: AWSDateTime
   lastModifiedBy: ID
+  outputIds: [ID!]!
   reference: String
-  resourceTypes: [String]
+  resourceTypes: [String!]
   runbook: String
-  severity: SeverityEnum
-  tags: [String]
-  tests: [PolicyUnitTest]
+  severity: SeverityEnum!
+  suppressions: [String!]
+  tags: [String!]!
+  tests: [DetectionTestDefinition!]!
   versionId: ID
+  analysisType: DetectionTypeEnum!
+}
+
+type GlobalPythonModule {
+  body: String!
+  description: String!
+  id: ID!
+  createdAt: AWSDateTime!
+  lastModified: AWSDateTime!
+}
+
+type ListGlobalPythonModulesResponse {
+  paging: PagingData
+  globals: [GlobalPythonModule]
 }
 
 type PagingData {
@@ -547,69 +1004,80 @@ type PagingData {
   totalItems: Int
 }
 
-type PolicySummary {
-  autoRemediationId: ID
-  autoRemediationParameters: AWSJSON
-  suppressions: [String]
-  complianceStatus: ComplianceStatusEnum
-  displayName: String
-  enabled: Boolean
-  id: ID!
-  lastModified: AWSDateTime
-  resourceTypes: [String]
-  severity: SeverityEnum
-  tags: [String]
-}
-
-input CreateOrModifyPolicyInput {
-  actionDelaySeconds: Int
-  alertSuppressSeconds: Int
+input AddPolicyInput {
   autoRemediationId: ID
   autoRemediationParameters: AWSJSON
   body: String!
   description: String
   displayName: String
   enabled: Boolean!
-  suppressions: [String]
   id: ID!
+  outputIds: [ID!]
   reference: String
   resourceTypes: [String]
   runbook: String
   severity: SeverityEnum!
+  suppressions: [String]
   tags: [String]
-  tests: [PolicyUnitTestInput]
+  tests: [DetectionTestDefinitionInput]
+}
+
+input UpdatePolicyInput {
+  autoRemediationId: ID
+  autoRemediationParameters: AWSJSON
+  body: String
+  description: String
+  displayName: String
+  enabled: Boolean
+  id: ID!
+  outputIds: [ID!]
+  reference: String
+  resourceTypes: [String]
+  runbook: String
+  severity: SeverityEnum
+  suppressions: [String]
+  tags: [String]
+  tests: [DetectionTestDefinitionInput]
 }
 
 input GetPolicyInput {
-  policyId: ID!
+  id: ID!
   versionId: ID
 }
 
-input DeletePolicyInput {
-  policies: [DeletePolicyInputItem]
-}
-
-input DeletePolicyInputItem {
-  id: ID!
-}
-
-input ListPoliciesInput {
-  complianceStatus: ComplianceStatusEnum
+input ListGlobalPythonModuleInput {
   nameContains: String
   enabled: Boolean
-  hasRemediation: Boolean
-  resourceTypes: String # Comma-separated string
-  severity: SeverityEnum
-  tags: String # Comma-separated string
   # Sorting
-  sortBy: ListPoliciesSortFieldsEnum # defaults to `id`
+  #  sortBy: ListRulesSortFieldsEnum # defaults to `id`
   sortDir: SortDirEnum # defaults to `ascending`
   # Paging
   pageSize: Int # defaults to `25`
   page: Int # defaults to `1`
 }
 
-input UploadPoliciesInput {
+input GetGlobalPythonModuleInput {
+  id: ID!
+  versionId: ID
+}
+
+input ModifyGlobalPythonModuleInput {
+  description: String!
+  id: ID!
+  body: String!
+}
+
+input AddGlobalPythonModuleInput {
+  id: ID!
+  description: String!
+  body: String!
+}
+
+input DeleteGlobalPythonModuleInput {
+  globals: [DeleteEntry!]!
+}
+
+input UploadDetectionsInput {
   data: String! # Base64-encoded zipfile with a policy bundle
 }
 
@@ -622,7 +1090,7 @@ input ListResourcesInput {
   deleted: Boolean
   idContains: String
   integrationId: ID
-  types: String # comma separated string
+  types: [String!]
   # Sorting
   sortBy: ListResourcesSortFieldsEnum # defaults to `id`
   sortDir: SortDirEnum # defaults to `ascending`
@@ -636,18 +1104,16 @@ input RemediateResourceInput {
   resourceId: ID!
 }
 
-type PolicyUnitTest {
+type DetectionTestDefinition {
   expectedResult: Boolean
   name: String
   resource: String # The `attributes` field of the Resource in stringified JSON format
-  resourceType: String # The `resourceType` of the unit test
 }
 
-input PolicyUnitTestInput {
+input DetectionTestDefinitionInput {
   expectedResult: Boolean
   name: String
   resource: String # The `attributes` field of the Resource in stringified JSON format
-  resourceType: String # The `resourceType` of the unit test
 }
 
 input UpdateUserInput {
@@ -657,25 +1123,79 @@ input UpdateUserInput {
   email: AWSEmail
 }
 
-type UploadPoliciesResponse {
-  totalPolicies: Int
-  newPolicies: Int
-  modifiedPolicies: Int
-  totalRules: Int
-  newRules: Int
-  modifiedRules: Int
+type UploadDetectionsResponse {
+  totalPolicies: Int!
+  newPolicies: Int!
+  modifiedPolicies: Int!
+
+  totalRules: Int!
+  newRules: Int!
+  modifiedRules: Int!
+
+  totalGlobals: Int!
+  newGlobals: Int!
+  modifiedGlobals: Int!
+
+  totalDataModels: Int!
+  newDataModels: Int!
+  modifiedDataModels: Int!
 }
 
-type PolicyUnitTestError {
-  name: String
-  errorMessage: String
+type Error {
+  code: String
+  message: String!
+}
+
+type TestDetectionSubRecord {
+  output: String
+  error: Error
+}
+
+interface TestRecord {
+  id: String!
+  name: String!
+  passed: Boolean!
+  error: Error
+}
+
+type TestPolicyRecordFunctions {
+  policyFunction: TestDetectionSubRecord!
+}
+
+type TestPolicyRecord implements TestRecord {
+  id: String!
+  name: String!
+  passed: Boolean!
+  functions: TestPolicyRecordFunctions!
+  error: Error
 }
 
 type TestPolicyResponse {
-  testSummary: Boolean # True if all tests passed
-  testsPassed: [String] # List of test names that passed
-  testsFailed: [String] # List of test names that failed
-  testsErrored: [PolicyUnitTestError] # List of test names that raised an error along with the message
+  results: [TestPolicyRecord!]!
+}
+
+type TestRuleRecordFunctions {
+  ruleFunction: TestDetectionSubRecord!
+  titleFunction: TestDetectionSubRecord
+  dedupFunction: TestDetectionSubRecord
+  alertContextFunction: TestDetectionSubRecord
+  descriptionFunction: TestDetectionSubRecord
+  destinationsFunction: TestDetectionSubRecord
+  referenceFunction: TestDetectionSubRecord
+  runbookFunction: TestDetectionSubRecord
+  severityFunction: TestDetectionSubRecord
+}
+
+type TestRuleRecord implements TestRecord {
+  id: String!
+  name: String!
+  passed: Boolean!
+  functions: TestRuleRecordFunctions!
+  error: Error
+}
+
+type TestRuleResponse {
+  results: [TestRuleRecord!]!
 }
 
 type ResourceSummary {
@@ -711,6 +1231,7 @@ input InviteUserInput {
   givenName: String
   familyName: String
   email: AWSEmail
+  messageAction: MessageActionEnum
 }
 
 enum ComplianceStatusEnum {
@@ -736,11 +1257,43 @@ enum ListPoliciesSortFieldsEnum {
 }
 
 enum ListRulesSortFieldsEnum {
-  enabled
+  displayName
   id
   lastModified
   logTypes
   severity
+}
+
+enum ListDetectionsSortFieldsEnum {
+  displayName
+  id
+  lastModified
+  enabled
+  severity
+}
+
+enum ListDataModelsSortFieldsEnum {
+  enabled
+  id
+  lastModified
+  logTypes
+}
+
+enum ListAlertsSortFieldsEnum {
+  createdAt
+}
+
+enum AlertStatusesEnum {
+  OPEN
+  TRIAGED
+  CLOSED
+  RESOLVED
+}
+
+enum AlertTypesEnum {
+  RULE
+  RULE_ERROR
+  POLICY
 }
 
 enum SortDirEnum {
@@ -754,12 +1307,6 @@ enum SeverityEnum {
   MEDIUM
   HIGH
   CRITICAL
-}
-
-enum JiraIssueTypesEnum {
-  Bug
-  Story
-  Task
 }
 
 enum AccountTypeEnum {
@@ -776,9 +1323,24 @@ enum DestinationTypeEnum {
   sns
   sqs
   asana
+  customwebhook
 }
 
-enum AnalysisTypeEnum {
+enum OpsgenieServiceRegionEnum {
+  EU
+  US
+}
+
+enum ErrorCodeEnum {
+  NotFound
+}
+
+enum MessageActionEnum {
+  RESEND
+  SUPPRESS
+}
+
+enum DetectionTypeEnum {
   RULE
   POLICY
 }

@@ -24,20 +24,34 @@ import (
 
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbiface"
+
+	"github.com/panther-labs/panther/api/lambda/alerts/models"
 )
 
 const (
-	RuleIDKey          = "ruleId"
-	AlertIDKey         = "id"
-	TimePartitionKey   = "timePartition"
-	TimePartitionValue = "defaultPartition"
+	RuleIDKey            = "ruleId"
+	AlertIDKey           = "id"
+	CreatedAtKey         = "creationTime"
+	TimePartitionKey     = "timePartition"
+	TimePartitionValue   = "defaultPartition"
+	TitleKey             = "title"
+	SeverityKey          = "severity"
+	EventCountKey        = "eventCount"
+	StatusKey            = "status"
+	LogTypesKey          = "logTypes"
+	ResourceTypesKey     = "resourceTypes"
+	DeliveryResponsesKey = "deliveryResponses"
+	LastUpdatedByKey     = "lastUpdatedBy"
+	LastUpdatedByTimeKey = "lastUpdatedByTime"
+	TypeKey              = "type"
 )
 
 // API defines the interface for the alerts table which can be used for mocking.
 type API interface {
-	GetAlert(*string) (*AlertItem, error)
-	ListByRule(string, *string, *int) ([]*AlertItem, *string, error)
-	ListAll(*string, *int) ([]*AlertItem, *string, error)
+	GetAlert(string) (*AlertItem, error)
+	ListAll(*models.ListAlertsInput) ([]*AlertItem, *string, error)
+	UpdateAlertStatus(*models.UpdateAlertStatusInput) ([]*AlertItem, error)
+	UpdateAlertDelivery(*models.UpdateAlertDeliveryInput) (*AlertItem, error)
 }
 
 // AlertsTable encapsulates a connection to the Dynamo alerts table.
@@ -48,6 +62,22 @@ type AlertsTable struct {
 	Client                             dynamodbiface.DynamoDBAPI
 }
 
+type AlertsTableEnvConfig struct {
+	// env config for instantiating a table.AlertsTable
+	AlertsTableName     string `required:"true" split_words:"true"`
+	AlertsRuleIndexName string `required:"true" split_words:"true"`
+	AlertsTimeIndexName string `required:"true" split_words:"true"`
+}
+
+func (config *AlertsTableEnvConfig) NewAlertsTable(client dynamodbiface.DynamoDBAPI) *AlertsTable {
+	return &AlertsTable{
+		AlertsTableName:                    config.AlertsTableName,
+		Client:                             client,
+		RuleIDCreationTimeIndexName:        config.AlertsRuleIndexName,
+		TimePartitionCreationTimeIndexName: config.AlertsTimeIndexName,
+	}
+}
+
 // The AlertsTable must satisfy the API interface.
 var _ API = (*AlertsTable)(nil)
 
@@ -56,15 +86,35 @@ type DynamoItem = map[string]*dynamodb.AttributeValue
 
 // AlertItem is a DDB representation of an Alert
 type AlertItem struct {
-	AlertID         string    `json:"id"`
-	RuleID          string    `json:"ruleId"`
-	RuleVersion     string    `json:"ruleVersion"`
-	RuleDisplayName *string   `json:"ruleDisplayName"`
-	Title           *string   `json:"title"`
-	DedupString     string    `json:"dedup"`
-	CreationTime    time.Time `json:"creationTime"`
-	UpdateTime      time.Time `json:"updateTime"`
-	Severity        string    `json:"severity"`
-	EventCount      int       `json:"eventCount"`
-	LogTypes        []string  `json:"logTypes"`
+	AlertID             string                     `json:"id"`
+	Type                string                     `json:"type"`
+	RuleID              string                     `json:"ruleId"`
+	RuleVersion         string                     `json:"ruleVersion"`
+	RuleDisplayName     *string                    `json:"ruleDisplayName"`
+	Title               string                     `json:"title"`
+	Description         *string                    `json:"description"`
+	Reference           *string                    `json:"reference"`
+	Runbook             *string                    `json:"runbook"`
+	Destinations        []string                   `json:"destinations,omitempty" validate:"dive,uuid4"`
+	DedupString         string                     `json:"dedup"`
+	FirstEventMatchTime time.Time                  `json:"firstEventMatchTime"`
+	CreationTime        time.Time                  `json:"creationTime"`
+	DeliveryResponses   []*models.DeliveryResponse `json:"deliveryResponses"`
+	// UpdateTime - stores the timestamp from an update from a dedup event
+	UpdateTime time.Time `json:"updateTime"`
+	Severity   string    `json:"severity"`
+	Status     string    `json:"status"`
+	EventCount int       `json:"eventCount"`
+	LogTypes   []string  `json:"logTypes"`
+	// LastUpdatedBy - stores the UserID of the last person who modified the Alert
+	LastUpdatedBy string `json:"lastUpdatedBy"`
+	// LastUpdatedByTime - stores the timestamp of the last person who modified the Alert
+	LastUpdatedByTime time.Time `json:"lastUpdatedByTime"`
+	// Policy related fields
+	PolicyID          string   `json:"policyId"`
+	PolicyDisplayName string   `json:"policyDisplayName"`
+	PolicySourceID    string   `json:"policySourceId"`
+	PolicyVersion     string   `json:"policyVersion"`
+	ResourceTypes     []string `json:"resourceTypes"`
+	ResourceID        string   `json:"resourceId"`
 }

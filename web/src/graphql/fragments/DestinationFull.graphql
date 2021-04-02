@@ -27,9 +27,11 @@ fragment DestinationFull on Destination {
       apiKey
       assigneeId
       issueType
+      labels
     }
     opsgenie {
       apiKey
+      serviceRegion
     }
     msTeams {
       webhookURL
@@ -41,8 +43,12 @@ fragment DestinationFull on Destination {
       personalAccessToken
       projectGids
     }
+    customWebhook {
+      webhookURL
+    }
   }
   verificationStatus
   defaultForSeverity
+  alertTypes
   __typename
 }

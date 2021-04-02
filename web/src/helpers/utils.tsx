@@ -17,9 +17,12 @@
  */
 
 import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
+
 import * as Yup from 'yup';
 import {
   ActiveSuppressCount,
+  AlertTypesEnum,
   ComplianceIntegration,
   ComplianceStatusCounts,
   OrganizationReportBySeverity,
@@ -31,33 +34,40 @@ import {
   INCLUDE_SPECIAL_CHAR_REGEX,
   INCLUDE_UPPERCASE_REGEX,
   CHECK_IF_HASH_REGEX,
+  SOURCE_LABEL_REGEX,
 } from 'Source/constants';
-import mapValues from 'lodash-es/mapValues';
-import sum from 'lodash-es/sum';
+import sum from 'lodash/sum';
 import { ErrorResponse } from 'apollo-link-error';
 import { ApolloError } from '@apollo/client';
+import { UserDetails } from 'Source/graphql/fragments/UserDetails.generated';
 
 export const isMobile = /Mobi|Android/i.test(navigator.userAgent);
 
 // Generate a new secret code that contains metadata of issuer and user email
 export const formatSecretCode = (code: string, email: string): string => {
   const issuer = 'Panther';
-  return `otpauth://totp/${email}?secret=${code}&issuer=${issuer}`;
+  return `otpauth://totp/${issuer}:${email}?secret=${code}&issuer=${issuer}`;
 };
 
 export const getArnRegexForService = (awsService: string) => {
   return new RegExp(`arn:aws:${awsService.toLowerCase()}:([a-z]){2}-([a-z])+-[0-9]:\\d{12}:.+`);
 };
 
-export const createYupPasswordValidationSchema = () =>
-  Yup.string()
-    .required()
-    .min(14)
-    .matches(INCLUDE_DIGITS_REGEX, 'Include at least 1 digit')
-    .matches(INCLUDE_LOWERCASE_REGEX, 'Include at least 1 lowercase character')
-    .matches(INCLUDE_UPPERCASE_REGEX, 'Include at least 1 uppercase character')
-    .matches(INCLUDE_SPECIAL_CHAR_REGEX, 'Include at least 1 special character');
+// Derived from https://github.com/3nvi/panther/blob/master/deployments/bootstrap.yml#L557-L563
+export const yupPasswordValidationSchema = Yup.string()
+  .required()
+  .min(12, 'Password must contain at least 12 characters')
+  .matches(INCLUDE_UPPERCASE_REGEX, 'Password must contain at least 1 uppercase character')
+  .matches(INCLUDE_LOWERCASE_REGEX, 'Password must contain at least 1 lowercase character')
+  .matches(INCLUDE_SPECIAL_CHAR_REGEX, 'Password must contain at least 1 symbol')
+  .matches(INCLUDE_DIGITS_REGEX, 'Password must contain  at least 1 number');
 
+export const yupIntegrationLabelValidation = Yup.string()
+  .required()
+  .matches(SOURCE_LABEL_REGEX, 'Can only include alphanumeric characters, dashes and spaces')
+  .max(32, 'Must be at most 32 characters');
+
+export const yupWebhookValidation = Yup.string().url('Must be a valid webhook URL');
 /**
  * checks whether the input is a valid UUID
  */
@@ -75,14 +85,17 @@ export const capitalize = (str: string) => str.charAt(0).toUpperCase() + str.sli
  * as a single digit (all of them display it either as 03:00 or as 0300) and require string
  * manipulation which is harder
  * */
-export const formatDatetime = (datetime: string) => {
+export const formatDatetime = (datetime: string, verbose = false, useUTC = false) => {
   // get the offset minutes and calculate the hours from them
   const utcOffset = dayjs(datetime).utcOffset() / 60;
 
+  const suffix = useUTC
+    ? 'UTC'
+    : `G[M]T${utcOffset > 0 ? '+' : ''}${utcOffset !== 0 ? utcOffset : ''}`;
+  const format = verbose ? `dddd, DD MMMM YYYY, HH:mm (${suffix})` : `YYYY-MM-DD HH:mm ${suffix}`;
+
   // properly format the date
-  return dayjs(datetime).format(
-    `YYYY-MM-DD HH:mm G[M]T${utcOffset > 0 ? '+' : ''}${utcOffset !== 0 ? utcOffset : ''}`
-  );
+  return (useUTC ? dayjs.utc(datetime) : dayjs(datetime)).format(format);
 };
 
 /** Slice text to 7 characters, mostly used for hashIds */
@@ -95,13 +108,34 @@ export const isHash = (str: string) => CHECK_IF_HASH_REGEX.test(str);
 export const minutesToString = (minutes: number) =>
   minutes < 60 ? `${minutes}min` : `${minutes / 60}h`;
 
-/** Converts any value of the object that is an array to a comma-separated string */
-export const convertObjArrayValuesToCsv = (obj: { [key: string]: any }) =>
-  mapValues(obj, v => (Array.isArray(v) ? v.join(',') : v));
+/** Converts seconds number to representative string i.e. 15 -> 15sec,  7200 -> 2 hours */
+export const secondsToString = (seconds: number) => {
+  if (seconds > 60 * 60 * 24 * 30 * 12) {
+    return `${(seconds / (60 * 60 * 24 * 30 * 12)).toLocaleString()} years`;
+  }
+  if (seconds > 60 * 60 * 24 * 30) {
+    return `${(seconds / (60 * 60 * 24 * 30)).toLocaleString()} months`;
+  }
+  if (seconds > 60 * 60 * 24) {
+    return `${(seconds / (60 * 60 * 24)).toLocaleString()} days`;
+  }
+  if (seconds > 60 * 60) {
+    return `${(seconds / (60 * 60)).toLocaleString()} hours`;
+  }
+  if (seconds > 60) {
+    return `${(seconds / 60).toLocaleString()} min`;
+  }
+  return `${seconds.toLocaleString()} sec`;
+};
 
-/** URI encoding for specified fields in object */
-export const encodeParams = (obj: { [key: string]: any }, fields: [string]) =>
-  mapValues(obj, (v, key) => (fields.includes(key) ? encodeURIComponent(v) : v));
+/**
+ * Given a server-received DateTime string, creates a proper time-ago display text for it.
+ * */
+export const getElapsedTime = (unixTimestamp: number) => {
+  dayjs.extend(relativeTime);
+  return dayjs.unix(unixTimestamp).fromNow();
+};
+
 /**
  * makes sure that it properly formats a JSON struct in order to be properly displayed within the
  * editor
@@ -207,11 +241,11 @@ export const extractErrorMessage = (error: ApolloError | ErrorResponse) => {
   switch (errorType) {
     case '401':
     case '403':
-      return message || 'You are not authorized to perform this request';
+      return capitalize(message) || 'You are not authorized to perform this request';
     case '404':
-      return message || "The resource you requested couldn't be found on our servers";
+      return capitalize(message) || "The resource you requested couldn't be found on our servers";
     default:
-      return message;
+      return capitalize(message);
   }
 };
 
@@ -232,17 +266,227 @@ export const copyTextToClipboard = (text: string) => {
   }
 };
 
-// Extracts stable version from git tag, i.e "v1.0.1-abc" returns "v1.0.1"
-export const getStableVersion = (version: string) =>
-  version.indexOf('-') > 0 ? version.substring(0, version.indexOf('-')) : version;
-
-export const generateDocUrl = (baseUrl: string, version: string) => {
-  if (version) {
-    return `${baseUrl}/v/${getStableVersion(version)}-docs`;
-  }
-  return baseUrl;
-};
+/**
+ * A function that takes a text and returns a valid slug for it. Useful for filename and url
+ * creation
+ *
+ * @param {String} text A string to slugify
+ * @returns {String} A slugified string
+ */
+export function slugify(text: string) {
+  return text
+    .toString()
+    .toLowerCase()
+    .replace(/\s+/g, '-') // Replace spaces with -
+    .replace(/[^\w-]+/g, '') // Remove all non-word chars
+    .replace(/--+/g, '-') // Replace multiple - with single -
+    .replace(/^-+/, '') // Trim - from start of text
+    .replace(/-+$/, ''); // Trim - from end of text
+}
 
 export const isNumber = (value: string) => /^-{0,1}\d+$/.test(value);
 
+/**
+ * A function that returns true if the string consists of only non-whitespace characters
+ * @param {string} value A string to test
+ */
+export const hasNoWhitespaces = (value: string) => /^\S+$/.test(value);
+
 export const toStackNameFormat = (val: string) => val.replace(/ /g, '-').toLowerCase();
+
+/*
+Given a user, returns a human readable string to show for the user's name
+*/
+export const getUserDisplayName = (
+  user: Pick<UserDetails, 'givenName' | 'familyName' | 'email'>
+) => {
+  if (!user) {
+    return '';
+  }
+
+  if (user.givenName && user.familyName) {
+    return `${user.givenName} ${user.familyName}`;
+  }
+  if (!user.givenName && user.familyName) {
+    return user.familyName;
+  }
+  if (user.givenName && !user.familyName) {
+    return user.givenName;
+  }
+  return user.email;
+};
+
+/**
+ * Generates a random HEX color
+ */
+export const generateRandomColor = () => Math.floor(Math.random() * 16777215).toString(16);
+
+/**
+ * Converts a rem measurement (i.e. `0.29rem`) to pixels. Returns the number of pixels
+ */
+export const remToPx = (rem: string) => {
+  return parseFloat(rem) * parseFloat(getComputedStyle(document.documentElement).fontSize);
+};
+
+/**
+ * Appends a trailing slash if missing from a url.
+ *
+ * @param {String} url A URL to check
+ * @returns {String} A URL with a trailing slash
+ */
+export const addTrailingSlash = (url: string) => {
+  return url.endsWith('/') ? url : `${url}/`;
+};
+
+/**
+ * Strips hashes and query params from a URI, returning the pathname
+ *
+ * @param {String} uri A relative URI
+ * @returns {String} The same URI stripped of hashes and query params
+ */
+export const getPathnameFromURI = (uri: string) => uri.split(/[?#]/)[0];
+
+export const getCurrentYear = () => {
+  return dayjs().format('YYYY');
+};
+
+export const getGraphqlSafeDateRange = ({
+  days = 0,
+  hours = 0,
+}: {
+  days?: number;
+  hours?: number;
+}) => {
+  const utcNow = dayjs.utc();
+  const utcDaysAgo = utcNow.subtract(days, 'day').subtract(hours, 'hour');
+
+  // the `startOf` and `endOf` help us have "constant" inputs for a few minutes, when we are using
+  // those values as inputs to a GraphQL query. Of course there are edge cases.
+  return [
+    utcDaysAgo.startOf('hour').format('YYYY-MM-DDTHH:mm:ss[Z]'),
+    utcNow.endOf('hour').format('YYYY-MM-DDTHH:mm:ss[Z]'),
+  ];
+};
+
+export const formatNumber = (num: number): string => {
+  return new Intl.NumberFormat().format(num);
+};
+
+/**
+ *
+ * Downloads the data  as a file
+ *
+ * @param data The data to save. Can be JSON, string, CSV, etc.
+ * @param filename The name to save it under, along  with the extension. i.e. file.csv
+ *
+ */
+export const downloadData = (data: string, filename: string) => {
+  const extension = filename.split('.')[1];
+  const blob = new Blob([data], {
+    type: `text/${extension};charset=utf-8`,
+  });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+
+  window.URL.revokeObjectURL(url);
+};
+
+/**
+ * Helper function that return key from Enumaration value
+ * @param object
+ * @param value
+ */
+export function getEnumKeyByValue(object: { [key: string]: string }, value: string) {
+  return Object.keys(object).find(key => object[key] === value);
+}
+
+/**
+ * Helper function that returns proper text for Alert Type
+ * @param item AlertTypesEnum
+ */
+export const alertTypeToString = (item: AlertTypesEnum) => {
+  switch (item) {
+    case AlertTypesEnum.Rule:
+      return 'Rule Matches';
+    case AlertTypesEnum.RuleError:
+      return 'Rule Errors';
+    case AlertTypesEnum.Policy:
+    default:
+      return 'Policy Failures';
+  }
+};
+
+/**
+ * Converts a word to its plural form
+ *
+ * @returns {String} pluralized word
+ *
+ * @example
+ * toPlural('example'); // => 'examples'
+ * toPlural('example', 10); // => 'examples'
+ * toPlural('example', 1); // => 'example'
+ * toPlural('example', 'examplez', 10); // => 'examplez'
+ * toPlural('example', 'examplez', 1); // => 'example'
+ */
+function toPlural(word: string): string;
+function toPlural(word: string, count: number): string;
+function toPlural(word: string, pluralForm: string, count: number): string;
+function toPlural(word: string, pluralFormOrCount?: number | string, count?: number) {
+  const plrl = typeof pluralFormOrCount === 'string' ? pluralFormOrCount : undefined;
+  const cnt = typeof pluralFormOrCount === 'number' ? pluralFormOrCount : count;
+
+  const pluralForm = plrl || `${word}s`;
+
+  return cnt === 1 ? word : pluralForm;
+}
+export { toPlural };
+
+/**
+ * Compares two semver version
+ * returns 1 if a version is bigger than b
+ * returns -1 if a version is smaller than b
+ * returns 0 if a version is equal to b
+ * @returns Number [1,0,-1]
+ */
+export function compareSemanticVersion(a: string, b: string) {
+  const av = a.match(/([0-9]+|[^0-9]+)/g);
+  const bv = b.match(/([0-9]+|[^0-9]+)/g);
+  for (;;) {
+    let ia = av.shift();
+    let ib = bv.shift();
+    if (typeof ia === 'undefined' && typeof ib === 'undefined') {
+      return 0;
+    }
+    if (typeof ia === 'undefined') {
+      ia = '';
+    }
+    if (typeof ib === 'undefined') {
+      ib = '';
+    }
+
+    const ian = parseInt(ia, 10);
+    const ibn = parseInt(ib, 10);
+    if (Number.isNaN(ian) || Number.isNaN(ibn)) {
+      // non-numeric comparison
+      if (ia < ib) {
+        return -1;
+      }
+      if (ia > ib) {
+        return 1;
+      }
+    } else {
+      if (ian < ibn) {
+        return -1;
+      }
+      if (ian > ibn) {
+        return 1;
+      }
+    }
+  }
+}

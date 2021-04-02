@@ -19,25 +19,25 @@ package ddb
  */
 
 import (
-	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/pkg/errors"
-
-	"github.com/panther-labs/panther/api/lambda/source/models"
 )
 
-// PutSourceIntegration adds a batch of new Snapshot Integrations to the database.
-func (ddb *DDB) PutSourceIntegration(input *models.SourceIntegrationMetadata) error {
+// PutItem adds a source integration to the database
+func (ddb *DDB) PutItem(input *Integration) error {
 	item, err := dynamodbattribute.MarshalMap(input)
 	if err != nil {
 		return errors.Wrapf(err, "failed to marshal integration metadata")
 	}
 
 	putRequest := &dynamodb.PutItemInput{
-		TableName: aws.String(ddb.TableName),
+		TableName: &ddb.TableName,
 		Item:      item,
 	}
 	_, err = ddb.Client.PutItem(putRequest)
-	return err
+	if err != nil {
+		return errors.Wrap(err, "failed to put item")
+	}
+	return nil
 }

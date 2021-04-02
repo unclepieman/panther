@@ -1,9 +1,0 @@
-fragment RuleBasic on RuleDetails {
-  id
-  description
-  displayName
-  logTypes
-  runbook
-  severity
-  tags
-}

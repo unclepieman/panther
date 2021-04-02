@@ -17,17 +17,18 @@
  */
 
 import * as React from 'react';
-import { Field, Formik } from 'formik';
-import { Box, Heading } from 'pouncejs';
+import { Field, Form, Formik } from 'formik';
+import { Box, Flex, Heading } from 'pouncejs';
 import * as Yup from 'yup';
 import SubmitButton from 'Components/buttons/SubmitButton';
 import FormikTextInput from 'Components/fields/TextInput';
-import { ErrorReportingSection } from 'Components/forms/AnalyticsConsentForm';
+import { AnalyticsConsentSection } from 'Components/forms/AnalyticsConsentForm';
 
 interface CompanyInformationFormValues {
   displayName: string;
   email: string;
   errorReportingConsent: boolean;
+  analyticsConsent: boolean;
 }
 
 interface CompanyInformationFormProps {
@@ -37,10 +38,9 @@ interface CompanyInformationFormProps {
 
 const validationSchema = Yup.object({
   displayName: Yup.string().required(),
-  email: Yup.string()
-    .email()
-    .required(),
+  email: Yup.string().email().required(),
   errorReportingConsent: Yup.boolean().required(),
+  analyticsConsent: Yup.boolean().required(),
 });
 
 export const CompanyInformationForm: React.FC<CompanyInformationFormProps> = ({
@@ -54,38 +54,36 @@ export const CompanyInformationForm: React.FC<CompanyInformationFormProps> = ({
       initialValues={initialValues}
       onSubmit={onSubmit}
     >
-      {({ handleSubmit, isSubmitting, isValid, dirty }) => (
-        <Box>
-          <form onSubmit={handleSubmit}>
-            <Box mb={50}>
-              <Heading size="medium" mb={10} color="grey500">
-                Company Information
-              </Heading>
-              <Field
-                as={FormikTextInput}
-                name="displayName"
-                label="Company Name"
-                aria-required
-                mb={6}
-              />
-              <Field as={FormikTextInput} name="email" label="Email" aria-required mb={6} />
-            </Box>
-            <Box mb={50}>
-              <Heading size="medium" mb={6} color="grey500">
-                Preferences
-              </Heading>
-              <ErrorReportingSection />
-            </Box>
-            <SubmitButton
-              width={1}
-              disabled={!isValid || isSubmitting || !dirty}
-              submitting={isSubmitting}
-            >
-              Save
-            </SubmitButton>
-          </form>
+      <Form>
+        <Box as="section" mb={6}>
+          <Heading as="h2" size="x-small" mb={6}>
+            Company Information
+          </Heading>
+          <Flex direction="column" spacing={4}>
+            <Field
+              as={FormikTextInput}
+              name="displayName"
+              label="Company Name"
+              placeholder="The name of the company"
+              required
+            />
+            <Field
+              as={FormikTextInput}
+              name="email"
+              label="Email"
+              placeholder="The company's email"
+              required
+            />
+          </Flex>
         </Box>
-      )}
+        <Box as="section" mb={6}>
+          <Heading as="h2" size="x-small" mb={4}>
+            Preferences
+          </Heading>
+          <AnalyticsConsentSection showErrorConsent showProductAnalyticsConsent />
+        </Box>
+        <SubmitButton fullWidth>Save</SubmitButton>
+      </Form>
     </Formik>
   );
 };

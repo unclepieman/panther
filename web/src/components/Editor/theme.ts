@@ -34,22 +34,26 @@ ace.define(
   } 
     
   .ace-panther .ace_gutter {
-    background: #17364c;
+    background: #011e3a;
     color: white
   }
   
   .ace-panther.ace_editor.ace_autocomplete {
-    background: #3e6079;
+    background: ${theme.colors['navyblue-400']};
     color: white;
     border: none;
   }
   
   .ace-panther.ace_editor.ace_autocomplete .ace_completion-highlight {
-    color: ${theme.colors.blue200}
+    color: ${theme.colors['blue-300']};
   }
   
   .ace-panther.ace_editor.ace_autocomplete .ace_marker-layer .ace_active-line {
-    background-color: #477BA1
+    background-color: ${theme.colors['navyblue-300']};
+  }
+  
+  .ace-panther.ace_editor.ace_autocomplete .ace_marker-layer .ace_line-hover {
+    background-color: ${theme.colors['navyblue-300']};
   }
   
   .ace-panther .ace_print-margin {
@@ -58,7 +62,7 @@ ace.define(
   }
   
   .ace-panther {
-    background-color: #2d4e66;
+    background-color: #002240;
     color: #FFFFFF
   }
   
@@ -99,14 +103,14 @@ ace.define(
   
   .ace-panther .ace_keyword,
   .ace-panther .ace_meta {
-    color: ${theme.colors.orange300}
+    color: ${theme.colors['yellow-500']}
   }
   
   .ace-panther .ace_constant,
   .ace-panther .ace_constant.ace_character,
   .ace-panther .ace_constant.ace_character.ace_escape,
   .ace-panther .ace_constant.ace_other {
-    color: ${theme.colors.red300}
+    color: ${theme.colors['red-300']}
   }
   
   .ace-panther .ace_invalid {
@@ -122,23 +126,23 @@ ace.define(
     color: #EB939A
   }
   .ace-panther .ace_fold {
-    background-color: ${theme.colors.orange300};
+    background-color: ${theme.colors['yellow-500']};
     border-color: #FFFFFF
   }
   .ace-panther .ace_support.ace_function {
-    color: ${theme.colors.orange300}
+    color: ${theme.colors['yellow-500']}
   }
   
   .ace-panther .ace_storage {
-    color: ${theme.colors.yellow300}
+    color: ${theme.colors['yellow-500']}
   }
   
   .ace-panther .ace_entity {
-    color: ${theme.colors.yellow300}
+    color: ${theme.colors['yellow-500']}
   }
   
   .ace-panther .ace_string {
-    color: ${theme.colors.green300};
+    color: ${theme.colors['teal-500']};
   }
   
   .ace-panther .ace_string.ace_regexp {
@@ -146,8 +150,12 @@ ace.define(
   }
   
   .ace-panther .ace_comment {
-  font-style: italic;
-    color: ${theme.colors.blue200}
+    font-style: italic;
+    color: ${theme.colors['blue-400']}
+  }
+  
+  .ace-panther .ace_comment.ace_placeholder {
+    margin-top: 10px;
   }
   
   .ace-panther .ace_heading,
@@ -156,13 +164,8 @@ ace.define(
     background-color: #001221
   }
   
-  .ace-panther .ace_list,
-  .ace-panther .ace_markup.ace_list {
-    background-color: #130D26
-  }
-  
   .ace-panther .ace_variable {
-    color: ${theme.colors.grey50}
+    color: ${theme.colors['gray-50']}
   }
   
   .ace-panther .ace_variable.ace_language {
@@ -170,11 +173,11 @@ ace.define(
   }
   
   .ace-panther .ace_meta.ace_tag {
-    color: #9EFFFF
+    color: ${theme.colors['blue-300']}
   }
   
   .ace-panther .ace_rightAlignedText {
-    color: ${theme.colors.grey200}
+    color: ${theme.colors['gray-300']}
   }
   
   .ace-panther .ace_indent-guide {

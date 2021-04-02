@@ -22,7 +22,6 @@ linters:
     - bodyclose
     - depguard
     - dogsled
-    - dupl
     - funlen
     - gocyclo
     - golint
@@ -38,11 +37,12 @@ linters:
     - whitespace
 
   # don't enable:
-  # Formatting (we check for that separately)
+  # Formatting (we autofmt in CI)
   # - gofmt
   # - goimports
   #
   # Other
+  # - dupl
   # - gochecknoinits
   # - gochecknoglobals
   # - gocognit
@@ -67,7 +67,6 @@ issues:
     - path: '_test\.go'
       linters:
         - bodyclose
-        - dupl
         - funlen
         - unparam
     - path: internal/compliance/aws_event_processor/processor/
@@ -78,7 +77,6 @@ issues:
     - path: internal/compliance/snapshot_poller/
       linters:
         # struct field names are designed for Python access, won't match Go style
-        - dupl
         - golint
         - stylecheck
     - path: internal/compliance/snapshot_poller/pollers/aws/awstest/

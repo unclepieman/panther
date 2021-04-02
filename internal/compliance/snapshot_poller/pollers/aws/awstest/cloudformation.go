@@ -48,8 +48,8 @@ var (
 						ParameterValue: aws.String("DevNick"),
 					},
 				},
-				CreationTime:    ExampleDate,
-				LastUpdatedTime: ExampleDate,
+				CreationTime:    &ExampleTime,
+				LastUpdatedTime: &ExampleTime,
 				RollbackConfiguration: &cloudformation.RollbackConfiguration{
 					RollbackTriggers: []*cloudformation.RollbackTrigger{},
 				},
@@ -62,10 +62,17 @@ var (
 				Tags: []*cloudformation.Tag{},
 				DriftInformation: &cloudformation.StackDriftInformation{
 					StackDriftStatus:   aws.String("DRIFTED"),
-					LastCheckTimestamp: ExampleDate,
+					LastCheckTimestamp: &ExampleTime,
 				},
 			},
 		},
+	}
+	ExampleDescribeStacksContinue = &cloudformation.DescribeStacksOutput{
+		Stacks: []*cloudformation.Stack{
+			ExampleDescribeStacks.Stacks[0],
+			ExampleDescribeStacks.Stacks[0],
+		},
+		NextToken: aws.String("1"),
 	}
 
 	ExampleDescribeStackResourceDrifts = &cloudformation.DescribeStackResourceDriftsOutput{
@@ -86,7 +93,7 @@ var (
 					},
 				},
 				StackResourceDriftStatus: aws.String("MODIFIED"),
-				Timestamp:                ExampleDate,
+				Timestamp:                &ExampleTime,
 			},
 		},
 	}
@@ -101,7 +108,7 @@ var (
 		StackDriftStatus:          aws.String("DRIFTED"),
 		DetectionStatus:           aws.String("DETECTION_COMPLETE"),
 		DriftedStackResourceCount: aws.Int64(1),
-		Timestamp:                 ExampleDate,
+		Timestamp:                 &ExampleTime,
 	}
 
 	ExampleDescribeStackDriftDetectionStatusInProgress = &cloudformation.DescribeStackDriftDetectionStatusOutput{
@@ -110,7 +117,7 @@ var (
 		StackDriftStatus:          aws.String("DRIFTED"),
 		DetectionStatus:           aws.String("DETECTION_IN_PROGESS"),
 		DriftedStackResourceCount: aws.Int64(1),
-		Timestamp:                 ExampleDate,
+		Timestamp:                 &ExampleTime,
 	}
 
 	svcCloudFormationSetupCalls = map[string]func(*MockCloudFormation){
@@ -169,7 +176,7 @@ var (
 // CloudFormation mock
 
 // SetupMockCloudFormation is used to override the CloudFormation Client initializer
-func SetupMockCloudFormation(sess *session.Session, cfg *aws.Config) interface{} {
+func SetupMockCloudFormation(_ *session.Session, _ *aws.Config) interface{} {
 	return MockCloudFormationForSetup
 }
 

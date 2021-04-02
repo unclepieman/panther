@@ -23,9 +23,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/guardduty"
 	"github.com/aws/aws-sdk-go/service/guardduty/guarddutyiface"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
-	apimodels "github.com/panther-labs/panther/api/gateway/resources/models"
+	apimodels "github.com/panther-labs/panther/api/lambda/resources/models"
 	awsmodels "github.com/panther-labs/panther/internal/compliance/snapshot_poller/models/aws"
 	pollermodels "github.com/panther-labs/panther/internal/compliance/snapshot_poller/models/poller"
 	"github.com/panther-labs/panther/internal/compliance/snapshot_poller/pollers/utils"
@@ -43,7 +44,7 @@ func setupGuardDutyClient(sess *session.Session, cfg *aws.Config) interface{} {
 func getGuardDutyClient(pollerResourceInput *awsmodels.ResourcePollerInput, region string) (guarddutyiface.GuardDutyAPI, error) {
 	client, err := getClient(pollerResourceInput, GuardDutyClientFunc, "guardduty", region)
 	if err != nil {
-		return nil, err // error is logged in getClient()
+		return nil, err
 	}
 
 	return client.(guarddutyiface.GuardDutyAPI), nil
@@ -61,9 +62,16 @@ func PollGuardDutyDetector(
 		return nil, err
 	}
 
-	detector := getGuardDutyDetector(gdClient)
+	detector, err := getGuardDutyDetector(gdClient)
+	if err != nil || detector == nil {
+		// errors.WithMessagef() will still return nil if err is nil
+		return nil, errors.WithMessagef(err, "region: %s", parsedResourceID.Region)
+	}
 
-	snapshot := buildGuardDutyDetectorSnapshot(gdClient, detector)
+	snapshot, err := buildGuardDutyDetectorSnapshot(gdClient, detector, pollerResourceInput)
+	if err != nil {
+		return nil, err
+	}
 	if snapshot == nil {
 		return nil, nil
 	}
@@ -74,30 +82,29 @@ func PollGuardDutyDetector(
 }
 
 // getGuardDutyDetector returns the detector ID for the guard duty detector in the current region
-func getGuardDutyDetector(svc guarddutyiface.GuardDutyAPI) *string {
+func getGuardDutyDetector(svc guarddutyiface.GuardDutyAPI) (*string, error) {
 	detector, err := svc.ListDetectors(&guardduty.ListDetectorsInput{})
 	if err != nil {
-		utils.LogAWSError("GuardDuty.ListDetectors", err)
-		return nil
+		return nil, errors.Wrap(err, "GuardDuty.ListDetectors")
 	}
 
 	if len(detector.DetectorIds) == 0 {
 		zap.L().Warn("tried to scan non-existent resource",
 			zap.String("resourceType", awsmodels.GuardDutySchema))
-		return nil
+		return nil, nil
 	}
-	return detector.DetectorIds[0]
+	return detector.DetectorIds[0], nil
 }
 
 // listDetectors returns the GuardDuty detectors in the account
-func listDetectors(guardDutySvc guarddutyiface.GuardDutyAPI) (detectorIDs []*string) {
-	err := guardDutySvc.ListDetectorsPages(&guardduty.ListDetectorsInput{},
+func listDetectors(guardDutySvc guarddutyiface.GuardDutyAPI) (detectorIDs []*string, err error) {
+	err = guardDutySvc.ListDetectorsPages(&guardduty.ListDetectorsInput{},
 		func(page *guardduty.ListDetectorsOutput, lastPage bool) bool {
 			detectorIDs = append(detectorIDs, page.DetectorIds...)
 			return true
 		})
 	if err != nil {
-		utils.LogAWSError("GuardDuty.ListDetectorsPages", err)
+		return nil, errors.Wrap(err, "GuardDuty.ListDetectorsPages")
 	}
 	return
 }
@@ -106,7 +113,7 @@ func listDetectors(guardDutySvc guarddutyiface.GuardDutyAPI) (detectorIDs []*str
 func getMasterAccount(guardDutySvc guarddutyiface.GuardDutyAPI, id *string) (*guardduty.Master, error) {
 	out, err := guardDutySvc.GetMasterAccount(&guardduty.GetMasterAccountInput{DetectorId: id})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "GuardDuty.GetMasterAccount: %s", aws.StringValue(id))
 	}
 
 	return out.Master, nil
@@ -116,17 +123,18 @@ func getMasterAccount(guardDutySvc guarddutyiface.GuardDutyAPI, id *string) (*gu
 func getDetector(guardDutySvc guarddutyiface.GuardDutyAPI, detectorID *string) (*guardduty.GetDetectorOutput, error) {
 	out, err := guardDutySvc.GetDetector(&guardduty.GetDetectorInput{DetectorId: detectorID})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "GuardDuty.GetDetector: %s", aws.StringValue(detectorID))
 	}
 
 	return out, nil
 }
 
 // buildGuardDutyDetectorSnapshot makes all the calls to build up a snapshot of a given GuardDuty detector
-func buildGuardDutyDetectorSnapshot(guardDutySvc guarddutyiface.GuardDutyAPI, detectorID *string) *awsmodels.GuardDutyDetector {
-	if detectorID == nil {
-		return nil
-	}
+func buildGuardDutyDetectorSnapshot(
+	guardDutySvc guarddutyiface.GuardDutyAPI,
+	detectorID *string,
+	pollerInput *awsmodels.ResourcePollerInput,
+) (*awsmodels.GuardDutyDetector, error) {
 
 	detectorSnapshot := &awsmodels.GuardDutyDetector{
 		GenericResource: awsmodels.GenericResource{
@@ -139,8 +147,14 @@ func buildGuardDutyDetectorSnapshot(guardDutySvc guarddutyiface.GuardDutyAPI, de
 
 	detectorDetails, err := getDetector(guardDutySvc, detectorID)
 	if err != nil {
-		utils.LogAWSError("GuardDuty.GetDetector", err)
-		return nil
+		return nil, err
+	}
+
+	// Check if ResourceID matches the integration's regex filter
+	if pollerInput != nil {
+		if pollerInput.ShouldIgnoreResource(*detectorSnapshot.ID) {
+			return nil, nil
+		}
 	}
 	detectorSnapshot.FindingPublishingFrequency = detectorDetails.FindingPublishingFrequency
 	detectorSnapshot.ServiceRole = detectorDetails.ServiceRole
@@ -151,30 +165,46 @@ func buildGuardDutyDetectorSnapshot(guardDutySvc guarddutyiface.GuardDutyAPI, de
 
 	master, err := getMasterAccount(guardDutySvc, detectorID)
 	if err != nil {
-		utils.LogAWSError("GuardDuty.GetMasterAccount", err)
-	} else {
-		detectorSnapshot.Master = master
+		return nil, err
 	}
+	detectorSnapshot.Master = master
 
-	return detectorSnapshot
+	return detectorSnapshot, nil
 }
 
 // PollGuardDutyDetectors gathers information on each GuardDuty detector for an AWS account.
-func PollGuardDutyDetectors(pollerInput *awsmodels.ResourcePollerInput) ([]*apimodels.AddResourceEntry, error) {
+func PollGuardDutyDetectors(pollerInput *awsmodels.ResourcePollerInput) ([]apimodels.AddResourceEntry, *string, error) {
 	zap.L().Debug("starting GuardDuty Detector resource poller")
 	guardDutyDetectorSnapshots := make(map[string]*awsmodels.GuardDutyDetector)
 
 	// Get detectors in each region
-	for _, regionID := range utils.GetServiceRegions(pollerInput.Regions, "guardduty") {
+	regions, err := GetServiceRegionsFunc(pollerInput, awsmodels.GuardDutySchema)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, regionID := range regions {
 		guardDutySvc, err := getGuardDutyClient(pollerInput, *regionID)
 		if err != nil {
-			return nil, err // error is logged in getClient()
+			var e *RegionIgnoreListError
+			if errors.As(err, &e) {
+				zap.L().Debug("Skipping denied region in GuardDuty scan")
+				continue
+			}
+			return nil, nil, err
 		}
 
 		// Start with generating a list of all detectors
-		detectors := listDetectors(guardDutySvc)
+		detectors, err := listDetectors(guardDutySvc)
+		if err != nil {
+			return nil, nil, errors.WithMessagef(err, "region: %s", *regionID)
+		}
+
 		for _, detectorID := range detectors {
-			detectorSnapshot := buildGuardDutyDetectorSnapshot(guardDutySvc, detectorID)
+			detectorSnapshot, err := buildGuardDutyDetectorSnapshot(guardDutySvc, detectorID, pollerInput)
+			if err != nil {
+				return nil, nil, err
+			}
 			if detectorSnapshot == nil {
 				continue
 			}
@@ -215,25 +245,29 @@ func PollGuardDutyDetectors(pollerInput *awsmodels.ResourcePollerInput) ([]*apim
 		Detectors: []*string{},
 	}
 
-	resources := make([]*apimodels.AddResourceEntry, 0, len(guardDutyDetectorSnapshots)+1)
+	resources := make([]apimodels.AddResourceEntry, 0, len(guardDutyDetectorSnapshots)+1)
 	for resourceID, guardDutyDetectorSnapshot := range guardDutyDetectorSnapshots {
 		detectorMetaSnapshot.Detectors = append(detectorMetaSnapshot.Detectors, aws.String(resourceID))
-		resources = append(resources, &apimodels.AddResourceEntry{
+		resources = append(resources, apimodels.AddResourceEntry{
 			Attributes:      guardDutyDetectorSnapshot,
-			ID:              apimodels.ResourceID(resourceID),
-			IntegrationID:   apimodels.IntegrationID(*pollerInput.IntegrationID),
-			IntegrationType: apimodels.IntegrationTypeAws,
+			ID:              resourceID,
+			IntegrationID:   *pollerInput.IntegrationID,
+			IntegrationType: integrationType,
 			Type:            awsmodels.GuardDutySchema,
 		})
 	}
 
-	resources = append(resources, &apimodels.AddResourceEntry{
+	resources = append(resources, apimodels.AddResourceEntry{
 		Attributes:      detectorMetaSnapshot,
-		ID:              apimodels.ResourceID(*detectorMetaSnapshot.ResourceID),
-		IntegrationID:   apimodels.IntegrationID(*pollerInput.IntegrationID),
-		IntegrationType: apimodels.IntegrationTypeAws,
+		ID:              *detectorMetaSnapshot.ResourceID,
+		IntegrationID:   *pollerInput.IntegrationID,
+		IntegrationType: integrationType,
 		Type:            awsmodels.GuardDutyMetaSchema,
 	})
 
-	return resources, nil
+	// We don't support paging for GuardDuty resources. Since there is a limit of 1 detector per
+	// region, we should not run into timeout issues here anyways.
+	//
+	// Reference: https://docs.aws.amazon.com/general/latest/gr/guardduty.html
+	return resources, nil, nil
 }

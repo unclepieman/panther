@@ -29,19 +29,14 @@ import (
 	"github.com/panther-labs/panther/pkg/lambdalogger"
 )
 
-var router = genericapi.NewRouter("log_analysis", "alerts", nil, api.API{})
+var router *genericapi.Router
 
 func lambdaHandler(ctx context.Context, input *models.LambdaInput) (interface{}, error) {
 	lambdalogger.ConfigureGlobal(ctx, nil)
-	event, err := router.Handle(input)
-	if err != nil {
-		// wrap for api, InternalError the only kind of error from this lambda
-		err = &genericapi.InternalError{Message: err.Error()}
-	}
-	return event, err
+	return router.Handle(input)
 }
 
 func main() {
-	api.Setup()
+	router = genericapi.NewRouter("log_analysis", "alerts", nil, api.Setup())
 	lambda.Start(lambdaHandler)
 }

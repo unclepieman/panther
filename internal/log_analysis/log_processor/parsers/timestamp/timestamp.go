@@ -20,8 +20,12 @@ package timestamp
 
 import (
 	"math"
+	"reflect"
 	"strconv"
 	"time"
+
+	"github.com/panther-labs/panther/internal/log_analysis/awsglue/glueschema"
+	"github.com/panther-labs/panther/internal/log_analysis/awsglue/gluetimestamp"
 )
 
 // These objects are used to read timestamps and ensure a consistent JSON output for timestamps.
@@ -29,17 +33,35 @@ import (
 // NOTE: prefix the name of all objects with Timestamp so schema generation can automatically understand these.
 // NOTE: the suffix of the names is meant to reflect the time format being read (unmarshal)
 
-// We want our output JSON timestamps to be: YYYY-MM-DD HH:MM:SS.fffffffff
-// https://aws.amazon.com/premiumsupport/knowledge-center/query-table-athena-timestamp-empty/
 const (
-	jsonMarshalLayout = `"2006-01-02 15:04:05.000000000"`
-
 	ansicWithTZUnmarshalLayout = `"Mon Jan 2 15:04:05 2006 MST"` // similar to time.ANSIC but with MST
 
 	fluentdTimestampLayout = `"2006-01-02 15:04:05 -0700"`
 
 	suricataTimestampLayout = `"2006-01-02T15:04:05.999999999Z0700"`
+
+	//08 Jul 2020 09:00 GMT
+	laceworkTimestampLayout = `"02 Jan 2006 15:04 MST"`
 )
+
+func init() {
+	// Register timestamp types
+	typANSICwithTZ := reflect.TypeOf(ANSICwithTZ{})
+	typFluentd := reflect.TypeOf(FluentdTimestamp{})
+	typRFC3339 := reflect.TypeOf(RFC3339{})
+	typSuricata := reflect.TypeOf(SuricataTimestamp{})
+	typUnixFloat := reflect.TypeOf(UnixFloat{})
+	typUnixMillis := reflect.TypeOf(UnixMillisecond{})
+	typLacework := reflect.TypeOf(LaceworkTimestamp{})
+	// Add glue table mappings
+	glueschema.MustRegisterMapping(typANSICwithTZ, glueschema.TypeTimestamp)
+	glueschema.MustRegisterMapping(typFluentd, glueschema.TypeTimestamp)
+	glueschema.MustRegisterMapping(typRFC3339, glueschema.TypeTimestamp)
+	glueschema.MustRegisterMapping(typSuricata, glueschema.TypeTimestamp)
+	glueschema.MustRegisterMapping(typUnixFloat, glueschema.TypeTimestamp)
+	glueschema.MustRegisterMapping(typUnixMillis, glueschema.TypeTimestamp)
+	glueschema.MustRegisterMapping(typLacework, glueschema.TypeTimestamp)
+}
 
 // use these functions to parse all incoming dates to ensure UTC consistency
 func Parse(layout, value string) (RFC3339, error) {
@@ -62,7 +84,7 @@ func (ts *RFC3339) String() string {
 }
 
 func (ts *RFC3339) MarshalJSON() ([]byte, error) {
-	return []byte((*time.Time)(ts).UTC().Format(jsonMarshalLayout)), nil // ensure UTC
+	return []byte((*time.Time)(ts).UTC().Format(gluetimestamp.LayoutJSON)), nil // ensure UTC
 }
 
 func (ts *RFC3339) UnmarshalJSON(jsonBytes []byte) (err error) {
@@ -77,7 +99,7 @@ func (ts *ANSICwithTZ) String() string {
 }
 
 func (ts *ANSICwithTZ) MarshalJSON() ([]byte, error) {
-	return []byte((*time.Time)(ts).UTC().Format(jsonMarshalLayout)), nil // ensure UTC
+	return []byte((*time.Time)(ts).UTC().Format(gluetimestamp.LayoutJSON)), nil // ensure UTC
 }
 
 func (ts *ANSICwithTZ) UnmarshalJSON(text []byte) (err error) {
@@ -97,7 +119,7 @@ func (ts *UnixMillisecond) String() string {
 }
 
 func (ts *UnixMillisecond) MarshalJSON() ([]byte, error) {
-	return []byte((*time.Time)(ts).UTC().Format(jsonMarshalLayout)), nil // ensure UTC
+	return []byte((*time.Time)(ts).UTC().Format(gluetimestamp.LayoutJSON)), nil // ensure UTC
 }
 
 func (ts *UnixMillisecond) UnmarshalJSON(jsonBytes []byte) (err error) {
@@ -117,7 +139,7 @@ func (ts *FluentdTimestamp) String() string {
 }
 
 func (ts *FluentdTimestamp) MarshalJSON() ([]byte, error) {
-	return []byte((*time.Time)(ts).UTC().Format(jsonMarshalLayout)), nil // ensure UTC
+	return []byte((*time.Time)(ts).UTC().Format(gluetimestamp.LayoutJSON)), nil // ensure UTC
 }
 
 func (ts *FluentdTimestamp) UnmarshalJSON(jsonBytes []byte) (err error) {
@@ -136,7 +158,7 @@ func (ts *SuricataTimestamp) String() string {
 }
 
 func (ts *SuricataTimestamp) MarshalJSON() ([]byte, error) {
-	return []byte((*time.Time)(ts).UTC().Format(jsonMarshalLayout)), nil // ensure UTC
+	return []byte((*time.Time)(ts).UTC().Format(gluetimestamp.LayoutJSON)), nil // ensure UTC
 }
 
 func (ts *SuricataTimestamp) UnmarshalJSON(jsonBytes []byte) (err error) {
@@ -155,7 +177,7 @@ func (ts *UnixFloat) String() string {
 	return (*time.Time)(ts).UTC().String() // ensure UTC
 }
 func (ts *UnixFloat) MarshalJSON() ([]byte, error) {
-	return []byte((*time.Time)(ts).UTC().Format(jsonMarshalLayout)), nil // ensure UTC
+	return []byte((*time.Time)(ts).UTC().Format(gluetimestamp.LayoutJSON)), nil // ensure UTC
 }
 func (ts *UnixFloat) UnmarshalJSON(jsonBytes []byte) (err error) {
 	f, err := strconv.ParseFloat(string(jsonBytes), 64)
@@ -166,4 +188,23 @@ func (ts *UnixFloat) UnmarshalJSON(jsonBytes []byte) (err error) {
 	t := time.Unix(int64(intPart), int64(fracPart*1e9))
 	*ts = (UnixFloat)(t.UTC())
 	return nil
+}
+
+type LaceworkTimestamp time.Time
+
+func (ts *LaceworkTimestamp) String() string {
+	return (*time.Time)(ts).UTC().String() // ensure UTC
+}
+
+func (ts *LaceworkTimestamp) MarshalJSON() ([]byte, error) {
+	return []byte((*time.Time)(ts).UTC().Format(laceworkTimestampLayout)), nil // ensure UTC
+}
+
+func (ts *LaceworkTimestamp) UnmarshalJSON(jsonBytes []byte) (err error) {
+	t, err := time.Parse(laceworkTimestampLayout, string(jsonBytes))
+	if err != nil {
+		return
+	}
+	*ts = (LaceworkTimestamp)(t.UTC())
+	return
 }

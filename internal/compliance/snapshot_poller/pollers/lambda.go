@@ -27,8 +27,7 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
-	"github.com/panther-labs/panther/api/gateway/resources/client/operations"
-	api "github.com/panther-labs/panther/api/gateway/resources/models"
+	api "github.com/panther-labs/panther/api/lambda/resources/models"
 	pollermodels "github.com/panther-labs/panther/internal/compliance/snapshot_poller/models/poller"
 	pollers "github.com/panther-labs/panther/internal/compliance/snapshot_poller/pollers/aws"
 	"github.com/panther-labs/panther/pkg/lambdalogger"
@@ -49,7 +48,7 @@ func loadMessage(messageBody string) (*pollermodels.ScanMsg, error) {
 }
 
 // batchResources creates groups of 500 resources to send to the ResourcesAPI.
-func batchResources(resources []*api.AddResourceEntry) (batches [][]*api.AddResourceEntry) {
+func batchResources(resources []api.AddResourceEntry) (batches [][]api.AddResourceEntry) {
 	for resourcesAPIBatchSize < len(resources) {
 		resources, batches = resources[resourcesAPIBatchSize:], append(
 			batches,
@@ -60,22 +59,29 @@ func batchResources(resources []*api.AddResourceEntry) (batches [][]*api.AddReso
 	return
 }
 
+// Replaced by unit tests with an in-memory logger
+var loggerSetupFunc = func(ctx context.Context, initialFields map[string]interface{}) *lambdacontext.LambdaContext {
+	lc, _ := lambdalogger.ConfigureGlobal(ctx, initialFields)
+	return lc
+}
+
 // Handle is the main Lambda Handler.
 func Handle(ctx context.Context, event events.SQSEvent) (err error) {
-	lc, _ := lambdalogger.ConfigureGlobal(ctx, nil)
-	operation := oplog.NewManager("cloudsec", "snapshot").Start(lc.InvokedFunctionArn).WithMemUsed(lambdacontext.MemoryLimitInMB)
+	lc := loggerSetupFunc(ctx, nil)
+	operation := oplog.NewManager("cloudsec", "snapshot").
+		Start(lc.InvokedFunctionArn).WithMemUsed(lambdacontext.MemoryLimitInMB)
 	defer func() {
 		operation.Stop().Log(err, zap.Int("numEvents", len(event.Records)))
 	}()
 
 	for indx, message := range event.Records {
-		zap.L().Debug("loading message from the queue")
 		scanRequest, loadErr := loadMessage(message.Body)
 		if loadErr != nil || scanRequest == nil {
 			operation.LogError(errors.Wrap(loadErr, "unable to load message from the queue"),
 				zap.Int("messageNumber", indx),
 				zap.String("messageBody", message.Body),
 			)
+			// This message is badly formatted, so don't bother re-trying it
 			continue
 		}
 
@@ -88,11 +94,11 @@ func Handle(ctx context.Context, event events.SQSEvent) (err error) {
 			resources, pollErr := pollers.Poll(entry)
 			if pollErr != nil {
 				operation.LogError(errors.Wrap(pollErr, "poll failed"), zap.Any("sqsEntry", entry))
-				continue
+				return pollErr
 			}
 
 			// Send data to the Resources API
-			if resources != nil {
+			if len(resources) > 0 {
 				zap.L().Debug("total resources generated",
 					zap.Int("messageNumber", indx),
 					zap.Int("numResources", len(resources)),
@@ -100,12 +106,11 @@ func Handle(ctx context.Context, event events.SQSEvent) (err error) {
 				)
 
 				for _, batch := range batchResources(resources) {
-					params := &operations.AddResourcesParams{
-						Body:       &api.AddResources{Resources: batch},
-						HTTPClient: httpClient,
+					params := api.LambdaInput{
+						AddResources: &api.AddResourcesInput{Resources: batch},
 					}
-					zap.L().Debug("adding new resources", zap.Any("params.Body", params.Body))
-					if _, err = apiClient.Operations.AddResources(params); err != nil {
+					zap.L().Debug("adding new resources", zap.Any("batch", batch))
+					if _, err = apiClient.Invoke(&params, nil); err != nil {
 						return err
 					}
 				}

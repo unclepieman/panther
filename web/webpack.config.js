@@ -26,6 +26,7 @@ const TerserPlugin = require('terser-webpack-plugin');
 const ManifestPlugin = require('webpack-manifest-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { CleanWebpackPlugin } = require('clean-webpack-plugin');
+const { BundleAnalyzerPlugin } = require('webpack-bundle-analyzer');
 const ForkTsCheckerWebpackPlugin = require('fork-ts-checker-webpack-plugin');
 const ReactRefreshWebpackPlugin = require('@pmmmwh/react-refresh-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
@@ -33,6 +34,7 @@ const CompressionPlugin = require('compression-webpack-plugin');
 
 const isEnvDevelopment = process.env.NODE_ENV === 'development';
 const isEnvProduction = process.env.NODE_ENV === 'production';
+const isPerformanceAnalysis = Boolean(process.env.PERFORMANCE_ANALYSIS);
 
 module.exports = {
   // webpack automatically makes optimisations depending on the environment that runs. We want to
@@ -42,6 +44,11 @@ module.exports = {
   bail: isEnvProduction,
   // add a proper source map in order to debug the code easier through the sources tab.
   devtool: isEnvProduction ? 'source-map' : isEnvDevelopment && 'cheap-module-source-map',
+  // Dont'watch changes in node_modules
+  watchOptions: {
+    ignored: /node_modules/,
+  },
+
   output: {
     // This will prevent webpack-dev-server from loading incorrectly because of react-router-v4.
     publicPath: '/',
@@ -67,35 +74,6 @@ module.exports = {
       : isEnvDevelopment && (info => path.resolve(info.absoluteResourcePath).replace(/\\/g, '/')),
   },
   entry: path.resolve(__dirname, 'src/index.tsx'),
-  // When we are developing locally, we want to add a `devServer` configuration
-  devServer: isEnvDevelopment
-    ? {
-        host: '0.0.0.0',
-        publicPath: '/',
-        historyApiFallback: {
-          disableDotRule: true,
-        },
-        // Where will the webpack-dev-server attempt to load the content from. We add public
-        // so that we can have access to files that don't pass through webpack (i.e. they are not
-        // imported through Javascript)
-        contentBase: path.join(__dirname, 'public'),
-        // Enable gzip compression of generated files.
-        compress: true,
-        // By default files from `contentBase` will not trigger a page reload.
-        watchContentBase: true,
-        // Enable hot reloading server. It will provide /sockjs-node/ endpoint
-        // for the WebpackDevServer client so it can learn when the files were
-        // updated. Note that only changes to CSS are currently hot reloaded.
-        // JS changes will refresh the browser.
-        hot: true,
-        // WebpackDevServer is noisy by default. We make it a bit "quiter" for the devs
-        quiet: true,
-        // Dont'watch changes in node_modules
-        watchOptions: {
-          ignored: /node_modules/,
-        },
-      }
-    : undefined,
   optimization: {
     minimize: isEnvProduction,
     minimizer: [
@@ -196,6 +174,7 @@ module.exports = {
       Hooks: path.resolve(__dirname, 'src/hooks'),
       Hoc: path.resolve(__dirname, 'src/hoc'),
       Source: path.resolve(__dirname, 'src/'),
+      Public: path.resolve(__dirname, 'public/'),
 
       // make sure that all the packages that attempt to resolve the following packages utilise the
       // same version, so we don't end up bundling multiple versions of it.
@@ -223,43 +202,40 @@ module.exports = {
         },
       ]),
     // Add scripts to the final HTML
-    new HtmlWebpackPlugin(
-      Object.assign(
-        {},
-        {
-          inject: true,
-          template: path.resolve(__dirname, 'public/index.ejs'),
-          filename: './index.html',
-          templateParameters: {
-            GRAPHQL_ENDPOINT: process.env.WEB_APPLICATION_GRAPHQL_API_ENDPOINT,
-            AWS_REGION: process.env.AWS_REGION,
-          },
-        },
-        // If we are in production, we make sure to also minify the HTML
-        isEnvProduction
-          ? {
-              minify: {
-                removeComments: true,
-                collapseWhitespace: true,
-                removeRedundantAttributes: true,
-                useShortDoctype: true,
-                removeEmptyAttributes: true,
-                removeStyleLinkTypeAttributes: true,
-                keepClosingSlash: true,
-                minifyJS: true,
-                minifyCSS: true,
-                minifyURLs: true,
-              },
-            }
-          : undefined
-      )
-    ),
+    new HtmlWebpackPlugin({
+      inject: true,
+      // We are using `html-loader` here for an EJS template (instead of the `ejs-loader`).
+      // The reason for that is that we have an EJS template, filled with template parameters
+      // that are going to be replaced in runtime. HtmlWebpackPlugin throws an error if those
+      // parameters are not provided during build time and there was no way to get around it.
+      // Basically, if those were undefined during build time, the EJS failed to compile. The
+      // only way to bypass that is to force HtmlWebpackPlugin to treat this template as a
+      // simple HTML and leave those template parameters untouched. Of course, we couldn't just
+      // remove this plugin entirely, since we need it for the CSS/JS tag injection
+      template: `html-loader!${path.resolve(__dirname, 'public/index.ejs')}`,
+      filename: 'index.ejs',
+      minify: isEnvProduction
+        ? {
+            removeComments: true,
+            collapseWhitespace: true,
+            removeRedundantAttributes: true,
+            useShortDoctype: true,
+            removeEmptyAttributes: true,
+            removeStyleLinkTypeAttributes: true,
+            keepClosingSlash: true,
+            minifyJS: true,
+            minifyCSS: true,
+            minifyURLs: true,
+          }
+        : undefined,
+    }),
     // Makes sure to inline the generated manifest to the HTML
     isEnvProduction && new InlineChunkHtmlPlugin(HtmlWebpackPlugin, [/runtime-.+[.]js/]),
     // This is currently an experimental feature supported only by react-native, but released
     // through the official React repo. Up until now we utilise a custom webpack-plugin (since
     // the official one exists only for react-native's Metro)
-    isEnvDevelopment && new ReactRefreshWebpackPlugin({ disableRefreshCheck: true }),
+    isEnvDevelopment && new webpack.HotModuleReplacementPlugin(),
+    isEnvDevelopment && new ReactRefreshWebpackPlugin({ overlay: { sockIntegration: 'whm' } }),
     // Generate a manifest file which contains a mapping of all asset filenames
     // to their corresponding output file so that tools can pick it up without
     // having to parse `index.html`.
@@ -307,5 +283,6 @@ module.exports = {
         algorithm: 'brotliCompress',
         compressionOptions: { level: 11 },
       }),
+    isPerformanceAnalysis && new BundleAnalyzerPlugin(),
   ].filter(Boolean),
 };

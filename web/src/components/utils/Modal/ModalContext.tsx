@@ -17,23 +17,35 @@
  */
 
 import React from 'react';
-import { DeletePolicyModalProps } from 'Components/modals/DeletePolicyModal';
 import { DeleteUserModalProps } from 'Components/modals/DeleteUserModal';
 import { ResetUserPasswordProps } from 'Components/modals/ResetUserPasswordModal';
+import { ReinviteUserProps } from 'Components/modals/ReinviteUserModal';
 import { DeleteComplianceSourceModalProps } from 'Components/modals/DeleteComplianceSourceModal';
 import { DeleteLogSourceModalProps } from 'Components/modals/DeleteLogSourceModal';
 import { DeleteDestinationModalProps } from 'Components/modals/DeleteDestinationModal';
-import { DeleteRuleModalProps } from 'Components/modals/DeleteRuleModal';
+import { GenericModalProps } from 'Components/modals/GenericModal';
+import { DeleteDetectionsModalProps } from 'Components/modals/DeleteDetectionsModal';
+import { DeleteTestModalProps } from 'Components/modals/DeleteTestModal';
+import { DeleteGlobalPythonModuleModalProps } from 'Components/modals/DeleteGlobalPythonModuleModal';
+import { AnalyticsConsentModalProps } from 'Components/modals/AnalyticsConsentModal';
+import { DeleteCustomLogModalProps } from 'Components/modals/DeleteCustomLogModal';
+import { DeleteDataModelModalProps } from 'Components/modals/DeleteDataModelModal';
 
 const SHOW_MODAL = 'SHOW_MODAL';
 const HIDE_MODAL = 'HIDE_MODAL';
 
 /* The available list of modals to dispatch */
 export enum MODALS {
-  DELETE_POLICY = 'DELETE_POLICY',
-  DELETE_RULE = 'DELETE_RULE',
+  DELETE_CUSTOM_LOG = 'DELETE_CUSTOM_LOG',
+  DELETE_DATA_MODELS = 'DELETE_DATA_MODELS',
+  DELETE_DETECTIONS = 'DELETE_DETECTIONS',
+  DELETE_GLOBAL_PYTHON_MODULE = 'DELETE_GLOBAL_PYTHON_MODULE',
   DELETE_USER = 'DELETE_USER',
+  DELETE_TEST = 'DELETE_TEST',
+  GENERIC_MODAL = 'GENERIC_MODAL',
+  EDIT_PROFILE_SETTINGS = 'EDIT_PROFILE_SETTINGS',
   RESET_USER_PASS = 'RESET_USER_PASS',
+  REINVITE_USER = 'REINVITE_USER',
   DELETE_COMPLIANCE_SOURCE = 'DELETE_COMPLIANCE_SOURCE',
   DELETE_LOG_SOURCE = 'DELETE_LOG_SOURCE',
   DELETE_DESTINATION = 'DELETE_DESTINATION',
@@ -41,18 +53,28 @@ export enum MODALS {
   ANALYTICS_CONSENT = 'ANALYTICS_CONSENT',
 }
 
+type OmitControlledProps<T> = Omit<T, 'open' | 'onClose'>;
+
 /* The shape of the reducer state */
 interface ModalStateShape {
   modal: keyof typeof MODALS | null;
   props: { [key: string]: any };
+  isVisible: boolean;
 }
 
-/* 1st action */
-interface ShowPolicyModalAction {
+interface ShowCustomLogModalAction {
   type: typeof SHOW_MODAL;
   payload: {
-    modal: MODALS.DELETE_POLICY;
-    props: DeletePolicyModalProps;
+    modal: MODALS.DELETE_CUSTOM_LOG;
+    props: OmitControlledProps<DeleteCustomLogModalProps>;
+  };
+}
+
+interface ShowGenericModal {
+  type: typeof SHOW_MODAL;
+  payload: {
+    modal: MODALS.GENERIC_MODAL;
+    props: OmitControlledProps<GenericModalProps>;
   };
 }
 
@@ -60,13 +82,20 @@ interface ShowPolicyModalAction {
 interface HideModalAction {
   type: typeof HIDE_MODAL;
 }
-
+/* Delete Global Module action */
+interface ShowGlobalPythonModuleModalAction {
+  type: typeof SHOW_MODAL;
+  payload: {
+    modal: MODALS.DELETE_GLOBAL_PYTHON_MODULE;
+    props: OmitControlledProps<DeleteGlobalPythonModuleModalProps>;
+  };
+}
 /* Delete User action */
 interface ShowDeleteUserModalAction {
   type: typeof SHOW_MODAL;
   payload: {
     modal: MODALS.DELETE_USER;
-    props: DeleteUserModalProps;
+    props: OmitControlledProps<DeleteUserModalProps>;
   };
 }
 
@@ -75,7 +104,32 @@ interface ShowResetUserPasswordModalAction {
   type: typeof SHOW_MODAL;
   payload: {
     modal: MODALS.RESET_USER_PASS;
-    props: ResetUserPasswordProps;
+    props: OmitControlledProps<ResetUserPasswordProps>;
+  };
+}
+
+/* Reset user password */
+interface ShowReinviteUserModalAction {
+  type: typeof SHOW_MODAL;
+  payload: {
+    modal: MODALS.REINVITE_USER;
+    props: OmitControlledProps<ReinviteUserProps>;
+  };
+}
+
+interface ShowDeleteTestModalAction {
+  type: typeof SHOW_MODAL;
+  payload: {
+    modal: MODALS.DELETE_TEST;
+    props: OmitControlledProps<DeleteTestModalProps>;
+  };
+}
+
+interface ShowDeleteDataModelModalAction {
+  type: typeof SHOW_MODAL;
+  payload: {
+    modal: MODALS.DELETE_DATA_MODELS;
+    props: OmitControlledProps<DeleteDataModelModalProps>;
   };
 }
 
@@ -84,7 +138,7 @@ interface ShowDeleteComplianceSourceModalAction {
   type: typeof SHOW_MODAL;
   payload: {
     modal: MODALS.DELETE_COMPLIANCE_SOURCE;
-    props: DeleteComplianceSourceModalProps;
+    props: OmitControlledProps<DeleteComplianceSourceModalProps>;
   };
 }
 
@@ -93,16 +147,24 @@ interface ShowDeleteLogSourceModalAction {
   type: typeof SHOW_MODAL;
   payload: {
     modal: MODALS.DELETE_LOG_SOURCE;
-    props: DeleteLogSourceModalProps;
+    props: OmitControlledProps<DeleteLogSourceModalProps>;
+  };
+}
+
+/* Opens the modal that allows the user to update info & change password */
+interface ShowProfileSettingsModalAction {
+  type: typeof SHOW_MODAL;
+  payload: {
+    modal: MODALS.EDIT_PROFILE_SETTINGS;
   };
 }
 
 /* 1st action */
-interface ShowDeleteRuleModalAction {
+interface ShowDeleteDetectionsModalAction {
   type: typeof SHOW_MODAL;
   payload: {
-    modal: MODALS.DELETE_RULE;
-    props: DeleteRuleModalProps;
+    modal: MODALS.DELETE_DETECTIONS;
+    props: OmitControlledProps<DeleteDetectionsModalProps>;
   };
 }
 
@@ -111,7 +173,7 @@ interface ShowDeleteDestinationModalAction {
   type: typeof SHOW_MODAL;
   payload: {
     modal: MODALS.DELETE_DESTINATION;
-    props: DeleteDestinationModalProps;
+    props: OmitControlledProps<DeleteDestinationModalProps>;
   };
 }
 
@@ -128,17 +190,24 @@ interface ShowAnalyticsConsentModalAction {
   type: typeof SHOW_MODAL;
   payload: {
     modal: MODALS.ANALYTICS_CONSENT;
+    props?: OmitControlledProps<AnalyticsConsentModalProps>;
   };
 }
 
 /* The available actions that can be dispatched */
 type ModalStateAction =
+  | ShowGenericModal
   | ShowDeleteComplianceSourceModalAction
+  | ShowCustomLogModalAction
   | ShowDeleteLogSourceModalAction
+  | ShowDeleteDataModelModalAction
+  | ShowGlobalPythonModuleModalAction
   | ShowDeleteUserModalAction
+  | ShowDeleteTestModalAction
+  | ShowProfileSettingsModalAction
   | ShowResetUserPasswordModalAction
-  | ShowPolicyModalAction
-  | ShowDeleteRuleModalAction
+  | ShowReinviteUserModalAction
+  | ShowDeleteDetectionsModalAction
   | ShowDeleteDestinationModalAction
   | ShowNetworkErrorModalAction
   | ShowAnalyticsConsentModalAction
@@ -148,6 +217,7 @@ type ModalStateAction =
 const initialState: ModalStateShape = {
   modal: null,
   props: {},
+  isVisible: false,
 };
 
 const modalReducer = (state: ModalStateShape, action: ModalStateAction) => {
@@ -156,9 +226,10 @@ const modalReducer = (state: ModalStateShape, action: ModalStateAction) => {
       return {
         modal: action.payload.modal,
         props: 'props' in action.payload ? action.payload.props : {},
+        isVisible: true,
       };
     case HIDE_MODAL:
-      return { modal: null, props: {} };
+      return { ...state, isVisible: false };
     default:
       return state;
   }

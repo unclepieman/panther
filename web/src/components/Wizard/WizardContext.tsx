@@ -17,12 +17,23 @@
  */
 
 import React from 'react';
+import { StepStatus } from './Wizard';
 
-interface WizardContextValue {
+interface WizardContextValue<WizardData> {
+  goToStep: (index: number) => void;
   goToPrevStep: () => void;
   goToNextStep: () => void;
+  setData: (data: WizardData) => void;
+  updateData: (data: WizardData) => void;
+  resetData: () => void;
+  reset: () => void;
+  data: WizardData;
+  currentStepStatus: StepStatus;
+  setCurrentStepStatus: (stepStatus: StepStatus) => void;
 }
 
-export const WizardContext = React.createContext<WizardContextValue>(null);
+export const WizardContext = React.createContext(null);
 
-export const useWizardContext = () => React.useContext(WizardContext);
+export function useWizardContext<WizardData = any>() {
+  return React.useContext<WizardContextValue<WizardData>>(WizardContext);
+}

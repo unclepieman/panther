@@ -21,21 +21,30 @@ package cognito
 import (
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	provider "github.com/aws/aws-sdk-go/service/cognitoidentityprovider"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	"github.com/panther-labs/panther/pkg/genericapi"
 )
 
-// DeleteUser calls cognito api delete user from a user pool
 func (g *UsersGateway) DeleteUser(id *string) error {
+	// Invalidate refresh token (access tokens are still valid for 1h)
+	if _, err := g.userPoolClient.AdminUserGlobalSignOut(&provider.AdminUserGlobalSignOutInput{
+		Username:   id,
+		UserPoolId: g.userPoolID,
+	}); err != nil {
+		var awsErr awserr.Error
+		if errors.As(err, &awsErr) && awsErr.Code() == provider.ErrCodeUserNotFoundException {
+			zap.L().Warn("user is already deleted", zap.String("userId", *id))
+			return nil
+		}
+		return &genericapi.AWSError{Method: "cognito.AdminUserGlobalSignOut", Err: err}
+	}
+
 	if _, err := g.userPoolClient.AdminDeleteUser(&provider.AdminDeleteUserInput{
 		Username:   id,
 		UserPoolId: g.userPoolID,
 	}); err != nil {
-		if awsErr, ok := err.(awserr.Error); ok && awsErr.Code() == provider.ErrCodeUserNotFoundException {
-			zap.L().Warn("user is already deleted", zap.String("userId", *id))
-			return nil
-		}
 		return &genericapi.AWSError{Method: "cognito.AdminDeleteUser", Err: err}
 	}
 

@@ -19,12 +19,13 @@ package outputs
  */
 
 import (
+	"context"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
+	jsoniter "github.com/json-iterator/go"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
 // Severity colors match those in the Panther UI
@@ -35,23 +36,24 @@ const (
 
 // Github alert send an issue.
 func (client *OutputClient) Github(
-	alert *alertmodels.Alert, config *outputmodels.GithubConfig) *AlertDeliveryError {
+	ctx context.Context, alert *deliverymodel.Alert, config *outputModels.GithubConfig) *AlertDeliveryResponse {
 
-	var tagsItem = aws.StringValueSlice(alert.Tags)
-
-	description := "**Description:** " + aws.StringValue(alert.PolicyDescription)
+	description := "**Description:** " + alert.AnalysisDescription
 	link := "\n [Click here to view in the Panther UI](" + generateURL(alert) + ")"
-	runBook := "\n **Runbook:** " + aws.StringValue(alert.Runbook)
-	severity := "\n **Severity:** " + aws.StringValue(alert.Severity)
-	tags := "\n **Tags:** " + strings.Join(tagsItem, ", ")
+	runBook := "\n **Runbook:** " + alert.Runbook
+	severity := "\n **Severity:** " + alert.Severity
+	tags := "\n **Tags:** " + strings.Join(alert.Tags, ", ")
+	// Best effort attempt to marshal Alert Context
+	marshaledContext, _ := jsoniter.MarshalToString(alert.Context)
+	alertContext := "\n **AlertContext:** " + marshaledContext
 
 	githubRequest := map[string]interface{}{
 		"title": generateAlertTitle(alert),
-		"body":  description + link + runBook + severity + tags,
+		"body":  description + link + runBook + severity + tags + alertContext,
 	}
 
-	token := "token " + *config.Token
-	repoURL := githubEndpoint + *config.RepoName + requestType
+	token := "token " + config.Token
+	repoURL := githubEndpoint + config.RepoName + requestType
 	requestHeader := map[string]string{
 		AuthorizationHTTPHeader: token,
 	}
@@ -61,5 +63,5 @@ func (client *OutputClient) Github(
 		body:    githubRequest,
 		headers: requestHeader,
 	}
-	return client.httpWrapper.post(postInput)
+	return client.httpWrapper.post(ctx, postInput)
 }

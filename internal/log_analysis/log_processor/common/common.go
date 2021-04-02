@@ -22,28 +22,35 @@ import (
 	"io"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/lambda"
 	"github.com/aws/aws-sdk-go/service/lambda/lambdaiface"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager/s3manageriface"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/aws/aws-sdk-go/service/sns"
 	"github.com/aws/aws-sdk-go/service/sns/snsiface"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
 	"github.com/kelseyhightower/envconfig"
+
+	"github.com/panther-labs/panther/api/lambda/source/models"
+	"github.com/panther-labs/panther/internal/log_analysis/log_processor/metrics"
+	"github.com/panther-labs/panther/internal/log_analysis/log_processor/processor/logstream"
+	"github.com/panther-labs/panther/pkg/awsretry"
 )
 
 const (
-	MaxRetries     = 20 // setting Max Retries to a higher number - we'd like to retry VERY hard before failing.
-	EventDelimiter = '\n'
+	MaxRetries = 13 // ~7'
+
 )
 
 var (
 	// Session and clients that can be used by components of the log processor
+	// FIXME: these should be removed as globals
 	Session      *session.Session
 	LambdaClient lambdaiface.LambdaAPI
-	S3Uploader   s3manageriface.UploaderAPI
+	S3Client     s3iface.S3API
 	SqsClient    sqsiface.SQSAPI
 	SnsClient    snsiface.SNSAPI
 
@@ -54,39 +61,34 @@ type EnvConfig struct {
 	AwsLambdaFunctionMemorySize int    `required:"true" split_words:"true"`
 	ProcessedDataBucket         string `required:"true" split_words:"true"`
 	SqsQueueURL                 string `required:"true" split_words:"true"`
+	SqsBatchSize                int64  `required:"true" split_words:"true"`
 	SnsTopicARN                 string `required:"true" split_words:"true"`
 }
 
 func Setup() {
-	Session = session.Must(session.NewSession(aws.NewConfig().WithMaxRetries(MaxRetries)))
-	LambdaClient = lambda.New(Session)
-	S3Uploader = s3manager.NewUploader(Session)
-	SqsClient = sqs.New(Session)
-	SnsClient = sns.New(Session)
+	Session = session.Must(session.NewSession()) // use default retries for fetching creds, avoids hangs!
+	clientsSession := Session.Copy(request.WithRetryer(aws.NewConfig().WithMaxRetries(MaxRetries),
+		awsretry.NewConnectionErrRetryer(MaxRetries)))
+	LambdaClient = lambda.New(clientsSession)
+	SqsClient = sqs.New(clientsSession)
+	SnsClient = sns.New(clientsSession)
+
+	s3UploaderSession := Session.Copy(request.WithRetryer(aws.NewConfig().WithMaxRetries(MaxRetries),
+		awsretry.NewAccessDeniedRetryer(MaxRetries)))
+	S3Client = s3.New(s3UploaderSession)
 
 	err := envconfig.Process("", &Config)
 	if err != nil {
 		panic(err)
 	}
+	metrics.Setup()
 }
 
-// DataStream represents a data stream that read by the processor
+// DataStream represents a data stream for an s3 object read by the processor
 type DataStream struct {
-	Reader io.Reader
-	Hints  DataStreamHints
-	// The log type if known
-	// If it is nil, it means the log type hasn't been identified yet
-	LogType *string
-}
-
-// Used in a DataStream as meta data to describe the data
-type DataStreamHints struct {
-	S3 *S3DataStreamHints // if nil, no hint
-}
-
-// Used in a DataStreamHints as meta data to describe the S3 object backing the stream
-type S3DataStreamHints struct {
-	Bucket      string
-	Key         string
-	ContentType string
+	Stream      logstream.Stream
+	Closer      io.Closer
+	Source      *models.SourceIntegration
+	S3ObjectKey string
+	S3Bucket    string
 }

@@ -16,14 +16,19 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { Alert } from 'pouncejs';
-import { Field, Formik } from 'formik';
+import { Alert, Card, Flex, Icon, Text, TextInput, Box } from 'pouncejs';
+import { Field, Form, Formik } from 'formik';
 import React from 'react';
 import * as Yup from 'yup';
-import { createYupPasswordValidationSchema } from 'Helpers/utils';
+import { yupPasswordValidationSchema } from 'Helpers/utils';
 import SubmitButton from 'Components/buttons/SubmitButton';
 import FormikTextInput from 'Components/fields/TextInput';
 import useAuth from 'Hooks/useAuth';
+import FieldPolicyChecker from 'Components/FieldPolicyChecker';
+
+interface ChangePasswordFormProps {
+  onSuccess: () => void;
+}
 
 interface ChangePasswordFormValues {
   oldPassword: string;
@@ -38,15 +43,15 @@ const initialValues = {
 };
 
 const validationSchema = Yup.object().shape({
-  oldPassword: createYupPasswordValidationSchema(),
-  newPassword: createYupPasswordValidationSchema(),
-  confirmNewPassword: createYupPasswordValidationSchema().oneOf(
+  oldPassword: yupPasswordValidationSchema,
+  newPassword: yupPasswordValidationSchema,
+  confirmNewPassword: yupPasswordValidationSchema.oneOf(
     [Yup.ref('newPassword')],
-    "Passwords don't match"
+    'Passwords must match'
   ),
 });
 
-const ChangePasswordForm: React.FC = () => {
+const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ onSuccess }) => {
   const { changePassword, signOut } = useAuth();
 
   return (
@@ -57,7 +62,10 @@ const ChangePasswordForm: React.FC = () => {
         changePassword({
           oldPassword,
           newPassword,
-          onSuccess: () => signOut({ global: true }),
+          onSuccess: () => {
+            signOut({ global: true });
+            onSuccess();
+          },
           onError: ({ message }) =>
             setStatus({
               title: 'Update password failed.',
@@ -66,51 +74,48 @@ const ChangePasswordForm: React.FC = () => {
         })
       }
     >
-      {({ handleSubmit, status, isSubmitting, isValid, dirty }) => (
-        <form onSubmit={handleSubmit}>
-          <Alert
-            variant="info"
-            title="Updating your password will log you out of all devices!"
-            mb={6}
-          />
-          {status && (
-            <Alert variant="error" title={status.title} description={status.message} mb={6} />
-          )}
-          <Field
-            as={FormikTextInput}
-            label="Current Password"
-            placeholder="Enter your current password..."
-            type="password"
-            name="oldPassword"
-            aria-required
-            mb={6}
-          />
-          <Field
-            as={FormikTextInput}
-            label="New Password"
-            placeholder="Type your new password..."
-            type="password"
-            name="newPassword"
-            aria-required
-            mb={6}
-          />
-          <Field
-            as={FormikTextInput}
-            label="Confirm New Password"
-            placeholder="Type your new password again..."
-            type="password"
-            name="confirmNewPassword"
-            aria-required
-            mb={6}
-          />
-          <SubmitButton
-            width={1}
-            submitting={isSubmitting}
-            disabled={isSubmitting || !isValid || !dirty}
-          >
-            Change password
-          </SubmitButton>
-        </form>
+      {({ status, values }) => (
+        <Form>
+          <Flex direction="column" spacing={5}>
+            <Card variant="dark" p={3}>
+              <Flex align="center">
+                <Icon type="alert-circle" size="medium" color="blue-400" />
+                <Text fontSize="medium" ml={2}>
+                  Updating your password will log you out of all devices you are logged in!
+                </Text>
+              </Flex>
+            </Card>
+            {status && <Alert variant="error" title={status.title} description={status.message} />}
+            <Field
+              as={FormikTextInput}
+              label="Current Password"
+              placeholder="Enter your current password..."
+              type="password"
+              name="oldPassword"
+              required
+            />
+            <Field
+              as={TextInput}
+              label="New Password"
+              placeholder="Type your new password..."
+              type="password"
+              name="newPassword"
+              required
+            />
+            <Field
+              as={FormikTextInput}
+              label="Confirm New Password"
+              placeholder="Type your new password again..."
+              type="password"
+              name="confirmNewPassword"
+              required
+            />
+            <Box py={3}>
+              <FieldPolicyChecker schema={yupPasswordValidationSchema} value={values.newPassword} />
+            </Box>
+            <SubmitButton fullWidth>Update password</SubmitButton>
+          </Flex>
+        </Form>
       )}
     </Formik>
   );

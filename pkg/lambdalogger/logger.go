@@ -34,16 +34,6 @@ const Application = "panther" // tag all logs with "application" -> "panther" (u
 // DebugEnabled is true if the DEBUG environment variable is set to true.
 var DebugEnabled = strings.ToLower(os.Getenv("DEBUG")) == "true"
 
-func init() {
-	if !DebugEnabled {
-		// Swagger HTTP clients log in DEBUG mode if the variable exists with any non-empty value.
-		// https://github.com/go-openapi/runtime/blob/master/logger/logger.go#L11
-		if err := os.Setenv("DEBUG", ""); err != nil {
-			log.Panic("failed to reset DEBUG environment variable: " + err.Error())
-		}
-	}
-}
-
 // ConfigureGlobal adds the Lambda request ID to the global zap logger.
 //
 // To add fields to every log message, include them in initialFields (the requestID is added for you).
@@ -70,12 +60,12 @@ func ConfigureGlobal(
 	// always tag with requestId and application
 	if initialFields == nil {
 		config.InitialFields = map[string]interface{}{
-			"requestId":   lc.AwsRequestID,
-			"application": Application,
+			FieldRequestID:   lc.AwsRequestID,
+			FieldApplication: Application,
 		}
 	} else {
-		initialFields["requestId"] = lc.AwsRequestID
-		initialFields["application"] = Application
+		initialFields[FieldRequestID] = lc.AwsRequestID
+		initialFields[FieldApplication] = Application
 		config.InitialFields = initialFields
 	}
 

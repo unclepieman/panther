@@ -19,25 +19,23 @@ package outputs
  */
 
 import (
+	"context"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
+	jsoniter "github.com/json-iterator/go"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
 // MsTeams alert send an alert.
 func (client *OutputClient) MsTeams(
-	alert *alertmodels.Alert, config *outputmodels.MsTeamsConfig) *AlertDeliveryError {
+	ctx context.Context, alert *deliverymodel.Alert, config *outputModels.MsTeamsConfig) *AlertDeliveryResponse {
 
-	var tagsItem = aws.StringValueSlice(alert.Tags)
+	link := "[Click here to view in the Panther UI](" + generateURL(alert) + ").\n"
 
-	link := "[Click here to view in the Panther UI](" + policyURLPrefix + aws.StringValue(alert.PolicyID) + ").\n"
-	runBook := aws.StringValue(alert.Runbook)
-	ruleDescription := aws.StringValue(alert.PolicyDescription)
-	severity := aws.StringValue(alert.Severity)
-	tags := strings.Join(tagsItem, ", ")
+	// Best effort attempt to marshal Alert Context
+	marshaledContext, _ := jsoniter.MarshalToString(alert.Context)
 
 	msTeamsRequestBody := map[string]interface{}{
 		"@context": "http://schema.org/extensions",
@@ -46,10 +44,11 @@ func (client *OutputClient) MsTeams(
 		"sections": []interface{}{
 			map[string]interface{}{
 				"facts": []interface{}{
-					map[string]string{"name": "Description", "value": ruleDescription},
-					map[string]string{"name": "Runbook", "value": runBook},
-					map[string]string{"name": "Severity", "value": severity},
-					map[string]string{"name": "Tags", "value": tags},
+					map[string]string{"name": "Description", "value": alert.AnalysisDescription},
+					map[string]string{"name": "Runbook", "value": alert.Runbook},
+					map[string]string{"name": "Severity", "value": alert.Severity},
+					map[string]string{"name": "Tags", "value": strings.Join(alert.Tags, ", ")},
+					map[string]string{"name": "AlertContext", "value": marshaledContext},
 				},
 				"text": link,
 			},
@@ -68,10 +67,9 @@ func (client *OutputClient) MsTeams(
 		},
 	}
 
-	requestURL := *config.WebhookURL
 	postInput := &PostInput{
-		url:  requestURL,
+		url:  config.WebhookURL,
 		body: msTeamsRequestBody,
 	}
-	return client.httpWrapper.post(postInput)
+	return client.httpWrapper.post(ctx, postInput)
 }

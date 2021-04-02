@@ -15,192 +15,121 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
 import React from 'react';
 import { Link as RRLink } from 'react-router-dom';
-import { Badge, Box, Button, Icon, Label, SimpleGrid, Text, Link } from 'pouncejs';
-import { formatDatetime, minutesToString } from 'Helpers/utils';
-import Panel from 'Components/Panel';
+import { Box, SimpleGrid, Text, Link, Flex, Card } from 'pouncejs';
+import { formatDatetime, minutesToString, formatNumber } from 'Helpers/utils';
 import Linkify from 'Components/Linkify';
-import { RuleDetails } from 'Generated/schema';
-import { SEVERITY_COLOR_MAP } from 'Source/constants';
 import urls from 'Source/urls';
-import useModal from 'Hooks/useModal';
-import { MODALS } from 'Components/utils/Modal';
+import { Rule } from 'Generated/schema';
 
-interface ResourceDetailsInfoProps {
-  rule?: RuleDetails;
+interface RuleCardDetailsProps {
+  rule?: Rule;
 }
 
-const RuleDetailsInfo: React.FC<ResourceDetailsInfoProps> = ({ rule }) => {
-  const { showModal } = useModal();
-
+const RuleDetailsInfo: React.FC<RuleCardDetailsProps> = ({ rule }) => {
   return (
-    <Panel
-      size="large"
-      title="Rule Details"
-      actions={
-        <Box>
-          <Button
-            size="large"
-            variant="default"
-            mr={4}
-            as={RRLink}
-            to={urls.logAnalysis.rules.edit(rule.id)}
-          >
-            Edit
-          </Button>
-          <Button
-            size="large"
-            variant="default"
-            color="red300"
-            onClick={() =>
-              showModal({
-                modal: MODALS.DELETE_RULE,
-                props: { rule },
-              })
-            }
-          >
-            Delete
-          </Button>
-        </Box>
-      }
-    >
-      <SimpleGrid columns={3} spacing={6}>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            ID
-          </Label>
-          <Text size="medium" color="black">
-            {rule.id}
-          </Text>
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            DISPLAY NAME
-          </Label>
-          <Text size="medium" color={rule.displayName ? 'black' : 'grey200'}>
-            {rule.displayName || 'No display name found'}
-          </Text>
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            ENABLED
-          </Label>
-          {rule.enabled ? (
-            <Icon type="check" color="green300" size="large" />
-          ) : (
-            <Icon type="close" color="red300" size="large" />
-          )}
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            REFERENCE
-          </Label>
-          {rule.reference ? (
-            <Linkify>{rule.reference}</Linkify>
-          ) : (
-            <Text size="medium" color="grey200">
-              No reference available
-            </Text>
-          )}
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            LOG TYPES
-          </Label>
-          {rule.logTypes.length ? (
-            rule.logTypes.map(logType => (
-              <Text size="medium" color="black" key={logType}>
-                {logType}
-              </Text>
-            ))
-          ) : (
-            <Text size="medium" color="black">
-              All logs
-            </Text>
-          )}
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            DESCRIPTION
-          </Label>
-          {rule.description ? (
-            <Linkify>{rule.description}</Linkify>
-          ) : (
-            <Text size="medium" color="grey200">
-              No description available
-            </Text>
-          )}
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            RUNBOOK
-          </Label>
-          {rule.runbook ? (
-            <Linkify>{rule.runbook}</Linkify>
-          ) : (
-            <Text size="medium" color="grey200">
-              No runbook available
-            </Text>
-          )}
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            SEVERITY
-          </Label>
-          <Badge color={SEVERITY_COLOR_MAP[rule.severity]}>{rule.severity}</Badge>
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            TAGS
-          </Label>
-          {rule.tags.length ? (
-            rule.tags.map((tag, index) => (
-              <Link
-                key={tag}
-                fontSize={2}
-                color="blue300"
-                as={RRLink}
-                to={`${urls.logAnalysis.rules.list()}?page=1&tags[]=${tag}`}
-              >
-                {tag}
-                {index !== rule.tags.length - 1 ? ', ' : null}
-              </Link>
-            ))
-          ) : (
-            <Text size="medium" color="grey200">
-              No tags assigned
-            </Text>
-          )}
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            CREATED
-          </Label>
-          <Text size="medium" color="black">
-            {formatDatetime(rule.createdAt)}
-          </Text>
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            LAST MODIFIED
-          </Label>
-          <Text size="medium" color="black">
-            {formatDatetime(rule.lastModified)}
-          </Text>
-        </Box>
-        <Box my={1}>
-          <Label mb={1} as="div" size="small" color="grey300">
-            DEDUPLICATION PERIOD TIME
-          </Label>
-          <Text size="medium" color={rule.displayName ? 'black' : 'grey200'}>
-            {minutesToString(rule.dedupPeriodMinutes)}
-          </Text>
-        </Box>
-      </SimpleGrid>
-    </Panel>
+    <Card as="article" p={6}>
+      <Card variant="dark" as="section" p={4} mb={4}>
+        <Text id="rule-description" fontStyle={!rule.description ? 'italic' : 'normal'} mb={6}>
+          {rule.description || 'No description found for rule'}
+        </Text>
+        <SimpleGrid columns={2} spacing={5}>
+          <Flex direction="column" spacing={2}>
+            <Box
+              color="navyblue-100"
+              fontSize="small-medium"
+              aria-describedby="runbook-description"
+            >
+              Runbook
+            </Box>
+            {rule.runbook ? (
+              <Linkify id="runbook-description">{rule.runbook}</Linkify>
+            ) : (
+              <Box fontStyle="italic" color="navyblue-100" id="runbook-description">
+                No runbook specified
+              </Box>
+            )}
+          </Flex>
+          <Flex direction="column" spacing={2}>
+            <Box
+              color="navyblue-100"
+              fontSize="small-medium"
+              aria-describedby="reference-description"
+            >
+              Reference
+            </Box>
+            {rule.reference ? (
+              <Linkify id="reference-description">{rule.reference}</Linkify>
+            ) : (
+              <Box fontStyle="italic" color="navyblue-100" id="reference-description">
+                No reference specified
+              </Box>
+            )}
+          </Flex>
+        </SimpleGrid>
+      </Card>
+      <Card variant="dark" as="section" p={4}>
+        <SimpleGrid columns={2} spacing={5} fontSize="small-medium">
+          <Box>
+            <SimpleGrid gap={2} columns={8} spacing={2}>
+              <Box gridColumn="1/3" color="navyblue-100" aria-describedby="tags-list">
+                Tags
+              </Box>
+              {rule.tags.length > 0 ? (
+                <Box id="tags-list" gridColumn="3/8">
+                  {rule.tags.map((tag, index) => (
+                    <Link
+                      key={tag}
+                      as={RRLink}
+                      to={`${urls.detections.list()}?page=1&tags[]=${tag}`}
+                    >
+                      {tag}
+                      {index !== rule.tags.length - 1 ? ', ' : null}
+                    </Link>
+                  ))}
+                </Box>
+              ) : (
+                <Box gridColumn="3/8" fontStyle="italic" color="navyblue-100" id="tags-list">
+                  This rule has no tags
+                </Box>
+              )}
+
+              <Box gridColumn="1/3" color="navyblue-100" aria-describedby="deduplication-period">
+                Deduplication Period
+              </Box>
+              <Box gridColumn="3/8" id="deduplication-period">
+                {minutesToString(rule.dedupPeriodMinutes)}
+              </Box>
+
+              <Box gridColumn="1/3" color="navyblue-100" aria-describedby="threshold">
+                Threshold
+              </Box>
+              <Box gridColumn="3/8" id="threshold">
+                {formatNumber(rule.threshold)}
+              </Box>
+            </SimpleGrid>
+          </Box>
+          <Box>
+            <SimpleGrid gap={2} columns={8} spacing={2}>
+              <Box color="navyblue-100" gridColumn="1/3" aria-describedby="created-at">
+                Created
+              </Box>
+              <Box gridColumn="3/8" id="created-at">
+                {formatDatetime(rule.createdAt)}
+              </Box>
+
+              <Box color="navyblue-100" gridColumn="1/3" aria-describedby="updated-at">
+                Modified
+              </Box>
+              <Box gridColumn="3/8" id="updated-at">
+                {formatDatetime(rule.lastModified)}
+              </Box>
+            </SimpleGrid>
+          </Box>
+        </SimpleGrid>
+      </Card>
+    </Card>
   );
 };
-
-export default React.memo(RuleDetailsInfo);
+export default RuleDetailsInfo;

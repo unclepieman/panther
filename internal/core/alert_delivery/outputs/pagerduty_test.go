@@ -19,6 +19,7 @@ package outputs
  */
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -27,22 +28,25 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
-var createdAtTime, _ = time.Parse(time.RFC3339, "2019-05-03T11:40:13Z")
-
-var pagerDutyAlert = &alertmodels.Alert{
-	PolicyName: aws.String("policyName"),
-	PolicyID:   aws.String("policyId"),
-	Severity:   aws.String("INFO"),
-	Runbook:    aws.String("runbook"),
-	CreatedAt:  &createdAtTime,
-}
-var pagerDutyConfig = &outputmodels.PagerDutyConfig{
-	IntegrationKey: aws.String("integrationKey"),
-}
+var (
+	createdAtTime, _ = time.Parse(time.RFC3339, "2019-05-03T11:40:13Z")
+	pagerDutyAlert   = &deliverymodel.Alert{
+		AlertID:      aws.String("alertId"),
+		AnalysisName: aws.String("policyName"),
+		AnalysisID:   "policyId",
+		Severity:     "INFO",
+		Runbook:      "runbook",
+		CreatedAt:    createdAtTime,
+		Type:         deliverymodel.PolicyType,
+	}
+	pagerDutyConfig = &outputModels.PagerDutyConfig{
+		IntegrationKey: "integrationKey",
+	}
+)
 
 func TestSendPagerDutyAlert(t *testing.T) {
 	httpWrapper := &mockHTTPWrapper{}
@@ -51,9 +55,19 @@ func TestSendPagerDutyAlert(t *testing.T) {
 	expectedPostPayload := map[string]interface{}{
 		"event_action": "trigger",
 		"payload": map[string]interface{}{
-			"custom_details": map[string]string{
-				"description": "",
-				"runbook":     "runbook",
+			"custom_details": Notification{
+				ID:           "policyId",
+				AlertID:      aws.String("alertId"),
+				CreatedAt:    createdAtTime,
+				Severity:     "INFO",
+				Type:         deliverymodel.PolicyType,
+				Link:         "https://panther.io/alerts/alertId",
+				Title:        "Policy Failure: policyName",
+				Name:         aws.String("policyName"),
+				Description:  aws.String(""),
+				Runbook:      aws.String("runbook"),
+				Tags:         []string{},
+				AlertContext: make(map[string]interface{}),
 			},
 			"severity":  "info",
 			"source":    "pantherlabs",
@@ -68,8 +82,9 @@ func TestSendPagerDutyAlert(t *testing.T) {
 		body: expectedPostPayload,
 	}
 
-	httpWrapper.On("post", expectedPostInput).Return((*AlertDeliveryError)(nil))
-	result := outputClient.PagerDuty(pagerDutyAlert, pagerDutyConfig)
+	ctx := context.Background()
+	httpWrapper.On("post", ctx, expectedPostInput).Return((*AlertDeliveryResponse)(nil))
+	result := outputClient.PagerDuty(ctx, pagerDutyAlert, pagerDutyConfig)
 
 	assert.Nil(t, result)
 	httpWrapper.AssertExpectations(t)
@@ -79,8 +94,9 @@ func TestSendPagerDutyAlertPostError(t *testing.T) {
 	httpWrapper := &mockHTTPWrapper{}
 	outputClient := &OutputClient{httpWrapper: httpWrapper}
 
-	httpWrapper.On("post", mock.Anything).Return(&AlertDeliveryError{Message: "Exception"})
+	ctx := context.Background()
+	httpWrapper.On("post", ctx, mock.Anything).Return(&AlertDeliveryResponse{Message: "Exception"})
 
-	require.Error(t, outputClient.PagerDuty(pagerDutyAlert, pagerDutyConfig))
+	require.Error(t, outputClient.PagerDuty(ctx, pagerDutyAlert, pagerDutyConfig))
 	httpWrapper.AssertExpectations(t)
 }

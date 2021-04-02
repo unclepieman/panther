@@ -20,19 +20,23 @@ import React from 'react';
 import { Box, Alert, SimpleGrid } from 'pouncejs';
 import Panel from 'Components/Panel';
 import ErrorBoundary from 'Components/ErrorBoundary';
+import withSEO from 'Hoc/withSEO';
 import { extractErrorMessage } from 'Helpers/utils';
+import useTrackPageView from 'Hooks/useTrackPageView';
+import { PageViewEnum } from 'Helpers/analytics';
 import { useGetOrganizationStats } from './graphql/getOrganizationStats.generated';
 import PoliciesBySeverityChart from './PoliciesBySeverityChart';
 import PoliciesByStatusChart from './PoliciesByStatusChart';
-import ResourcesByPlatformChart from './ResourcesByPlatformChart';
 import ResourcesByStatusChart from './ResourcesByStatusChart';
-import DonutChartWrapper from './DonutChartWrapper';
+import PoliciesOverviewChart from './PoliciesOverviewChart';
 import ComplianceOverviewPageEmptyDataFallback from './EmptyDataFallback';
 import ComplianceOverviewPageSkeleton from './Skeleton';
 import TopFailingPoliciesTable from './TopFailingPoliciesTable';
 import TopFailingResourcesTable from './TopFailingResourcesTable';
 
 const ComplianceOverview: React.FC = () => {
+  useTrackPageView(PageViewEnum.ComplianceOverview);
+
   const { data, loading, error } = useGetOrganizationStats({
     fetchPolicy: 'cache-and-network',
   });
@@ -57,30 +61,38 @@ const ComplianceOverview: React.FC = () => {
 
   return (
     <Box as="article" mb={6}>
-      <SimpleGrid columns={4} spacing={3} as="section" mb={3}>
-        <DonutChartWrapper title="Policy Severity" icon="policy">
-          <PoliciesBySeverityChart policies={data.organizationStats.appliedPolicies} />
-        </DonutChartWrapper>
-        <DonutChartWrapper title="Policy Failure" icon="policy">
-          <PoliciesByStatusChart policies={data.organizationStats.appliedPolicies} />
-        </DonutChartWrapper>
-        <DonutChartWrapper title="Resource Type" icon="resource">
-          <ResourcesByPlatformChart resources={data.organizationStats.scannedResources} />
-        </DonutChartWrapper>
-        <DonutChartWrapper title="Resource Health" icon="resource">
-          <ResourcesByStatusChart resources={data.organizationStats.scannedResources} />
-        </DonutChartWrapper>
+      <SimpleGrid columns={2} spacing={3} as="section" mb={3}>
+        <Panel title="Policy Health">
+          <Box height={150}>
+            <PoliciesOverviewChart policies={data.organizationStats.appliedPolicies} />
+          </Box>
+        </Panel>
+        <Panel title="Failing Policies">
+          <Box height={150}>
+            <PoliciesByStatusChart policies={data.organizationStats.appliedPolicies} />
+          </Box>
+        </Panel>
+        <Panel title="Resource Health">
+          <Box height={150}>
+            <ResourcesByStatusChart resources={data.organizationStats.scannedResources} />
+          </Box>
+        </Panel>
+        <Panel title="Enabled Policies">
+          <Box height={150}>
+            <PoliciesBySeverityChart policies={data.organizationStats.appliedPolicies} />
+          </Box>
+        </Panel>
       </SimpleGrid>
       <SimpleGrid columns={2} spacingX={3} spacingY={2}>
-        <Panel title="Top Failing Policies" size="small">
-          <Box m={-6}>
+        <Panel title="Top Failing Policies">
+          <Box my={-6}>
             <ErrorBoundary>
               <TopFailingPoliciesTable policies={data.organizationStats.topFailingPolicies} />
             </ErrorBoundary>
           </Box>
         </Panel>
-        <Panel title="Top Failing Resources" size="small">
-          <Box m={-6}>
+        <Panel title="Top Failing Resources">
+          <Box my={-6}>
             <ErrorBoundary>
               <TopFailingResourcesTable resources={data.organizationStats.topFailingResources} />
             </ErrorBoundary>
@@ -91,4 +103,4 @@ const ComplianceOverview: React.FC = () => {
   );
 };
 
-export default ComplianceOverview;
+export default withSEO({ title: 'Cloud Security Overview' })(ComplianceOverview);

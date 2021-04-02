@@ -1,19 +1,47 @@
 package requeue
 
+/**
+ * Panther is a Cloud-Native SIEM for the Modern Security Team.
+ * Copyright (C) 2020 Panther Labs Inc
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 import (
-	"log"
 	"strconv"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
 	"github.com/pkg/errors"
+	"go.uber.org/zap"
 )
 
 const (
 	waitTimeSeconds          = 20
 	messageBatchSize         = 10
 	visibilityTimeoutSeconds = 2 * waitTimeSeconds
+)
+
+var (
+	logDataTypeAttributeName = "type"
+	logTypeAttributeName     = "id"
+
+	messageAttributes = []*string{
+		&logDataTypeAttributeName,
+		&logTypeAttributeName,
+	}
 )
 
 func Requeue(sqsClient sqsiface.SQSAPI, region, fromQueueName, toQueueName string) error {
@@ -31,14 +59,15 @@ func Requeue(sqsClient sqsiface.SQSAPI, region, fromQueueName, toQueueName strin
 		return errors.Wrapf(err, "cannot find destination queue %s in region %s", toQueueName, region)
 	}
 
-	log.Printf("Moving messages from %s to %s", fromQueueName, toQueueName)
+	zap.S().Debugf("Moving messages from %s to %s", fromQueueName, toQueueName)
 	totalMessages := 0
 	for {
 		resp, err := sqsClient.ReceiveMessage(&sqs.ReceiveMessageInput{
-			WaitTimeSeconds:     aws.Int64(waitTimeSeconds),
-			MaxNumberOfMessages: aws.Int64(messageBatchSize),
-			VisibilityTimeout:   aws.Int64(visibilityTimeoutSeconds),
-			QueueUrl:            fromQueueURL.QueueUrl,
+			MessageAttributeNames: messageAttributes,
+			WaitTimeSeconds:       aws.Int64(waitTimeSeconds),
+			MaxNumberOfMessages:   aws.Int64(messageBatchSize),
+			VisibilityTimeout:     aws.Int64(visibilityTimeoutSeconds),
+			QueueUrl:              fromQueueURL.QueueUrl,
 		})
 
 		if err != nil {
@@ -49,17 +78,18 @@ func Requeue(sqsClient sqsiface.SQSAPI, region, fromQueueName, toQueueName strin
 		numberOfMessages := len(messages)
 		totalMessages += numberOfMessages
 		if numberOfMessages == 0 {
-			log.Printf("Successfully requeued %d messages.", totalMessages)
+			zap.S().Debugf("Successfully requeued %d messages.", totalMessages)
 			return nil
 		}
 
-		log.Printf("Moving %d message(s)...", numberOfMessages)
+		zap.S().Debugf("Moving %d message(s)...", numberOfMessages)
 
 		var sendMessageBatchRequestEntries []*sqs.SendMessageBatchRequestEntry
 		for index, element := range messages {
 			sendMessageBatchRequestEntries = append(sendMessageBatchRequestEntries, &sqs.SendMessageBatchRequestEntry{
-				Id:          aws.String(strconv.Itoa(index)),
-				MessageBody: element.Body,
+				Id:                aws.String(strconv.Itoa(index)),
+				MessageBody:       element.Body,
+				MessageAttributes: element.MessageAttributes,
 			})
 		}
 

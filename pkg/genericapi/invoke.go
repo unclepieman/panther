@@ -49,14 +49,14 @@ import (
 // var output models.AddRuleOutput
 // err := Invoke(client, "panther-rules-api", &input, &output)
 func Invoke(
-	client lambdaiface.LambdaAPI, function string, input interface{}, output interface{}) error {
+	client lambdaiface.LambdaAPI, function string, input, output interface{}) error {
 
 	payload, err := jsoniter.Marshal(input)
 	if err != nil {
 		return &InternalError{Message: "jsoniter.Marshal(input) failed: " + err.Error()}
 	}
 
-	zap.L().Info(
+	zap.L().Debug(
 		"invoking Lambda function", zap.String("name", function), zap.Int("bytes", len(payload)))
 	response, err := client.Invoke(
 		&lambda.InvokeInput{FunctionName: aws.String(function), Payload: payload})

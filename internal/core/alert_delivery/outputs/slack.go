@@ -19,12 +19,11 @@ package outputs
  */
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go/aws"
-
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
 // Severity colors match those in the Panther UI
@@ -37,7 +36,12 @@ var severityColors = map[string]string{
 }
 
 // Slack sends an alert to a slack channel.
-func (client *OutputClient) Slack(alert *alertmodels.Alert, config *outputmodels.SlackConfig) *AlertDeliveryError {
+func (client *OutputClient) Slack(
+	ctx context.Context,
+	alert *deliverymodel.Alert,
+	config *outputModels.SlackConfig,
+) *AlertDeliveryResponse {
+
 	messageField := fmt.Sprintf("<%s|%s>",
 		generateURL(alert),
 		"Click here to view in the Panther UI")
@@ -48,12 +52,12 @@ func (client *OutputClient) Slack(alert *alertmodels.Alert, config *outputmodels
 		},
 		{
 			"title": "Runbook",
-			"value": aws.StringValue(alert.Runbook),
+			"value": alert.Runbook,
 			"short": false,
 		},
 		{
 			"title": "Severity",
-			"value": aws.StringValue(alert.Severity),
+			"value": alert.Severity,
 			"short": true,
 		},
 	}
@@ -62,17 +66,16 @@ func (client *OutputClient) Slack(alert *alertmodels.Alert, config *outputmodels
 		"attachments": []map[string]interface{}{
 			{
 				"fallback": generateAlertTitle(alert),
-				"color":    severityColors[aws.StringValue(alert.Severity)],
+				"color":    severityColors[alert.Severity],
 				"title":    generateAlertTitle(alert),
 				"fields":   fields,
 			},
 		},
 	}
-	requestEndpoint := *config.WebhookURL
 	postInput := &PostInput{
-		url:  requestEndpoint,
+		url:  config.WebhookURL,
 		body: payload,
 	}
 
-	return client.httpWrapper.post(postInput)
+	return client.httpWrapper.post(ctx, postInput)
 }

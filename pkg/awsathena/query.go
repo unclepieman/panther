@@ -31,16 +31,17 @@ const (
 )
 
 // RunQuery executes query, blocking until done
-func RunQuery(client athenaiface.AthenaAPI, database, sql string, s3Path *string) (*athena.GetQueryResultsOutput, error) {
-	startOutput, err := StartQuery(client, database, sql, s3Path)
+func RunQuery(client athenaiface.AthenaAPI, workgroup, database, sql string) (*athena.GetQueryResultsOutput, error) {
+	startOutput, err := StartQuery(client, workgroup, database, sql)
 	if err != nil {
 		return nil, err
 	}
 	return WaitForResults(client, *startOutput.QueryExecutionId)
 }
 
-func StartQuery(client athenaiface.AthenaAPI, database, sql string, s3Path *string) (*athena.StartQueryExecutionOutput, error) {
+func StartQuery(client athenaiface.AthenaAPI, workgroup, database, sql string) (*athena.StartQueryExecutionOutput, error) {
 	var startInput athena.StartQueryExecutionInput
+	startInput.SetWorkGroup(workgroup)
 	startInput.SetQueryString(sql)
 
 	var startContext athena.QueryExecutionContext
@@ -48,9 +49,6 @@ func StartQuery(client athenaiface.AthenaAPI, database, sql string, s3Path *stri
 	startInput.SetQueryExecutionContext(&startContext)
 
 	var resultConfig athena.ResultConfiguration
-	if s3Path != nil {
-		resultConfig.SetOutputLocation(*s3Path)
-	}
 	startInput.SetResultConfiguration(&resultConfig)
 
 	return client.StartQueryExecution(&startInput)
@@ -66,9 +64,12 @@ func WaitForResults(client athenaiface.AthenaAPI, queryExecutionID string) (quer
 		switch *executionOutput.QueryExecution.Status.State {
 		case
 			athena.QueryExecutionStateSucceeded,
-			athena.QueryExecutionStateFailed,
 			athena.QueryExecutionStateCancelled:
 			return executionOutput, true, nil
+		case
+			athena.QueryExecutionStateFailed:
+			return executionOutput, true,
+				errors.Errorf("query execution failed: %s", *executionOutput.QueryExecution.Status.StateChangeReason)
 		default:
 			return executionOutput, false, nil
 		}

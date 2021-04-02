@@ -19,28 +19,30 @@ package handlers
  */
 
 import (
+	"errors"
 	"net/http"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
-	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/dynamodb/expression"
 	"go.uber.org/zap"
 
-	"github.com/panther-labs/panther/api/gateway/resources/models"
+	compliancemodels "github.com/panther-labs/panther/api/lambda/compliance/models"
+	"github.com/panther-labs/panther/api/lambda/resources/models"
 )
 
 // The resource struct stored in Dynamo has some different fields compared to the external models.Resource
 type resourceItem struct {
-	Attributes      models.Attributes      `json:"attributes"`
-	Deleted         models.Deleted         `json:"deleted"`
-	ID              models.ResourceID      `json:"id"`
-	IntegrationID   models.IntegrationID   `json:"integrationId"`
-	IntegrationType models.IntegrationType `json:"integrationType"`
-	LastModified    models.LastModified    `json:"lastModified"`
-	Type            models.ResourceType    `json:"type"`
+	Attributes      interface{} `json:"attributes"`
+	Deleted         bool        `json:"deleted"`
+	ID              string      `json:"id"`
+	IntegrationID   string      `json:"integrationId"`
+	IntegrationType string      `json:"integrationType"`
+	LastModified    time.Time   `json:"lastModified"`
+	Type            string      `json:"type"`
 
 	// Internal fields: TTL and more efficient filtering
 	ExpiresAt int64  `json:"expiresAt,omitempty"`
@@ -48,8 +50,8 @@ type resourceItem struct {
 }
 
 // Convert dynamo item to external models.Resource
-func (r *resourceItem) Resource(status models.ComplianceStatus) *models.Resource {
-	return &models.Resource{
+func (r *resourceItem) Resource(status compliancemodels.ComplianceStatus) models.Resource {
+	return models.Resource{
 		Attributes:       r.Attributes,
 		ComplianceStatus: status,
 		Deleted:          r.Deleted,
@@ -62,19 +64,19 @@ func (r *resourceItem) Resource(status models.ComplianceStatus) *models.Resource
 }
 
 // Build the table key in the format Dynamo expects
-func tableKey(resourceID models.ResourceID) map[string]*dynamodb.AttributeValue {
+func tableKey(resourceID string) map[string]*dynamodb.AttributeValue {
 	return map[string]*dynamodb.AttributeValue{
-		"id": {S: aws.String(string(resourceID))},
+		"id": {S: &resourceID},
 	}
 }
 
 // Build a condition expression if the resource must exist in the table
-func existsCondition(resourceID models.ResourceID) expression.ConditionBuilder {
+func existsCondition(resourceID string) expression.ConditionBuilder {
 	return expression.Name("id").Equal(expression.Value(resourceID))
 }
 
 // Complete a conditional Dynamo update and return the appropriate status code
-func doUpdate(update expression.UpdateBuilder, resourceID models.ResourceID) *events.APIGatewayProxyResponse {
+func doUpdate(update expression.UpdateBuilder, resourceID string) *events.APIGatewayProxyResponse {
 	condition := existsCondition(resourceID)
 	expr, err := expression.NewBuilder().WithCondition(condition).WithUpdate(update).Build()
 	if err != nil {
@@ -82,8 +84,8 @@ func doUpdate(update expression.UpdateBuilder, resourceID models.ResourceID) *ev
 		return &events.APIGatewayProxyResponse{StatusCode: http.StatusInternalServerError}
 	}
 
-	zap.L().Info("submitting dynamo item update",
-		zap.String("resourceId", string(resourceID)))
+	zap.L().Debug("submitting dynamo item update",
+		zap.String("resourceId", resourceID))
 	_, err = dynamoClient.UpdateItem(&dynamodb.UpdateItemInput{
 		ConditionExpression:       expr.Condition(),
 		ExpressionAttributeNames:  expr.Names(),
@@ -105,39 +107,109 @@ func doUpdate(update expression.UpdateBuilder, resourceID models.ResourceID) *ev
 	return &events.APIGatewayProxyResponse{StatusCode: http.StatusOK}
 }
 
+type scanResult struct {
+	resources []models.Resource
+	err       error
+}
+
 // Wrapper around dynamoClient.ScanPages that accepts a handler function to process each item.
-func scanPages(input *dynamodb.ScanInput, handler func(*resourceItem) error) error {
-	var handlerErr, unmarshalErr error
+func scanPages(inputs []*dynamodb.ScanInput, includeCompliance bool,
+	requiredComplianceStatus compliancemodels.ComplianceStatus) ([]models.Resource, error) {
 
-	err := dynamoClient.ScanPages(input, func(page *dynamodb.ScanOutput, lastPage bool) bool {
-		var items []*resourceItem
-		if unmarshalErr = dynamodbattribute.UnmarshalListOfMaps(page.Items, &items); unmarshalErr != nil {
-			return false // stop paginating
-		}
+	results := make(chan scanResult)
+	defer close(results)
+	// The scan inputs have already been broken up into segments, scan each segment in parallel
+	for _, scanInput := range inputs {
+		go func(input *dynamodb.ScanInput) {
+			// Recover from panic so we don't block forever when waiting for routines to finish.
+			defer func() {
+				if r := recover(); r != nil {
+					zap.L().Error("panicked while scanning segment",
+						zap.Any("segment", input.Segment), zap.Any("panic", r))
+					results <- scanResult{nil, errors.New("panicked goroutine")}
+				}
+			}()
 
-		for _, entry := range items {
-			if handlerErr = handler(entry); handlerErr != nil {
-				return false // stop paginating
+			// Scan this segment
+			var segmentResources []models.Resource
+			var handlerErr, unmarshalErr error
+			// The pages of this segment will be handled serially
+			err := dynamoClient.ScanPages(input, func(page *dynamodb.ScanOutput, lastPage bool) bool {
+				var items []*resourceItem
+				if unmarshalErr = dynamodbattribute.UnmarshalListOfMaps(page.Items, &items); unmarshalErr != nil {
+					return false // stop paginating
+				}
+
+				if !includeCompliance {
+					for _, entry := range items {
+						segmentResources = append(segmentResources, entry.Resource(""))
+					}
+					return true
+				}
+
+				if requiredComplianceStatus == "" {
+					for _, entry := range items {
+						var status *complianceStatus
+						status, handlerErr = getComplianceStatus(entry.ID)
+						if handlerErr != nil {
+							return false
+						}
+						segmentResources = append(segmentResources, entry.Resource(status.Status))
+					}
+					return true
+				}
+
+				for _, entry := range items {
+					var status *complianceStatus
+					status, handlerErr = getComplianceStatus(entry.ID)
+					if handlerErr != nil {
+						return false
+					}
+					// Filter on the compliance status (if applicable)
+					if requiredComplianceStatus == status.Status {
+						// Resource passed all of the filters - add it to the result set
+						segmentResources = append(segmentResources, entry.Resource(status.Status))
+					}
+				}
+				return true // keep paging
+			})
+
+			if handlerErr != nil {
+				zap.L().Error("query item handler failed", zap.Error(handlerErr))
+				results <- scanResult{nil, handlerErr}
 			}
+
+			if unmarshalErr != nil {
+				zap.L().Error("dynamodbattribute.UnmarshalListOfMaps failed", zap.Error(unmarshalErr))
+				results <- scanResult{nil, unmarshalErr}
+			}
+
+			if err != nil {
+				zap.L().Error("dynamoClient.QueryPages failed", zap.Error(err))
+				results <- scanResult{nil, err}
+			}
+
+			// Report results
+			results <- scanResult{
+				resources: segmentResources,
+				err:       nil,
+			}
+		}(scanInput)
+	}
+
+	// Merge scan results
+	zap.L().Debug("scans initiated, awaiting results")
+	var err error
+	var mergedResources []models.Resource
+	for range inputs {
+		result := <-results
+		zap.L().Debug("received scan segment results", zap.Any("results", len(result.resources)), zap.Error(result.err))
+		if result.err != nil {
+			err = result.err
+			continue
 		}
-
-		return true // keep paging
-	})
-
-	if handlerErr != nil {
-		zap.L().Error("query item handler failed", zap.Error(handlerErr))
-		return handlerErr
+		mergedResources = append(mergedResources, result.resources...)
 	}
 
-	if unmarshalErr != nil {
-		zap.L().Error("dynamodbattribute.UnmarshalListOfMaps failed", zap.Error(unmarshalErr))
-		return unmarshalErr
-	}
-
-	if err != nil {
-		zap.L().Error("dynamoClient.QueryPages failed", zap.Error(err))
-		return err
-	}
-
-	return nil
+	return mergedResources, err
 }

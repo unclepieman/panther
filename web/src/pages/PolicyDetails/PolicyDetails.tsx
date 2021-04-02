@@ -18,51 +18,46 @@
 
 import React from 'react';
 import useRouter from 'Hooks/useRouter';
-import { ComplianceStatusEnum, ResourcesForPolicyInput } from 'Generated/schema';
-import { Alert, Box } from 'pouncejs';
-import Panel from 'Components/Panel';
-import {
-  TableControlsPagination,
-  TableControlsComplianceFilter,
-} from 'Components/utils/TableControls';
-import {
-  extendResourceWithIntegrationLabel,
-  getComplianceItemsTotalCount,
-  convertObjArrayValuesToCsv,
-  extractErrorMessage,
-} from 'Helpers/utils';
-import pick from 'lodash-es/pick';
-import { DEFAULT_SMALL_PAGE_SIZE } from 'Source/constants';
-import useRequestParamsWithPagination from 'Hooks/useRequestParamsWithPagination';
+import { Alert, Box, Flex, Card, TabList, TabPanel, TabPanels, Tabs } from 'pouncejs';
+import { BorderedTab, BorderTabDivider } from 'Components/BorderedTab';
+import { getComplianceItemsTotalCount, extractErrorMessage } from 'Helpers/utils';
+import invert from 'lodash/invert';
+import withSEO from 'Hoc/withSEO';
+import useUrlParams from 'Hooks/useUrlParams';
 import ErrorBoundary from 'Components/ErrorBoundary';
-import PolicyDetailsTable from './PolicyDetailsTable';
 import PolicyDetailsInfo from './PolicyDetailsInfo';
+import PolicyDetailsBanner from './PolicyDetailsBanner';
+import PolicyDetailsResources from './PolicyDetailsResources';
 import PolicyDetailsPageSkeleton from './Skeleton';
-import { usePolicyDetails } from './graphql/policyDetails.generated';
+import { useGetPolicyDetails } from './graphql/getPolicyDetails.generated';
 
-const acceptedRequestParams = ['page', 'status', 'pageSize', 'suppressed'] as const;
+export interface PolicyDetailsPageUrlParams {
+  section?: 'details' | 'resources';
+}
+
+const sectionToTabIndex: Record<PolicyDetailsPageUrlParams['section'], number> = {
+  details: 0,
+  resources: 1,
+};
+
+const tabIndexToSection = invert(sectionToTabIndex) as Record<
+  number,
+  PolicyDetailsPageUrlParams['section']
+>;
 
 const PolicyDetailsPage = () => {
   const { match } = useRouter<{ id: string }>();
-  const {
-    requestParams,
-    updatePagingParams,
-    setRequestParamsAndResetPaging,
-  } = useRequestParamsWithPagination<
-    Pick<ResourcesForPolicyInput, typeof acceptedRequestParams[number]>
-  >();
+  const { urlParams, setUrlParams } = useUrlParams<PolicyDetailsPageUrlParams>();
 
-  const { error, data, loading } = usePolicyDetails({
+  const { error, data, loading } = useGetPolicyDetails({
     fetchPolicy: 'cache-and-network',
     variables: {
       policyDetailsInput: {
+        id: match.params.id,
+      },
+      resourcesForPolicyInput: {
         policyId: match.params.id,
       },
-      resourcesForPolicyInput: convertObjArrayValuesToCsv({
-        ...pick(requestParams, acceptedRequestParams),
-        policyId: match.params.id,
-        pageSize: DEFAULT_SMALL_PAGE_SIZE,
-      }),
     },
   });
 
@@ -72,110 +67,55 @@ const PolicyDetailsPage = () => {
 
   if (error) {
     return (
-      <Alert
-        variant="error"
-        title="Couldn't load policy"
-        description={
-          extractErrorMessage(error) ||
-          "An unknown error occured and we couldn't load the policy details from the server"
-        }
-        mb={6}
-      />
+      <Box mb={6}>
+        <Alert
+          variant="error"
+          title="Couldn't load policy"
+          description={
+            extractErrorMessage(error) ||
+            "An unknown error occured and we couldn't load the policy details from the server"
+          }
+        />
+      </Box>
     );
   }
 
-  const resources = data.resourcesForPolicy.items;
   const totalCounts = data.resourcesForPolicy.totals;
-  const pagingData = data.resourcesForPolicy.paging;
 
-  // add an `integrationLabel` field to each resource based on its matching integrationId
-  const enhancedResources = resources.map(r =>
-    extendResourceWithIntegrationLabel(r, data.listComplianceIntegrations)
-  );
+  const totals = getComplianceItemsTotalCount(totalCounts);
+  const policyHasResources = totals > 0;
 
   return (
-    <article>
-      <ErrorBoundary>
-        <PolicyDetailsInfo policy={data.policy} />
-      </ErrorBoundary>
-      <Box mt={2} mb={6}>
-        <Panel
-          size="large"
-          title="Resources"
-          actions={
-            <Box ml={6} mr="auto">
-              <TableControlsComplianceFilter
-                mr={1}
-                count={getComplianceItemsTotalCount(totalCounts)}
-                text="All"
-                isActive={!requestParams.status && !requestParams.suppressed}
-                onClick={() =>
-                  setRequestParamsAndResetPaging({ status: undefined, suppressed: undefined })
-                }
-              />
-              <TableControlsComplianceFilter
-                mr={1}
-                count={totalCounts.active.fail}
-                countColor="red300"
-                text="Failing"
-                isActive={requestParams.status === ComplianceStatusEnum.Fail}
-                onClick={() =>
-                  setRequestParamsAndResetPaging({
-                    status: ComplianceStatusEnum.Fail,
-                    suppressed: undefined,
-                  })
-                }
-              />
-              <TableControlsComplianceFilter
-                mr={1}
-                countColor="green300"
-                count={totalCounts.active.pass}
-                text="Passing"
-                isActive={requestParams.status === ComplianceStatusEnum.Pass}
-                onClick={() =>
-                  setRequestParamsAndResetPaging({
-                    status: ComplianceStatusEnum.Pass,
-                    suppressed: undefined,
-                  })
-                }
-              />
-              <TableControlsComplianceFilter
-                mr={1}
-                countColor="orange300"
-                count={
-                  totalCounts.suppressed.fail +
-                  totalCounts.suppressed.pass +
-                  totalCounts.suppressed.error
-                }
-                text="Ignored"
-                isActive={!requestParams.status && requestParams.suppressed}
-                onClick={() =>
-                  setRequestParamsAndResetPaging({
-                    status: undefined,
-                    suppressed: true,
-                  })
-                }
-              />
+    <Box as="article">
+      <Flex direction="column" spacing={6} my={6}>
+        <ErrorBoundary>
+          <PolicyDetailsBanner policy={data.policy} />
+        </ErrorBoundary>
+        <Card position="relative">
+          <Tabs
+            index={sectionToTabIndex[urlParams.section] || 0}
+            onChange={index => setUrlParams({ section: tabIndexToSection[index] })}
+          >
+            <Box px={2}>
+              <TabList>
+                <BorderedTab>Details</BorderedTab>
+                <BorderedTab>Resources {policyHasResources ? `(${totals})` : ''}</BorderedTab>
+              </TabList>
+              <BorderTabDivider />
+              <TabPanels>
+                <TabPanel data-testid="policy-details-tabpanel" lazy unmountWhenInactive>
+                  <PolicyDetailsInfo policy={data.policy} />
+                </TabPanel>
+                <TabPanel data-testid="policy-resources-tabpanel" lazy unmountWhenInactive>
+                  <PolicyDetailsResources />
+                </TabPanel>
+              </TabPanels>
             </Box>
-          }
-        >
-          <ErrorBoundary>
-            <PolicyDetailsTable
-              items={enhancedResources}
-              enumerationStartIndex={(pagingData.thisPage - 1) * DEFAULT_SMALL_PAGE_SIZE}
-            />
-          </ErrorBoundary>
-          <Box my={6}>
-            <TableControlsPagination
-              page={pagingData.thisPage}
-              totalPages={pagingData.totalPages}
-              onPageChange={updatePagingParams}
-            />
-          </Box>
-        </Panel>
-      </Box>
-    </article>
+          </Tabs>
+        </Card>
+      </Flex>
+    </Box>
   );
 };
 
-export default PolicyDetailsPage;
+export default withSEO({ title: ({ match }) => match.params.id })(PolicyDetailsPage);

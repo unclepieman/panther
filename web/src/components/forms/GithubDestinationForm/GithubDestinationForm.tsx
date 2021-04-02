@@ -20,11 +20,13 @@ import React from 'react';
 import { Field } from 'formik';
 import * as Yup from 'yup';
 import FormikTextInput from 'Components/fields/TextInput';
+import SensitiveTextInput from 'Components/fields/SensitiveTextInput';
 import { DestinationConfigInput } from 'Generated/schema';
 import BaseDestinationForm, {
   BaseDestinationFormValues,
   defaultValidationSchema,
 } from 'Components/forms/BaseDestinationForm';
+import { SimpleGrid } from 'pouncejs';
 
 type GithubFieldValues = Pick<DestinationConfigInput, 'github'>;
 
@@ -33,48 +35,54 @@ interface GithubDestinationFormProps {
   onSubmit: (values: BaseDestinationFormValues<GithubFieldValues>) => void;
 }
 
-const githubFieldsValidationSchema = Yup.object().shape({
-  outputConfig: Yup.object().shape({
-    github: Yup.object().shape({
-      repoName: Yup.string().required(),
-      token: Yup.string().required(),
-    }),
-  }),
-});
-
-// @ts-ignore
-// We merge the two schemas together: the one deriving from the common fields, plus the custom
-// ones that change for each destination.
-// https://github.com/jquense/yup/issues/522
-const mergedValidationSchema = defaultValidationSchema.concat(githubFieldsValidationSchema);
-
 const GithubDestinationForm: React.FC<GithubDestinationFormProps> = ({
   onSubmit,
   initialValues,
 }) => {
+  const existing = initialValues.outputId;
+
+  const githubFieldsValidationSchema = Yup.object().shape({
+    outputConfig: Yup.object().shape({
+      github: Yup.object().shape({
+        repoName: Yup.string().required(),
+        token: existing ? Yup.string() : Yup.string().required(),
+      }),
+    }),
+  });
+
+  const mergedValidationSchema = defaultValidationSchema.concat(githubFieldsValidationSchema);
+
   return (
     <BaseDestinationForm<GithubFieldValues>
       initialValues={initialValues}
       validationSchema={mergedValidationSchema}
       onSubmit={onSubmit}
     >
-      <Field
-        as={FormikTextInput}
-        name="outputConfig.github.repoName"
-        label="Repository name"
-        placeholder="What's the name of your Github repository?"
-        mb={6}
-        aria-required
-      />
-      <Field
-        as={FormikTextInput}
-        name="outputConfig.github.token"
-        label="Token"
-        placeholder="What's your Github API token?"
-        mb={6}
-        aria-required
-        autoComplete="new-password"
-      />
+      <SimpleGrid gap={5} columns={3}>
+        <Field
+          name="displayName"
+          as={FormikTextInput}
+          label="* Display Name"
+          placeholder="How should we name this?"
+          required
+        />
+        <Field
+          as={FormikTextInput}
+          name="outputConfig.github.repoName"
+          label="Repository name"
+          placeholder="What's the repo name?"
+          required
+        />
+        <Field
+          as={SensitiveTextInput}
+          shouldMask={!!existing}
+          name="outputConfig.github.token"
+          label="Token"
+          placeholder="What's your API token?"
+          autoComplete="new-password"
+          required={!existing}
+        />
+      </SimpleGrid>
     </BaseDestinationForm>
   );
 };

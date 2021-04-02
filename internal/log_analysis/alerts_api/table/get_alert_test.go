@@ -26,13 +26,14 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
-	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbiface"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/panther-labs/panther/pkg/testutils"
 )
 
 func TestGetAlert(t *testing.T) {
-	mockDdbClient := &mockDynamoDB{}
+	mockDdbClient := &testutils.DynamoDBMock{}
 	table := AlertsTable{
 		AlertsTableName:                    "alertsTableName",
 		RuleIDCreationTimeIndexName:        "ruleIDCreationTimeIndexName",
@@ -53,6 +54,7 @@ func TestGetAlert(t *testing.T) {
 		CreationTime: time.Now().UTC(),
 		UpdateTime:   time.Now().UTC(),
 		Severity:     "INFO",
+		Status:       "TRIAGED",
 		EventCount:   10,
 		LogTypes:     []string{"logtype"},
 	}
@@ -62,13 +64,29 @@ func TestGetAlert(t *testing.T) {
 
 	mockDdbClient.On("GetItem", expectedGetItemRequest).Return(&dynamodb.GetItemOutput{Item: item}, nil)
 
-	result, err := table.GetAlert(aws.String("alertId"))
+	result, err := table.GetAlert("alertId")
 	require.NoError(t, err)
 	require.Equal(t, expectedAlert, result)
 }
 
+func TestGetAlertDoesNotExist(t *testing.T) {
+	mockDdbClient := &testutils.DynamoDBMock{}
+	table := AlertsTable{
+		AlertsTableName:                    "alertsTableName",
+		RuleIDCreationTimeIndexName:        "ruleIDCreationTimeIndexName",
+		TimePartitionCreationTimeIndexName: "timePartitionCreationTimeIndexName",
+		Client:                             mockDdbClient,
+	}
+
+	mockDdbClient.On("GetItem", mock.Anything).Return(&dynamodb.GetItemOutput{}, nil)
+
+	result, err := table.GetAlert("alertId")
+	require.NoError(t, err)
+	require.Nil(t, result)
+}
+
 func TestGetAlertErrorQueryingDynamo(t *testing.T) {
-	mockDdbClient := &mockDynamoDB{}
+	mockDdbClient := &testutils.DynamoDBMock{}
 	table := AlertsTable{
 		AlertsTableName:                    "alertsTableName",
 		RuleIDCreationTimeIndexName:        "ruleIDCreationTimeIndexName",
@@ -78,16 +96,6 @@ func TestGetAlertErrorQueryingDynamo(t *testing.T) {
 
 	mockDdbClient.On("GetItem", mock.Anything).Return(&dynamodb.GetItemOutput{}, errors.New("test"))
 
-	_, err := table.GetAlert(aws.String("alertId"))
+	_, err := table.GetAlert("alertId")
 	require.Error(t, err)
-}
-
-type mockDynamoDB struct {
-	dynamodbiface.DynamoDBAPI
-	mock.Mock
-}
-
-func (m *mockDynamoDB) GetItem(input *dynamodb.GetItemInput) (*dynamodb.GetItemOutput, error) {
-	args := m.Called(input)
-	return args.Get(0).(*dynamodb.GetItemOutput), args.Error(1)
 }

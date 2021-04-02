@@ -19,18 +19,19 @@ package outputs
  */
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
-var msTeamConfig = &outputmodels.MsTeamsConfig{
-	WebhookURL: aws.String("msteam-url"),
+var msTeamConfig = &outputModels.MsTeamsConfig{
+	WebhookURL: "msteam-url",
 }
 
 func TestMsTeamsAlert(t *testing.T) {
@@ -38,12 +39,15 @@ func TestMsTeamsAlert(t *testing.T) {
 	client := &OutputClient{httpWrapper: httpWrapper}
 
 	var createdAtTime, _ = time.Parse(time.RFC3339, "2019-08-03T11:40:13Z")
-	alert := &alertmodels.Alert{
-		PolicyID:   aws.String("policyId"),
-		CreatedAt:  &createdAtTime,
-		OutputIDs:  aws.StringSlice([]string{"output-id"}),
-		PolicyName: aws.String("policyName"),
-		Severity:   aws.String("INFO"),
+	alert := &deliverymodel.Alert{
+		AlertID:      aws.String("alertId"),
+		AnalysisID:   "policyId",
+		Type:         deliverymodel.PolicyType,
+		CreatedAt:    createdAtTime,
+		OutputIds:    []string{"output-id"},
+		AnalysisName: aws.String("policyName"),
+		Severity:     "INFO",
+		Context:      map[string]interface{}{"key": "value"},
 	}
 
 	msTeamsPayload := map[string]interface{}{
@@ -57,8 +61,9 @@ func TestMsTeamsAlert(t *testing.T) {
 					map[string]string{"name": "Runbook", "value": ""},
 					map[string]string{"name": "Severity", "value": "INFO"},
 					map[string]string{"name": "Tags", "value": ""},
+					map[string]string{"name": "AlertContext", "value": `{"key":"value"}`},
 				},
-				"text": "[Click here to view in the Panther UI](https://panther.io/policies/policyId).\n",
+				"text": "[Click here to view in the Panther UI](https://panther.io/alerts/alertId).\n",
 			},
 		},
 		"potentialAction": []interface{}{
@@ -68,22 +73,22 @@ func TestMsTeamsAlert(t *testing.T) {
 				"targets": []interface{}{
 					map[string]string{
 						"os":  "default",
-						"uri": "https://panther.io/policies/policyId",
+						"uri": "https://panther.io/alerts/alertId",
 					},
 				},
 			},
 		},
 	}
 
-	requestURL := *msTeamConfig.WebhookURL
+	requestURL := msTeamConfig.WebhookURL
 
 	expectedPostInput := &PostInput{
 		url:  requestURL,
 		body: msTeamsPayload,
 	}
+	ctx := context.Background()
+	httpWrapper.On("post", ctx, expectedPostInput).Return((*AlertDeliveryResponse)(nil))
 
-	httpWrapper.On("post", expectedPostInput).Return((*AlertDeliveryError)(nil))
-
-	require.Nil(t, client.MsTeams(alert, msTeamConfig))
+	assert.Nil(t, client.MsTeams(ctx, alert, msTeamConfig))
 	httpWrapper.AssertExpectations(t)
 }

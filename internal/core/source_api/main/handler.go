@@ -31,19 +31,16 @@ import (
 
 var router *genericapi.Router
 
-func init() {
-	validator, err := models.Validator()
-	if err != nil {
-		panic(err)
-	}
-	router = genericapi.NewRouter("cloudsec", "snapshot", validator, api.API{})
-}
-
 func lambdaHandler(ctx context.Context, request *models.LambdaInput) (interface{}, error) {
 	lambdalogger.ConfigureGlobal(ctx, nil)
 	return router.Handle(request)
 }
 
 func main() {
+	validator, err := models.Validator()
+	if err != nil {
+		panic(err)
+	}
+	router = genericapi.NewRouter("api", "sources", validator, api.Setup())
 	lambda.Start(lambdaHandler)
 }

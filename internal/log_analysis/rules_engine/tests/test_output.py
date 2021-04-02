@@ -25,7 +25,7 @@ from unittest import TestCase, mock
 import boto3
 
 from . import mock_to_return, DDB_MOCK, S3_MOCK, SNS_MOCK
-from ..src import EventMatch
+from ..src import EngineResult
 
 with mock.patch.dict(os.environ, {'ALERTS_DEDUP_TABLE': 'table_name', 'S3_BUCKET': 's3_bucket', 'NOTIFICATIONS_TOPIC': 'sns_topic'}), \
      mock.patch.object(boto3, 'client', side_effect=mock_to_return) as mock_boto:
@@ -41,13 +41,15 @@ class TestMatchedEventsBuffer(TestCase):
 
     def test_add_and_flush_event_generate_new_alert(self) -> None:
         buffer = MatchedEventsBuffer()
-        event_match = EventMatch(
+        event_match = EngineResult(
             rule_id='rule_id',
             rule_version='rule_version',
             log_type='log_type',
             dedup='dedup',
             dedup_period_mins=100,
-            event={'data_key': 'data_value'}
+            alert_context='{"key":"value"}',
+            event={'data_key': 'data_value'},
+            title='test title'
         )
         buffer.add_event(event_match)
 
@@ -68,7 +70,10 @@ class TestMatchedEventsBuffer(TestCase):
                 '#7': 'alertUpdateTime',
                 '#8': 'eventCount',
                 '#9': 'logTypes',
-                '#10': 'ruleVersion'
+                '#10': 'ruleVersion',
+                '#11': 'type',
+                '#12': 'context',
+                '#13': 'title'
             },
             ExpressionAttributeValues={
                 ':1': {
@@ -97,7 +102,16 @@ class TestMatchedEventsBuffer(TestCase):
                 },
                 ':10': {
                     'S': 'rule_version'
-                }
+                },
+                ':11': {
+                    'S': 'RULE'
+                },
+                ':12': {
+                    'S': '{"key":"value"}'
+                },
+                ':13': {
+                    'S': 'test title'
+                },
             },
             Key={
                 'partitionKey': {
@@ -107,7 +121,7 @@ class TestMatchedEventsBuffer(TestCase):
             },
             ReturnValues='ALL_NEW',
             TableName='table_name',
-            UpdateExpression='ADD #3 :3\nSET #4=:4, #5=:5, #6=:6, #7=:7, #8=:8, #9=:9, #10=:10'
+            UpdateExpression='ADD #3 :3\nSET #4=:4, #5=:5, #6=:6, #7=:7, #8=:8, #9=:9, #10=:10, #11=:11, #12=:12, #13=:13'
         )
 
         S3_MOCK.put_object.assert_called_once_with(Body=mock.ANY, Bucket='s3_bucket', ContentType='gzip', Key=mock.ANY)
@@ -157,12 +171,12 @@ class TestMatchedEventsBuffer(TestCase):
     def test_add_same_rule_different_log(self) -> None:
         buffer = MatchedEventsBuffer()
         buffer.add_event(
-            EventMatch(
+            EngineResult(
                 rule_id='id', rule_version='version', log_type='log1', dedup='dedup', dedup_period_mins=100, event={'key1': 'value1'}
             )
         )
         buffer.add_event(
-            EventMatch(
+            EngineResult(
                 rule_id='id', rule_version='version', log_type='log2', dedup='dedup', dedup_period_mins=100, event={'key2': 'value2'}
             )
         )
@@ -207,12 +221,19 @@ class TestMatchedEventsBuffer(TestCase):
     def test_add_same_log_different_rules(self) -> None:
         buffer = MatchedEventsBuffer()
         buffer.add_event(
-            EventMatch(
-                rule_id='id1', rule_version='version', log_type='log', dedup='dedup', dedup_period_mins=100, event={'key1': 'value1'}
+            EngineResult(
+                rule_id='id1',
+                rule_version='version',
+                log_type='log',
+                dedup='dedup',
+                dedup_period_mins=100,
+                event={'key1': 'value1'},
+                rule_tags=['test-tag'],
+                rule_reports={'key': ['value']}
             )
         )
         buffer.add_event(
-            EventMatch(
+            EngineResult(
                 rule_id='id2', rule_version='version', log_type='log', dedup='dedup', dedup_period_mins=100, event={'key2': 'value2'}
             )
         )
@@ -240,12 +261,17 @@ class TestMatchedEventsBuffer(TestCase):
                 self.assertEqual(content['key1'], 'value1')
                 # Verify extra fields
                 self.assertEqual(content['p_rule_id'], 'id1')
+                self.assertEqual(content['p_rule_tags'], ['test-tag'])
+                self.assertEqual(content['p_rule_reports'], {'key': ['value']})
                 self.assertEqual(content['p_alert_id'], hashlib.md5(b'id1:1:dedup').hexdigest())  # nosec
             elif 'key2' in content:
                 # Verify actual event
                 self.assertEqual(content['key2'], 'value2')
                 # Verify extra fields
                 self.assertEqual(content['p_rule_id'], 'id2')
+                # Assert that tags row is not populated
+                self.assertEqual(content['p_rule_tags'], [])
+                self.assertEqual(content['p_rule_reports'], {})
                 self.assertEqual(content['p_alert_id'], hashlib.md5(b'id2:1:dedup').hexdigest())  # nosec
             else:
                 self.fail('unexpected content')
@@ -257,12 +283,12 @@ class TestMatchedEventsBuffer(TestCase):
     def test_group_events_together(self) -> None:
         buffer = MatchedEventsBuffer()
         buffer.add_event(
-            EventMatch(
+            EngineResult(
                 rule_id='id', rule_version='version', log_type='log', dedup='dedup', dedup_period_mins=100, event={'key1': 'value1'}
             )
         )
         buffer.add_event(
-            EventMatch(
+            EngineResult(
                 rule_id='id', rule_version='version', log_type='log', dedup='dedup', dedup_period_mins=100, event={'key2': 'value2'}
             )
         )
@@ -302,8 +328,8 @@ class TestMatchedEventsBuffer(TestCase):
     def test_add_overflows_buffer(self) -> None:
         buffer = MatchedEventsBuffer()
         # Reducing max_bytes so that it will cause the overflow condition to trigger earlier
-        buffer.max_bytes = 50
-        event_match = EventMatch(
+        buffer.max_bytes = 20
+        event_match = EngineResult(
             rule_id='rule_id',
             rule_version='rule_version',
             log_type='log_type',

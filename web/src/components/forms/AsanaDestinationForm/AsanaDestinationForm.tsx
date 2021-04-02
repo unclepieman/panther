@@ -20,6 +20,7 @@ import React from 'react';
 import { Field } from 'formik';
 import * as Yup from 'yup';
 import FormikTextInput from 'Components/fields/TextInput';
+import SensitiveTextInput from 'Components/fields/SensitiveTextInput';
 import { DestinationConfigInput } from 'Generated/schema';
 import BaseDestinationForm, {
   BaseDestinationFormValues,
@@ -27,7 +28,7 @@ import BaseDestinationForm, {
 } from 'Components/forms/BaseDestinationForm';
 import { isNumber } from 'Helpers/utils';
 import FormikMultiCombobox from 'Components/fields/MultiComboBox';
-import { Text } from 'pouncejs';
+import { Box, FormHelperText, SimpleGrid } from 'pouncejs';
 
 type AsanaFieldValues = Pick<DestinationConfigInput, 'asana'>;
 
@@ -36,54 +37,59 @@ interface AsanaDestinationFormProps {
   onSubmit: (values: BaseDestinationFormValues<AsanaFieldValues>) => void;
 }
 
-const asanaFieldsValidationSchema = Yup.object().shape({
-  outputConfig: Yup.object().shape({
-    asana: Yup.object().shape({
-      personalAccessToken: Yup.string().required(),
-      projectGids: Yup.array()
-        .of(Yup.number())
-        .required(),
-    }),
-  }),
-});
-
-// @ts-ignore
-// We merge the two schemas together: the one deriving from the common fields, plus the custom
-// ones that change for each destination.
-// https://github.com/jquense/yup/issues/522
-const mergedValidationSchema = defaultValidationSchema.concat(asanaFieldsValidationSchema);
-
 const AsanaDestinationForm: React.FC<AsanaDestinationFormProps> = ({ onSubmit, initialValues }) => {
+  const existing = initialValues.outputId;
+
+  const asanaFieldsValidationSchema = Yup.object().shape({
+    outputConfig: Yup.object().shape({
+      asana: Yup.object().shape({
+        projectGids: Yup.array().of(Yup.number()).required(),
+        personalAccessToken: existing ? Yup.string() : Yup.string().required(),
+      }),
+    }),
+  });
+
+  const mergedValidationSchema = defaultValidationSchema.concat(asanaFieldsValidationSchema);
+
   return (
     <BaseDestinationForm<AsanaFieldValues>
       initialValues={initialValues}
       validationSchema={mergedValidationSchema}
       onSubmit={onSubmit}
     >
-      <Field
-        as={FormikTextInput}
-        name="outputConfig.asana.personalAccessToken"
-        label="Access Token"
-        placeholder="Your personal Asana access token"
-        mb={6}
-        aria-required
-      />
-      <Field
-        name="outputConfig.asana.projectGids"
-        as={FormikMultiCombobox}
-        label="Project GIDs"
-        aria-required
-        allowAdditions
-        validateAddition={isNumber}
-        searchable
-        items={[]}
-        inputProps={{
-          placeholder: 'The GIDs of the projects that will receive the task',
-        }}
-      />
-      <Text size="small" color="grey200" mt={2}>
-        Add by pressing the {'<'}Enter{'>'} key
-      </Text>
+      <SimpleGrid gap={5} columns={2} mb={5}>
+        <Field
+          name="displayName"
+          as={FormikTextInput}
+          label="* Display Name"
+          placeholder="How should we name this?"
+          required
+        />
+        <Field
+          as={SensitiveTextInput}
+          shouldMask={!!existing}
+          name="outputConfig.asana.personalAccessToken"
+          label="Access Token"
+          placeholder="What's  your access token?"
+          required={!existing}
+        />
+      </SimpleGrid>
+      <Box as="fieldset">
+        <Field
+          name="outputConfig.asana.projectGids"
+          as={FormikMultiCombobox}
+          label="Project GIDs"
+          aria-describedby="projectGids-helper"
+          allowAdditions
+          validateAddition={isNumber}
+          searchable
+          items={[]}
+          placeholder="The GIDs of the projects that will receive the task"
+        />
+        <FormHelperText id="projectGids-helper" mt={2}>
+          Add by pressing the {'<'}Enter{'>'} key
+        </FormHelperText>
+      </Box>
     </BaseDestinationForm>
   );
 };

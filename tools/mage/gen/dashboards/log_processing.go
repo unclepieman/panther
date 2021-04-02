@@ -1,0 +1,612 @@
+package dashboards
+
+/**
+ * Panther is a Cloud-Native SIEM for the Modern Security Team.
+ * Copyright (C) 2020 Panther Labs Inc
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+// nolint:lll
+var logProcessingJSON = `
+{
+    "start": "-PT1H",
+    "widgets": [
+        {
+            "type": "log",
+            "x": 0,
+            "y": 3,
+            "width": 9,
+            "height": 6,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-log-processor' | SOURCE '/aws/lambda/panther-rules-engine' | SOURCE '/aws/lambda/panther-datacatalog-updater' | filter @message like '[ERROR]' or  @message like '[WARN]' or level='error' or level='warn' or @message like 'fatal error:'\n| fields @timestamp, @message\n| sort @timestamp desc\n| limit 20",
+                "region": "eu-west-1",
+                "stacked": false,
+                "title": "Most Recent 20 Errors and Warnings",
+                "view": "table"
+            }
+        },
+        {
+            "type": "log",
+            "x": 0,
+            "y": 26,
+            "width": 9,
+            "height": 3,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-log-processor' | filter operation='readS3Object' | stats percentile(opTime, 50)*1000.0 as p50, percentile(opTime, 90)*1000.0 as p90, percentile(opTime, 95)*1000.0 as p95, percentile(opTime, 100)*1000.0 as p100 by bin(5m)",
+                "region": "eu-west-1",
+                "stacked": false,
+                "title": "Input File Read Time Percentiles (msec)",
+                "view": "timeSeries"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 19,
+            "width": 18,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "panther-input-data-notifications-queue-dlq", { "yAxis": "right" } ],
+                    [ ".", "NumberOfMessagesReceived", ".", "panther-input-data-notifications-queue" ],
+                    [ ".", "NumberOfMessagesSent", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "eu-west-1",
+                "stat": "Sum",
+                "period": 300,
+                "title": "Input SQS Queue Performance",
+                "legend": {
+                    "position": "bottom"
+                }
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 32,
+            "width": 18,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/SNS", "NumberOfMessagesPublished", "TopicName", "panther-processed-data-notifications" ],
+                    [ ".", "NumberOfNotificationsFailed", ".", "." ],
+                    [ ".", "NumberOfNotificationsDelivered", ".", "." ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "eu-west-1",
+                "stat": "Sum",
+                "period": 300,
+                "title": "Output File Notification SNS Performance",
+                "legend": {
+                    "position": "bottom"
+                }
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 0,
+            "width": 18,
+            "height": 3,
+            "properties": {
+                "markdown": "\n# [Log Processing](https://docs.runpanther.io/log-analysis/log-processing) \nThe log processing Input SQS Queue receives S3 event notifications from buckets users configure for log processing. A Lambda function processes each file into JSON and appends the [Panther Fields](https://docs.runpanther.io/historical-search/panther-fields). The new JSON files are written to S3 and notifications are sent to the Output File Notification SNS topic to trigger the [Rules Engine](https://docs.runpanther.io/log-analysis/rules).\n\nThe Rules Engine reads file names in S3 notifications sent to the Input SQS Queue from the output of the [log processing](https://docs.runpanther.io/log-analysis/log-processing) subsystem. The engine applies the configured rules to each file. Those events that match are written to S3 for historical search and alarms generated per the set deduplication string and alarm interval for each rule.The alarms are sent to the Alert Output SQS Queue for delivery to user configured [destinations](https://docs.runpanther.io/destinations/background).\n\nAll graphs have data aggregated into 5 minute bins. Please refer to our operational [Run Books](https://docs.runpanther.io/operations) for tips on troubleshooting issues.\n"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 3,
+            "y": 36,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Invocations", "FunctionName", "panther-log-processor", "Resource", "panther-log-processor", { "stat": "Sum" } ]
+                ],
+                "region": "eu-west-1",
+                "title": "Invocations",
+                "start": "-PT3H",
+                "end": "P0D",
+                "view": "timeSeries",
+                "stacked": false
+            }
+        },
+        {
+            "type": "metric",
+            "x": 6,
+            "y": 36,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Duration", "FunctionName", "panther-log-processor", "Resource", "panther-log-processor", { "stat": "Minimum", "region": "eu-west-1" } ],
+                    [ "AWS/Lambda", "Duration", "FunctionName", "panther-log-processor", "Resource", "panther-log-processor", { "stat": "Average", "region": "eu-west-1" } ],
+                    [ "AWS/Lambda", "Duration", "FunctionName", "panther-log-processor", "Resource", "panther-log-processor", { "stat": "Maximum", "region": "eu-west-1" } ]
+                ],
+                "region": "eu-west-1",
+                "view": "timeSeries",
+                "stacked": false,
+                "title": "Duration (msec)"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 9,
+            "y": 36,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Errors", "FunctionName", "panther-log-processor", "Resource", "panther-log-processor", { "id": "errors", "stat": "Sum", "color": "#d13212", "region": "eu-west-1" } ],
+                    [ "AWS/Lambda", "Invocations", "FunctionName", "panther-log-processor", "Resource", "panther-log-processor", { "id": "invocations", "stat": "Sum", "visible": false, "region": "eu-west-1" } ],
+                    [ { "expression": "100 - 100 * errors / MAX([errors, invocations])", "label": "Success rate (%)", "id": "availability", "yAxis": "right", "region": "eu-west-1" } ]
+                ],
+                "region": "eu-west-1",
+                "title": "Errors / Success (%)",
+                "yAxis": {
+                    "right": {
+                        "max": 100
+                    }
+                },
+                "view": "timeSeries",
+                "stacked": false
+            }
+        },
+        {
+            "type": "log",
+            "x": 15,
+            "y": 42,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-datacatalog-updater' | filter operation like 'panther-datacatalog-updater' | stats max(heapSizeMB) as heap by bin(5min)\n",
+                "region": "eu-west-1",
+                "stacked": false,
+                "title": "Heap Usage (MB)",
+                "view": "timeSeries"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 3,
+            "y": 39,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Invocations", "FunctionName", "panther-rules-engine", "Resource", "panther-rules-engine", { "stat": "Sum" } ]
+                ],
+                "region": "eu-west-1",
+                "title": "Invocations",
+                "view": "timeSeries",
+                "stacked": false,
+                "start": "-P1D",
+                "end": "P0D"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 6,
+            "y": 39,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Duration", "FunctionName", "panther-rules-engine", "Resource", "panther-rules-engine", { "stat": "Minimum" } ],
+                    [ "...", { "stat": "Average" } ],
+                    [ "...", { "stat": "Maximum" } ]
+                ],
+                "region": "eu-west-1",
+                "view": "timeSeries",
+                "stacked": false,
+                "title": "Duration (msec)",
+                "start": "-P1D",
+                "end": "P0D"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 9,
+            "y": 39,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Errors", "FunctionName", "panther-rules-engine", "Resource", "panther-rules-engine", { "id": "errors", "stat": "Sum", "color": "#d13212" } ],
+                    [ ".", "Invocations", ".", ".", ".", ".", { "id": "invocations", "stat": "Sum", "visible": false } ],
+                    [ { "expression": "100 - 100 * errors / MAX([errors, invocations])", "label": "Success rate (%)", "id": "availability", "yAxis": "right", "region": "eu-west-1" } ]
+                ],
+                "region": "eu-west-1",
+                "title": " Errors / Success (%)",
+                "yAxis": {
+                    "right": {
+                        "max": 100
+                    }
+                },
+                "view": "timeSeries",
+                "stacked": false,
+                "start": "-P1D",
+                "end": "P0D"
+            }
+        },
+        {
+            "type": "log",
+            "x": 9,
+            "y": 3,
+            "width": 9,
+            "height": 6,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-rules-engine' | SOURCE '/aws/lambda/panther-log-processor' | SOURCE '/aws/lambda/panther-datacatalog-updater' | filter @message like '[ERROR]' or level='error' or @message like '[WARN]' or level='warn' or @message like 'fatal error:'\n| sum(strcontains(@message, '\"level\":\"error\"')+strcontains(@message, '[ERROR'])+strcontains(@message, 'fatal error:')) as errors, sum(strcontains(@message, '\"level\":\"warn\"')+strcontains(@message, '[WARN]')) as warns by bin(5m)",
+                "region": "eu-west-1",
+                "stacked": false,
+                "title": "Errors and Warnings",
+                "view": "timeSeries"
+            }
+        },
+        {
+            "type": "log",
+            "x": 0,
+            "y": 13,
+            "width": 9,
+            "height": 3,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-rules-engine' | filter @message like 'Retrieved' | parse @message \"Retrieved * rules in * seconds\" as nrules, ruleloadtime | stats max(nrules) as rules by bin(5m)\n",
+                "region": "eu-west-1",
+                "title": "Number of Loaded Rules",
+                "view": "timeSeries",
+                "stacked": false
+            }
+        },
+        {
+            "type": "log",
+            "x": 9,
+            "y": 13,
+            "width": 9,
+            "height": 3,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-rules-engine' | filter @message like 'Retrieved' | parse @message \"Retrieved * rules in * seconds\" as nrules, ruleloadtime | stats percentile(ruleloadtime, 50)*1000.0 as p50, percentile(ruleloadtime, 90)*1000.0  as p90, percentile(ruleloadtime, 95)*1000.0  as p95, percentile(ruleloadtime, 100)*1000.0  as p100 by bin(5m)\n",
+                "region": "eu-west-1",
+                "title": "Rule Load Time Percentiles (msec)",
+                "view": "timeSeries",
+                "stacked": false
+            }
+        },
+        {
+            "type": "log",
+            "x": 0,
+            "y": 16,
+            "width": 9,
+            "height": 3,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-rules-engine' | filter @message like 'Matched' | parse @message \"Matched * events in * seconds\" as nevents, rulematchtime | stats percentile(rulematchtime, 50)*1000.0 as p50, percentile(rulematchtime, 90)*1000.0  as p90, percentile(rulematchtime, 95)*1000.0  as p95, percentile(rulematchtime, 100)*1000.0  as p100 by bin(5m)\n",
+                "region": "eu-west-1",
+                "title": "Match Time per File  Percentiles (msec)",
+                "view": "timeSeries",
+                "stacked": false
+            }
+        },
+        {
+            "type": "log",
+            "x": 9,
+            "y": 16,
+            "width": 9,
+            "height": 3,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-rules-engine' | filter @message like 'Matched' | parse @message \"Matched * events in * seconds\" as nevents, rulematchtime | stats sum(nevents) as matches by bin(5m)\n",
+                "region": "eu-west-1",
+                "stacked": false,
+                "title": "Number of Rule Matches",
+                "view": "timeSeries"
+            }
+        },
+        {
+            "type": "log",
+            "x": 12,
+            "y": 39,
+            "width": 6,
+            "height": 3,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-rules-engine' | filter @message like 'REPORT' | stats max(@maxMemoryUsed/@memorySize) * 100.0 as usage by bin(5min)",
+                "region": "eu-west-1",
+                "title": "Memory Usage (%)",
+                "view": "timeSeries",
+                "stacked": false
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 42,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "markdown": "\n### Data Catalog Updater\n"
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 22,
+            "width": 18,
+            "height": 1,
+            "properties": {
+                "markdown": "\n## Processing\n"
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 36,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "markdown": "\n### Log Processor\n"
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 35,
+            "width": 18,
+            "height": 1,
+            "properties": {
+                "markdown": "\n## Lambdas\n"
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 9,
+            "width": 18,
+            "height": 1,
+            "properties": {
+                "markdown": "\n## Rules\n"
+            }
+        },
+        {
+            "type": "text",
+            "x": 0,
+            "y": 39,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "markdown": "\n### Rules Engine\n"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 3,
+            "y": 42,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Invocations", "FunctionName", "panther-datacatalog-updater", "Resource", "panther-datacatalog-updater", { "stat": "Sum", "region": "eu-west-1" } ]
+                ],
+                "region": "eu-west-1",
+                "title": "Invocations",
+                "view": "timeSeries",
+                "stacked": false
+            }
+        },
+        {
+            "type": "metric",
+            "x": 6,
+            "y": 42,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Duration", "FunctionName", "panther-datacatalog-updater", "Resource", "panther-datacatalog-updater", { "stat": "Minimum", "region": "eu-west-1" } ],
+                    [ "AWS/Lambda", "Duration", "FunctionName", "panther-datacatalog-updater", "Resource", "panther-datacatalog-updater", { "stat": "Average", "region": "eu-west-1" } ],
+                    [ "AWS/Lambda", "Duration", "FunctionName", "panther-datacatalog-updater", "Resource", "panther-datacatalog-updater", { "stat": "Maximum", "region": "eu-west-1" } ]
+                ],
+                "region": "eu-west-1",
+                "view": "timeSeries",
+                "stacked": false,
+                "title": "Duration"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 9,
+            "y": 42,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/Lambda", "Errors", "FunctionName", "panther-datacatalog-updater", "Resource", "panther-datacatalog-updater", { "id": "errors", "stat": "Sum", "color": "#d13212", "region": "eu-west-1" } ],
+                    [ "AWS/Lambda", "Invocations", "FunctionName", "panther-datacatalog-updater", "Resource", "panther-datacatalog-updater", { "id": "invocations", "stat": "Sum", "visible": false, "region": "eu-west-1" } ],
+                    [ { "expression": "100 - 100 * errors / MAX([errors, invocations])", "label": "Success rate (%)", "id": "availability", "yAxis": "right", "region": "eu-west-1" } ]
+                ],
+                "region": "eu-west-1",
+                "title": "Error count and success rate (%)",
+                "yAxis": {
+                    "right": {
+                        "max": 100
+                    }
+                },
+                "view": "timeSeries",
+                "stacked": false
+            }
+        },
+        {
+            "type": "log",
+            "x": 12,
+            "y": 36,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-log-processor' | filter operation like 'panther-log-processor' | stats max(percentMemUsed) as used by bin(5min)\n",
+                "region": "eu-west-1",
+                "title": "Memory Usage (%)",
+                "view": "timeSeries",
+                "stacked": false
+            }
+        },
+        {
+            "type": "log",
+            "x": 15,
+            "y": 36,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-log-processor' | filter operation like 'panther-log-processor' | stats max(heapSizeMB) as heap by bin(5min)\n",
+                "region": "eu-west-1",
+                "stacked": false,
+                "title": "Heap Usage (MB)",
+                "view": "timeSeries"
+            }
+        },
+        {
+            "type": "log",
+            "x": 12,
+            "y": 42,
+            "width": 3,
+            "height": 3,
+            "properties": {
+                "query": "SOURCE '/aws/lambda/panther-datacatalog-updater' | filter operation like 'panther-datacatalog-updater' | stats max(percentMemUsed) as used by bin(5min)\n",
+                "region": "eu-west-1",
+                "title": "Memory Usage (%)",
+                "view": "timeSeries",
+                "stacked": false
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 10,
+            "width": 18,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ "AWS/SQS", "NumberOfMessagesSent", "QueueName", "panther-rules-engine-queue" ],
+                    [ ".", "NumberOfMessagesReceived", ".", "." ],
+                    [ ".", "ApproximateNumberOfMessagesVisible", ".", "panther-rules-engine-queue-dlq", { "yAxis": "right" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "eu-west-1",
+                "stat": "Sum",
+                "period": 300,
+                "start": "-PT12H",
+                "end": "P0D",
+                "title": "Input SQS Queue Performance"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 23,
+            "width": 9,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SEARCH('{Panther,LogType} MetricName=\"BytesProcessed\"', 'Sum', 300)/1000000", "id": "e1", "period": 300 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "eu-west-1",
+                "stat": "Average",
+                "period": 300,
+                "yAxis": {
+                    "left": {
+                        "label": "MB"
+                    },
+                    "right": {
+                        "showUnits": false
+                    }
+                },
+                "title": "Input data by Log Type ( MB Uncompressed)",
+                "legend": {
+                    "position": "bottom"
+                },
+                "liveData": false
+            }
+        },
+        {
+            "type": "metric",
+            "x": 9,
+            "y": 23,
+            "width": 9,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SUM(SEARCH('{Panther,LogType} MetricName=\"BytesProcessed\"', 'Sum', 300))/1000000", "id": "e1", "period": 300 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "eu-west-1",
+                "stat": "Average",
+                "title": "Input Processed (MB Uncompressed)"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 9,
+            "y": 26,
+            "width": 9,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SUM(SEARCH('{Panther,ID,Status,Subsystem} MetricName=\"GetObject\" Status=\"OK\"', 'Sum', 300))", "id": "e1", "period": 300 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "eu-west-1",
+                "stat": "Average",
+                "title": "Input Files Processed"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 0,
+            "y": 29,
+            "width": 9,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SEARCH('{Panther,Subsystem} MetricName=\"OutputBytes\"', 'Sum', 300)/1000000", "id": "e1", "period": 300 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "eu-west-1",
+                "stat": "Sum",
+                "period": 300,
+                "title": "Output MBytes (Compressed) written to S3"
+            }
+        },
+        {
+            "type": "metric",
+            "x": 9,
+            "y": 29,
+            "width": 9,
+            "height": 3,
+            "properties": {
+                "metrics": [
+                    [ { "expression": "SEARCH('{Panther,Subsystem} MetricName=\"OutputFiles\"', 'Sum', 300)", "id": "e1", "period": 300 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "eu-west-1",
+                "stat": "Average",
+                "title": "Output Files written to S3"
+            }
+        }
+    ]
+}
+`

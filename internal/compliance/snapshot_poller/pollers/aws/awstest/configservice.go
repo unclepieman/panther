@@ -50,10 +50,10 @@ var (
 	ExampleDescribeConfigurationRecorderStatus = &configservice.DescribeConfigurationRecorderStatusOutput{
 		ConfigurationRecordersStatus: []*configservice.ConfigurationRecorderStatus{
 			{
-				LastStartTime:        &ExampleTimeParsed,
+				LastStartTime:        &ExampleTime,
 				LastStatus:           aws.String("SUCCESS"),
-				LastStatusChangeTime: &ExampleTimeParsed,
-				LastStopTime:         &ExampleTimeParsed,
+				LastStatusChangeTime: &ExampleTime,
+				LastStopTime:         &ExampleTime,
 				Name:                 aws.String("default"),
 				Recording:            aws.Bool(true),
 			},
@@ -94,7 +94,7 @@ var (
 )
 
 // SetupMockConfigService is used to override the ConfigService client initializer
-func SetupMockConfigService(sess *session.Session, cfg *aws.Config) interface{} {
+func SetupMockConfigService(_ *session.Session, _ *aws.Config) interface{} {
 	return MockConfigServiceForSetup
 }
 

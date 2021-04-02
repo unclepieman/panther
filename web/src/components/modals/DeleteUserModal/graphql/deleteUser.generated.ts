@@ -16,10 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../../../__generated__/schema';
 
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
@@ -71,3 +70,17 @@ export type DeleteUserMutationOptions = ApolloReactCommon.BaseMutationOptions<
   DeleteUser,
   DeleteUserVariables
 >;
+export function mockDeleteUser({
+  data,
+  variables,
+  errors,
+}: {
+  data: DeleteUser;
+  variables?: DeleteUserVariables;
+  errors?: GraphQLError[];
+}) {
+  return {
+    request: { query: DeleteUserDocument, variables },
+    result: { data, errors },
+  };
+}

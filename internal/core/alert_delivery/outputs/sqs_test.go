@@ -19,59 +19,79 @@ package outputs
  */
 
 import (
+	"context"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
+	"github.com/panther-labs/panther/pkg/testutils"
 )
 
-type mockSqsClient struct {
-	sqsiface.SQSAPI
-	mock.Mock
-}
-
-func (m *mockSqsClient) SendMessage(input *sqs.SendMessageInput) (*sqs.SendMessageOutput, error) {
-	args := m.Called(input)
-	return args.Get(0).(*sqs.SendMessageOutput), args.Error(1)
-}
-
 func TestSendSqs(t *testing.T) {
-	client := &mockSqsClient{}
-	outputClient := &OutputClient{sqsClients: map[string]sqsiface.SQSAPI{"us-west-2": client}}
+	client := &testutils.SqsMock{}
+	outputClient := &OutputClient{}
 
-	sqsOutputConfig := &outputmodels.SqsConfig{
-		QueueURL: aws.String("https://sqs.us-west-2.amazonaws.com/123456789012/test-output"),
+	sqsOutputConfig := &outputModels.SqsConfig{
+		QueueURL: "https://sqs.us-west-2.amazonaws.com/123456789012/test-output",
 	}
-	alert := &alertmodels.Alert{
-		PolicyName:        aws.String("policyName"),
-		PolicyID:          aws.String("policyId"),
-		PolicyDescription: aws.String("policyDescription"),
-		Severity:          aws.String("severity"),
-		Runbook:           aws.String("runbook"),
+	alert := &deliverymodel.Alert{
+		AlertID:             aws.String("alertId"),
+		AnalysisName:        aws.String("policyName"),
+		Type:                deliverymodel.PolicyType,
+		AnalysisID:          "policyId",
+		AnalysisDescription: "policyDescription",
+		Severity:            "severity",
+		Runbook:             "runbook",
+		Context: map[string]interface{}{
+			"key": "value",
+		},
 	}
 
-	expectedSqsMessage := &sqsOutputMessage{
-		ID:          alert.PolicyID,
-		Name:        alert.PolicyName,
-		Description: alert.PolicyDescription,
+	expectedSqsMessage := &Notification{
+		ID:          alert.AnalysisID,
+		AlertID:     aws.String("alertId"),
+		Type:        deliverymodel.PolicyType,
+		Name:        alert.AnalysisName,
+		Description: aws.String(alert.AnalysisDescription),
 		Severity:    alert.Severity,
-		Runbook:     alert.Runbook,
+		Runbook:     aws.String(alert.Runbook),
+		Link:        "https://panther.io/alerts/alertId",
+		Title:       "Policy Failure: policyName",
+		Tags:        []string{},
+		AlertContext: map[string]interface{}{
+			"key": "value",
+		},
 	}
-	expectedSerializedSqsMessage, _ := jsoniter.MarshalToString(expectedSqsMessage)
+	expectedSerializedSqsMessage, err := jsoniter.MarshalToString(expectedSqsMessage)
+	require.NoError(t, err)
 	expectedSqsSendMessageInput := &sqs.SendMessageInput{
-		QueueUrl:    sqsOutputConfig.QueueURL,
-		MessageBody: aws.String(expectedSerializedSqsMessage),
+		QueueUrl:    &sqsOutputConfig.QueueURL,
+		MessageBody: &expectedSerializedSqsMessage,
+	}
+	ctx := context.Background()
+	client.On("SendMessageWithContext",
+		ctx,
+		expectedSqsSendMessageInput,
+	).Return(&sqs.SendMessageOutput{MessageId: aws.String("messageId")}, nil)
+	getSqsClient = func(*session.Session, string) sqsiface.SQSAPI {
+		return client
 	}
 
-	client.On("SendMessage", expectedSqsSendMessageInput).Return(&sqs.SendMessageOutput{}, nil)
-	result := outputClient.Sqs(alert, sqsOutputConfig)
-	assert.Nil(t, result)
+	result := outputClient.Sqs(ctx, alert, sqsOutputConfig)
+	assert.NotNil(t, result)
+	assert.Equal(t, &AlertDeliveryResponse{
+		Message:    "messageId",
+		StatusCode: 200,
+		Success:    true,
+		Permanent:  false,
+	}, result)
 	client.AssertExpectations(t)
 }

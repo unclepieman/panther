@@ -26,10 +26,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
 	"github.com/panther-labs/panther/api/lambda/outputs/models"
 )
-
-const outputSet = "Slack|Sns|PagerDuty|Github|Jira|Opsgenie|MsTeams|Sqs|Asana"
 
 func expectedMsg(structName string, fieldName string, tagName string) string {
 	return fmt.Sprintf(
@@ -44,37 +43,11 @@ func TestAddOutputNoName(t *testing.T) {
 	err = validator.Struct(&models.AddOutputInput{
 		UserID:       aws.String("3601990c-b566-404b-b367-3c6eacd6fe60"),
 		DisplayName:  aws.String(""),
-		OutputConfig: &models.OutputConfig{Slack: &models.SlackConfig{WebhookURL: aws.String("https://hooks.slack.com")}},
+		AlertTypes:   []string{deliverymodel.RuleType},
+		OutputConfig: &models.OutputConfig{Slack: &models.SlackConfig{WebhookURL: "https://hooks.slack.com"}},
 	})
 	require.Error(t, err)
 	assert.Equal(t, expectedMsg("AddOutputInput", "DisplayName", "min"), err.Error())
-}
-
-func TestAddOutputNoneSpecified(t *testing.T) {
-	validator, err := Validator()
-	require.NoError(t, err)
-	err = validator.Struct(&models.AddOutputInput{
-		UserID:       aws.String("3601990c-b566-404b-b367-3c6eacd6fe60"),
-		DisplayName:  aws.String("mychannel"),
-		OutputConfig: &models.OutputConfig{},
-	})
-	require.NotNil(t, err)
-	assert.Equal(t, expectedMsg("AddOutputInput.OutputConfig", outputSet, "exactly_one_output"), err.Error())
-}
-
-func TestAddOutputAllSpecified(t *testing.T) {
-	validator, err := Validator()
-	require.NoError(t, err)
-	err = validator.Struct(&models.AddOutputInput{
-		UserID:      aws.String("3601990c-b566-404b-b367-3c6eacd6fe60"),
-		DisplayName: aws.String("mychannel"),
-		OutputConfig: &models.OutputConfig{
-			Slack: &models.SlackConfig{WebhookURL: aws.String("https://hooks.slack.com")},
-			Sns:   &models.SnsConfig{TopicArn: aws.String("arn:aws:sns:us-west-2:123456789012:MyTopic")},
-		},
-	})
-	require.NotNil(t, err)
-	assert.Equal(t, expectedMsg("AddOutputInput.OutputConfig", outputSet, "exactly_one_output"), err.Error())
 }
 
 func TestAddOutputValid(t *testing.T) {
@@ -83,8 +56,9 @@ func TestAddOutputValid(t *testing.T) {
 	assert.NoError(t, validator.Struct(&models.AddOutputInput{
 		UserID:      aws.String("3601990c-b566-404b-b367-3c6eacd6fe60"),
 		DisplayName: aws.String("mychannel"),
+		AlertTypes:  []string{deliverymodel.RuleType},
 		OutputConfig: &models.OutputConfig{
-			Slack: &models.SlackConfig{WebhookURL: aws.String("https://hooks.slack.com")},
+			Slack: &models.SlackConfig{WebhookURL: "https://hooks.slack.com"},
 		},
 	}))
 }
@@ -95,8 +69,9 @@ func TestAddInvalidArn(t *testing.T) {
 	err = validator.Struct(&models.AddOutputInput{
 		UserID:      aws.String("3601990c-b566-404b-b367-3c6eacd6fe60"),
 		DisplayName: aws.String("mytopic"),
+		AlertTypes:  []string{deliverymodel.RuleType},
 		OutputConfig: &models.OutputConfig{
-			Sns: &models.SnsConfig{TopicArn: aws.String("arn:aws:sns:invalidarn:MyTopic")},
+			Sns: &models.SnsConfig{TopicArn: "arn:aws:sns:invalidarn:MyTopic"},
 		},
 	})
 	require.Error(t, err)
@@ -109,8 +84,9 @@ func TestAddNonSnsArn(t *testing.T) {
 	err = validator.Struct(&models.AddOutputInput{
 		UserID:      aws.String("3601990c-b566-404b-b367-3c6eacd6fe60"),
 		DisplayName: aws.String("mytopic"),
+		AlertTypes:  []string{deliverymodel.RuleType},
 		OutputConfig: &models.OutputConfig{
-			Sns: &models.SnsConfig{TopicArn: aws.String("arn:aws:s3:::test-s3-bucket")},
+			Sns: &models.SnsConfig{TopicArn: "arn:aws:s3:::test-s3-bucket"},
 		},
 	})
 	require.Error(t, err)

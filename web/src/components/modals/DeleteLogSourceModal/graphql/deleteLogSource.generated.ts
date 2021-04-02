@@ -16,10 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../../../__generated__/schema';
 
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
@@ -71,3 +70,17 @@ export type DeleteLogSourceMutationOptions = ApolloReactCommon.BaseMutationOptio
   DeleteLogSource,
   DeleteLogSourceVariables
 >;
+export function mockDeleteLogSource({
+  data,
+  variables,
+  errors,
+}: {
+  data: DeleteLogSource;
+  variables?: DeleteLogSourceVariables;
+  errors?: GraphQLError[];
+}) {
+  return {
+    request: { query: DeleteLogSourceDocument, variables },
+    result: { data, errors },
+  };
+}

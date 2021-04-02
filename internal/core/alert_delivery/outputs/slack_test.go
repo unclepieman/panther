@@ -19,29 +19,32 @@ package outputs
  */
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/stretchr/testify/require"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
-var slackConfig = &outputmodels.SlackConfig{WebhookURL: aws.String("slack-channel-url")}
+var slackConfig = &outputModels.SlackConfig{WebhookURL: "slack-channel-url"}
 
 func TestSlackAlert(t *testing.T) {
 	httpWrapper := &mockHTTPWrapper{}
 	client := &OutputClient{httpWrapper: httpWrapper}
 
 	createdAtTime := time.Now()
-	alert := &alertmodels.Alert{
-		PolicyID:   aws.String("policyId"),
-		CreatedAt:  &createdAtTime,
-		OutputIDs:  aws.StringSlice([]string{"output-id"}),
-		PolicyName: aws.String("policyName"),
-		Severity:   aws.String("INFO"),
+	alert := &deliverymodel.Alert{
+		AlertID:      aws.String("alertId"),
+		AnalysisID:   "policyId",
+		Type:         deliverymodel.PolicyType,
+		CreatedAt:    createdAtTime,
+		OutputIds:    []string{"output-id"},
+		AnalysisName: aws.String("policyName"),
+		Severity:     "INFO",
 	}
 
 	expectedPostPayload := map[string]interface{}{
@@ -51,7 +54,7 @@ func TestSlackAlert(t *testing.T) {
 				"fields": []map[string]interface{}{
 					{
 						"short": false,
-						"value": "<https://panther.io/policies/policyId|Click here to view in the Panther UI>",
+						"value": "<https://panther.io/alerts/alertId|Click here to view in the Panther UI>",
 					},
 					{
 						"short": false,
@@ -68,14 +71,15 @@ func TestSlackAlert(t *testing.T) {
 			},
 		},
 	}
-	requestEndpoint := "slack-channel-url"
+	requestURL := slackConfig.WebhookURL
 	expectedPostInput := &PostInput{
-		url:  requestEndpoint,
+		url:  requestURL,
 		body: expectedPostPayload,
 	}
 
-	httpWrapper.On("post", expectedPostInput).Return((*AlertDeliveryError)(nil))
+	ctx := context.Background()
+	httpWrapper.On("post", ctx, expectedPostInput).Return((*AlertDeliveryResponse)(nil))
 
-	require.Nil(t, client.Slack(alert, slackConfig))
+	require.Nil(t, client.Slack(ctx, alert, slackConfig))
 	httpWrapper.AssertExpectations(t)
 }

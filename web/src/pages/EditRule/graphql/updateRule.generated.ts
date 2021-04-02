@@ -16,28 +16,27 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../../__generated__/schema';
 
-import { RuleFull } from '../../../graphql/fragments/RuleFull.generated';
+import { RuleDetails } from '../../../graphql/fragments/RuleDetails.generated';
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
 
 export type UpdateRuleVariables = {
-  input: Types.CreateOrModifyRuleInput;
+  input: Types.UpdateRuleInput;
 };
 
-export type UpdateRule = { updateRule?: Types.Maybe<RuleFull> };
+export type UpdateRule = { updateRule: RuleDetails };
 
 export const UpdateRuleDocument = gql`
-  mutation UpdateRule($input: CreateOrModifyRuleInput!) {
+  mutation UpdateRule($input: UpdateRuleInput!) {
     updateRule(input: $input) {
-      ...RuleFull
+      ...RuleDetails
     }
   }
-  ${RuleFull}
+  ${RuleDetails}
 `;
 export type UpdateRuleMutationFn = ApolloReactCommon.MutationFunction<
   UpdateRule,
@@ -75,3 +74,17 @@ export type UpdateRuleMutationOptions = ApolloReactCommon.BaseMutationOptions<
   UpdateRule,
   UpdateRuleVariables
 >;
+export function mockUpdateRule({
+  data,
+  variables,
+  errors,
+}: {
+  data: UpdateRule;
+  variables?: UpdateRuleVariables;
+  errors?: GraphQLError[];
+}) {
+  return {
+    request: { query: UpdateRuleDocument, variables },
+    result: { data, errors },
+  };
+}

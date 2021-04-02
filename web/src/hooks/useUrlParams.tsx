@@ -19,21 +19,21 @@
 import React from 'react';
 import useRouter from 'Hooks/useRouter';
 import queryString from 'query-string';
-import omitBy from 'lodash-es/omitBy';
+import omitBy from 'lodash/omitBy';
 
-const queryStringOptions = {
+export const queryStringOptions = {
   arrayFormat: 'bracket' as const,
   parseNumbers: true,
   parseBooleans: true,
 };
 
 function useUrlParams<T extends { [key: string]: any }>() {
-  const { history } = useRouter();
+  const { history, location } = useRouter();
 
   /**
    * parses the query params of a URL and returns an object with params in the correct typo
    */
-  const urlParams = queryString.parse(history.location.search, queryStringOptions) as T;
+  const urlParams = queryString.parse(location.search, queryStringOptions) as T;
 
   /**
    * stringifies an object and adds it to the existing query params of a URL
@@ -50,12 +50,23 @@ function useUrlParams<T extends { [key: string]: any }>() {
       v => !v && !['number', 'boolean'].includes(typeof v)
     );
 
-    history.replace(
-      `${history.location.pathname}?${queryString.stringify(
-        cleanedMergedQueryParams,
-        queryStringOptions
-      )}`
-    );
+    history.replace({
+      ...location,
+      search: queryString.stringify(cleanedMergedQueryParams, queryStringOptions),
+    });
+  };
+
+  /**
+   * stringifies an object and replaces the query params of a URL
+   */
+  const setUrlParams = (params: Partial<T>) => {
+    // Remove any falsy value apart from the value `0` (number) and the value `false` (boolean)
+    const cleanedQueryParams = omitBy(params, v => !v && !['number', 'boolean'].includes(typeof v));
+
+    history.replace({
+      ...location,
+      search: queryString.stringify(cleanedQueryParams, queryStringOptions),
+    });
   };
 
   // Cache those values as long as URL parameters are the same
@@ -63,6 +74,7 @@ function useUrlParams<T extends { [key: string]: any }>() {
     () => ({
       urlParams,
       updateUrlParams,
+      setUrlParams,
     }),
     [history.location.search]
   );

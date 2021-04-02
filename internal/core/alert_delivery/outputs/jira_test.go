@@ -19,24 +19,26 @@ package outputs
  */
 
 import (
+	"context"
 	"encoding/base64"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
-var jiraConfig = &outputmodels.JiraConfig{
-	APIKey:     aws.String("apikey"),
-	AssigneeID: aws.String("ae393k930390"),
-	OrgDomain:  aws.String("https://panther-labs.atlassian.net"),
-	ProjectKey: aws.String("QR"),
-	Type:       aws.String("Task"),
-	UserName:   aws.String("username"),
+var jiraConfig = &outputModels.JiraConfig{
+	APIKey:     "apikey",
+	AssigneeID: "ae393k930390",
+	OrgDomain:  "https://panther-labs.atlassian.net",
+	ProjectKey: "QR",
+	Type:       "Task",
+	UserName:   "username",
+	Labels:     []string{"panther", "test-label"},
 }
 
 func TestJiraAlert(t *testing.T) {
@@ -44,32 +46,35 @@ func TestJiraAlert(t *testing.T) {
 	client := &OutputClient{httpWrapper: httpWrapper}
 
 	var createdAtTime, _ = time.Parse(time.RFC3339, "2019-08-03T11:40:13Z")
-	alert := &alertmodels.Alert{
-		PolicyID:          aws.String("ruleId"),
-		CreatedAt:         &createdAtTime,
-		OutputIDs:         aws.StringSlice([]string{"output-id"}),
-		PolicyDescription: aws.String("policyDescription"),
-		Severity:          aws.String("INFO"),
+	alert := &deliverymodel.Alert{
+		AlertID:             aws.String("alertId"),
+		AnalysisID:          "policyId",
+		Type:                deliverymodel.PolicyType,
+		CreatedAt:           createdAtTime,
+		OutputIds:           []string{"output-id"},
+		AnalysisDescription: "policyDescription",
+		Severity:            "INFO",
+		Context:             map[string]interface{}{"key": "value"},
 	}
-
 	jiraPayload := map[string]interface{}{
 		"fields": map[string]interface{}{
-			"summary": "Policy Failure: ruleId",
+			"summary": "Policy Failure: policyId",
 			"description": "*Description:* policyDescription\n " +
-				"[Click here to view in the Panther UI](https://panther.io/policies/ruleId)\n" +
-				" *Runbook:* \n *Severity:* INFO\n *Tags:* ",
+				"[Click here to view in the Panther UI|https://panther.io/alerts/alertId]\n" +
+				" *Runbook:* \n *Severity:* INFO\n *Tags:* \n *AlertContext:* {\"key\":\"value\"}",
 			"project": map[string]*string{
-				"key": jiraConfig.ProjectKey,
+				"key": aws.String(jiraConfig.ProjectKey),
 			},
 			"issuetype": map[string]*string{
-				"name": jiraConfig.Type,
+				"name": aws.String(jiraConfig.Type),
 			},
 			"assignee": map[string]*string{
-				"id": jiraConfig.AssigneeID,
+				"id": aws.String(jiraConfig.AssigneeID),
 			},
+			"labels": aws.StringSlice(jiraConfig.Labels),
 		},
 	}
-	auth := *jiraConfig.UserName + ":" + *jiraConfig.APIKey
+	auth := jiraConfig.UserName + ":" + jiraConfig.APIKey
 	basicAuthToken := "Basic " + base64.StdEncoding.EncodeToString([]byte(auth))
 	requestHeader := map[string]string{
 		AuthorizationHTTPHeader: basicAuthToken,
@@ -80,9 +85,9 @@ func TestJiraAlert(t *testing.T) {
 		body:    jiraPayload,
 		headers: requestHeader,
 	}
+	ctx := context.Background()
+	httpWrapper.On("post", ctx, expectedPostInput).Return((*AlertDeliveryResponse)(nil))
 
-	httpWrapper.On("post", expectedPostInput).Return((*AlertDeliveryError)(nil))
-
-	require.Nil(t, client.Jira(alert, jiraConfig))
+	assert.Nil(t, client.Jira(ctx, alert, jiraConfig))
 	httpWrapper.AssertExpectations(t)
 }

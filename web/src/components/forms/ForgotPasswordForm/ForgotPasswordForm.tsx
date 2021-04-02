@@ -17,12 +17,12 @@
  */
 
 import React from 'react';
-import { Field, Formik } from 'formik';
+import { Field, Form, Formik } from 'formik';
 import * as Yup from 'yup';
 import SubmitButton from 'Components/buttons/SubmitButton';
 import FormikTextInput from 'Components/fields/TextInput';
 import useAuth from 'Hooks/useAuth';
-import { Card, Text } from 'pouncejs';
+import { Card, Flex, FormHelperText } from 'pouncejs';
 
 interface ForgotPasswordFormValues {
   email: string;
@@ -33,9 +33,7 @@ const initialValues = {
 };
 
 const validationSchema = Yup.object().shape({
-  email: Yup.string()
-    .email('Needs to be a valid email')
-    .required(),
+  email: Yup.string().email('Needs to be a valid email').required(),
 });
 
 const ForgotPasswordForm: React.FC = () => {
@@ -49,48 +47,40 @@ const ForgotPasswordForm: React.FC = () => {
         forgotPassword({
           email,
           onSuccess: () => setStatus('SENT'),
-          onError: ({ code, message }) => {
-            setErrors({
-              email:
-                code === 'UserNotFoundException'
-                  ? "We couldn't find this Panther account"
-                  : message,
-            });
-          },
+          onError: ({ message }) => setErrors({ email: message }),
         })
       }
     >
-      {({ handleSubmit, isSubmitting, isValid, dirty, status, values }) => {
+      {({ status, values }) => {
         if (status === 'SENT') {
           return (
-            <Card bg="green100" p={5} mb={8} boxShadow="none">
-              <Text color="green300" size="large">
-                We have successfully sent you an email with reset instructions at{' '}
-                <b>{values.email}</b>
-              </Text>
+            <Card bg="teal-500" p={5} mb={8} boxShadow="none" fontSize="medium">
+              We have successfully sent you an email with reset instructions at{' '}
+              <b>{values.email}</b>
             </Card>
           );
         }
 
         return (
-          <form onSubmit={handleSubmit}>
-            <Field
-              as={FormikTextInput}
-              label="Email"
-              placeholder="Enter your company email..."
-              type="email"
-              name="email"
-              aria-required
-              mb={6}
-            />
-            <SubmitButton
-              width={1}
-              submitting={isSubmitting}
-              disabled={isSubmitting || !isValid || !dirty}
-            >
-              Reset Password
-            </SubmitButton>
-          </form>
+          <Form>
+            <Flex direction="column" spacing={4}>
+              <Field
+                as={FormikTextInput}
+                label="Email"
+                placeholder="Enter your company email..."
+                type="email"
+                name="email"
+                required
+              />
+              <SubmitButton fullWidth aria-describedby="forgot-password-description">
+                Reset Password
+              </SubmitButton>
+              <FormHelperText id="forgot-password-description" textAlign="center">
+                By submitting a request, you will receive an email with instructions on how to reset
+                your password
+              </FormHelperText>
+            </Flex>
+          </Form>
         );
       }}
     </Formik>

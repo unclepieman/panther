@@ -16,25 +16,60 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../__generated__/schema';
 
+import { DeliveryResponseFull } from './DeliveryResponseFull.generated';
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 
 export type AlertSummaryFull = Pick<
   Types.AlertSummary,
-  'alertId' | 'ruleId' | 'title' | 'severity' | 'creationTime' | 'eventsMatched' | 'updateTime'
->;
+  | 'alertId'
+  | 'title'
+  | 'severity'
+  | 'type'
+  | 'status'
+  | 'creationTime'
+  | 'updateTime'
+  | 'lastUpdatedBy'
+  | 'lastUpdatedByTime'
+> & {
+  deliveryResponses: Array<Types.Maybe<DeliveryResponseFull>>;
+  detection:
+    | Pick<Types.AlertSummaryRuleInfo, 'ruleId' | 'logTypes' | 'eventsMatched'>
+    | Pick<
+        Types.AlertSummaryPolicyInfo,
+        'policyId' | 'resourceTypes' | 'resourceId' | 'policySourceId'
+      >;
+};
 
 export const AlertSummaryFull = gql`
   fragment AlertSummaryFull on AlertSummary {
     alertId
-    ruleId
     title
     severity
+    type
+    status
     creationTime
-    eventsMatched
+    deliveryResponses {
+      ...DeliveryResponseFull
+    }
     updateTime
+    lastUpdatedBy
+    lastUpdatedByTime
+    detection {
+      ... on AlertSummaryPolicyInfo {
+        policyId
+        resourceTypes
+        resourceId
+        policySourceId
+      }
+      ... on AlertSummaryRuleInfo {
+        ruleId
+        logTypes
+        eventsMatched
+      }
+    }
   }
+  ${DeliveryResponseFull}
 `;

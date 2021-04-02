@@ -19,53 +19,58 @@ package sources
  */
 
 import (
-	"bufio"
-	"compress/gzip"
-	"io"
-	"net/http"
+	"context"
+	"net/url"
+	"path"
+	"regexp"
 	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/aws/aws-sdk-go/service/sns"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
+	"github.com/panther-labs/panther/api/lambda/source/models"
 	"github.com/panther-labs/panther/internal/log_analysis/log_processor/common"
+	"github.com/panther-labs/panther/internal/log_analysis/log_processor/processor/logstream"
+	"github.com/panther-labs/panther/internal/log_analysis/log_processor/s3pipe"
+	"github.com/panther-labs/panther/pkg/stringset"
 )
 
 const (
+	DownloadMaxPartSize = 50 * 1024 * 1024                  // the max size of in memory buffers will be 3X as this due to multiple buffers
+	DownloadMinPartSize = s3manager.DefaultDownloadPartSize // the min part size for efficiency
+
 	s3TestEvent                 = "s3:TestEvent"
 	cloudTrailValidationMessage = "CloudTrail validation message."
 )
 
-// ReadSnsMessages reads incoming messages containing SNS notifications and returns a slice of DataStream items
-func ReadSnsMessages(messages []string) (result []*common.DataStream, err error) {
-	zap.L().Debug("reading data from messages", zap.Int("numMessages", len(messages)))
-	for _, message := range messages {
-		snsNotificationMessage := &SnsNotification{}
-		if err := jsoniter.UnmarshalFromString(message, snsNotificationMessage); err != nil {
+// ReadSnsMessage reads incoming messages containing SNS notifications and returns a slice of DataStream items
+func ReadSnsMessage(ctx context.Context, message string) (result []*common.DataStream, err error) {
+	snsNotificationMessage := &SnsNotification{}
+	if err := jsoniter.UnmarshalFromString(message, snsNotificationMessage); err != nil {
+		return nil, err
+	}
+
+	switch snsNotificationMessage.Type {
+	case "Notification":
+		streams, err := handleNotificationMessage(ctx, snsNotificationMessage)
+		if err != nil {
 			return nil, err
 		}
-
-		switch snsNotificationMessage.Type {
-		case "Notification":
-			streams, err := handleNotificationMessage(snsNotificationMessage)
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, streams...)
-		case "SubscriptionConfirmation":
-			err := ConfirmSubscription(snsNotificationMessage)
-			if err != nil {
-				return nil, err
-			}
-		default:
-			return nil, errors.New("received unexpected message in SQS queue")
+		result = append(result, streams...)
+	case "SubscriptionConfirmation":
+		err := ConfirmSubscription(snsNotificationMessage)
+		if err != nil {
+			return nil, err
 		}
+	default:
+		return nil, errors.New("received unexpected message in SQS queue")
 	}
 	return result, nil
 }
@@ -96,106 +101,108 @@ func ConfirmSubscription(notification *SnsNotification) (err error) {
 	return nil
 }
 
-func handleNotificationMessage(notification *SnsNotification) (result []*common.DataStream, err error) {
+func handleNotificationMessage(ctx context.Context, notification *SnsNotification) (result []*common.DataStream, err error) {
 	s3Objects, err := ParseNotification(notification.Message)
 	if err != nil {
 		return nil, err
 	}
 	for _, s3Object := range s3Objects {
+		if shouldIgnoreS3Object(s3Object) {
+			continue
+		}
 		var dataStream *common.DataStream
-		dataStream, err = readS3Object(s3Object)
+		dataStream, err = buildStream(ctx, s3Object)
 		if err != nil {
 			return
 		}
-		result = append(result, dataStream)
+		if dataStream != nil {
+			result = append(result, dataStream)
+		}
 	}
 	return result, err
 }
 
-func readS3Object(s3Object *S3ObjectInfo) (dataStream *common.DataStream, err error) {
-	operation := common.OpLogManager.Start("readS3Object", common.OpLogS3ServiceDim)
-	defer func() {
-		operation.Stop()
-		operation.Log(err,
-			// s3 dim info
-			zap.String("bucket", s3Object.S3Bucket),
-			zap.String("key", s3Object.S3ObjectKey))
-	}()
+func shouldIgnoreS3Object(s3Object *S3ObjectInfo) bool {
+	// We should ignore S3 objects that end in `/`.
+	// These objects are used in S3 to define a "folder" and do not contain data.
+	// We also ignore empty files since they do not contain any logs, they log errors that page on-call, and some
+	// systems like to create them during their normal process of delivering logs to Panther.
+	return s3Object.S3ObjectSize == 0 || strings.HasSuffix(s3Object.S3ObjectKey, "/")
+}
 
-	s3Client, err := getS3Client(s3Object)
+func buildStream(ctx context.Context, s3Object *S3ObjectInfo) (*common.DataStream, error) {
+	key, bucket := s3Object.S3ObjectKey, s3Object.S3Bucket
+	s3Client, src, err := getS3Client(bucket, key)
 	if err != nil {
-		err = errors.Wrapf(err, "failed to get S3 client for s3://%s/%s",
-			s3Object.S3Bucket, s3Object.S3ObjectKey)
+		err = errors.Wrapf(err, "failed to get S3 client for s3://%s/%s", bucket, key)
 		return nil, err
 	}
-
-	getObjectInput := &s3.GetObjectInput{
-		Bucket: &s3Object.S3Bucket,
-		Key:    &s3Object.S3ObjectKey,
-	}
-	output, err := s3Client.GetObject(getObjectInput)
-	if err != nil {
-		err = errors.Wrapf(err, "GetObject() failed for s3://%s/%s",
-			s3Object.S3Bucket, s3Object.S3ObjectKey)
-		return nil, err
+	if src == nil {
+		zap.L().Warn("no source configured for S3 object",
+			zap.String("bucket", bucket),
+			zap.String("key", key))
+		return nil, nil
 	}
 
-	bufferedReader := bufio.NewReader(output.Body)
-
-	// We peek into the file header to identify the content type
-	// http.DetectContentType only uses up to the first 512 bytes
-	headerBytes, err := bufferedReader.Peek(512)
-	if err != nil {
-		if err != bufio.ErrBufferFull && err != io.EOF { // EOF or ErrBufferFull means file is shorter than n
-			err = errors.Wrapf(err, "failed to Peek() in S3 payload for s3://%s/%s",
-				s3Object.S3Bucket, s3Object.S3ObjectKey)
-			return nil, err
+	downloader := s3pipe.Downloader{
+		S3:       s3Client,
+		PartSize: calculatePartSize(s3Object.S3ObjectSize),
+	}
+	// gzip streams are transparently uncompressed
+	r := downloader.Download(ctx, &s3.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	})
+	var stream logstream.Stream
+	switch src.IntegrationType {
+	case models.IntegrationTypeAWS3:
+		if isCloudTrailLog(key) && stringset.Contains(src.RequiredLogTypes(), "AWS.CloudTrail") {
+			zap.L().Debug("detected CloudTrail logs", zap.String("bucket", bucket), zap.String("key", key))
+			stream = logstream.NewJSONArrayStream(r, DownloadMinPartSize, "Records")
+		} else {
+			stream = logstream.NewLineStream(r, DownloadMinPartSize)
 		}
-		err = nil // not really an error
-	}
-	contentType := http.DetectContentType(headerBytes)
-
-	var streamReader io.Reader
-
-	// Checking for prefix because the returned type can have also charset used
-	if strings.HasPrefix(contentType, "text/plain") {
-		// if it's plain text, just return the buffered reader
-		streamReader = bufferedReader
-	} else if strings.HasPrefix(contentType, "application/x-gzip") {
-		var gzipReader *gzip.Reader
-		gzipReader, err = gzip.NewReader(bufferedReader)
-		if err != nil {
-			err = errors.Wrapf(err, "failed to created gzip reader for s3://%s/%s",
-				s3Object.S3Bucket, s3Object.S3ObjectKey)
-			return nil, err
-		}
-		streamReader = gzipReader
+	default:
+		// Set the buffer size to something big to avoid multiple fill() calls if possible
+		stream = logstream.NewLineStream(r, DownloadMinPartSize)
 	}
 
-	dataStream = &common.DataStream{
-		Reader: streamReader,
-		Hints: common.DataStreamHints{
-			S3: &common.S3DataStreamHints{
-				Bucket:      s3Object.S3Bucket,
-				Key:         s3Object.S3ObjectKey,
-				ContentType: contentType,
-			},
-		},
+	return &common.DataStream{
+		Stream:      stream,
+		Closer:      r,
+		Source:      src,
+		S3Bucket:    s3Object.S3Bucket,
+		S3ObjectKey: s3Object.S3ObjectKey,
+	}, nil
+}
+
+func calculatePartSize(size int64) int64 {
+	// we want this as large as possible to minimize S3 api calls, not more than DownloadMaxPartSize to control memory use
+	partSize := size / 2 // use 1/2 to allow processing first half while reading second half on small files
+	if partSize > DownloadMaxPartSize {
+		return DownloadMaxPartSize
 	}
-	return dataStream, err
+	if partSize < DownloadMinPartSize { // min part size for efficiency
+		return DownloadMinPartSize
+	}
+	return partSize
 }
 
 // ParseNotification parses a message received
 func ParseNotification(message string) ([]*S3ObjectInfo, error) {
+	// Most notifications will be s3 event notifications, the AWS CloudTrail service however can be
+	// configured to directly notify SNS that it has written new objects to s3. If notifications are
+	// configured like this, we first convert them into the same structure as we expect from S3 event
+	// notifications so that we can process them the same as other notifications.
 	s3Objects := parseCloudTrailNotification(message)
 
-	// If the input was not a CloudTrail notification, s3Objects will be empty slice
-	if len(s3Objects) > 0 {
+	// If the input was not a CloudTrail notification, s3Objects will be nil
+	if s3Objects != nil {
 		return s3Objects, nil
 	}
 
 	s3Objects = parseS3Event(message)
-	if len(s3Objects) > 0 {
+	if s3Objects != nil {
 		return s3Objects, nil
 	}
 
@@ -207,19 +214,26 @@ func ParseNotification(message string) ([]*S3ObjectInfo, error) {
 	return nil, errors.New("notification is not of known type: " + message)
 }
 
-// parseCloudTrailNotification will try to parse input as if it was a CloudTrail notification
-// If the input was not a CloudTrail notification, it will return a empty slice
+// The function will try to parse input as if it was a CloudTrail notification
+// If the message is not a CloudTrail notification, it returns nil
 func parseCloudTrailNotification(message string) (result []*S3ObjectInfo) {
 	cloudTrailNotification := &cloudTrailNotification{}
 	err := jsoniter.UnmarshalFromString(message, cloudTrailNotification)
 	if err != nil {
-		return result
+		return nil
+	}
+
+	if len(cloudTrailNotification.S3ObjectKey) == 0 {
+		return nil
 	}
 
 	for _, s3Key := range cloudTrailNotification.S3ObjectKey {
 		info := &S3ObjectInfo{
 			S3Bucket:    *cloudTrailNotification.S3Bucket,
 			S3ObjectKey: *s3Key,
+			// A negative object size indicates we don't know what the true size is. We don't leave
+			// this as the default of 0 as then it would get dropped by the log processor.
+			S3ObjectSize: -1,
 		}
 		result = append(result, info)
 	}
@@ -227,18 +241,26 @@ func parseCloudTrailNotification(message string) (result []*S3ObjectInfo) {
 }
 
 // parseS3Event will try to parse input as if it was an S3 Event (https://docs.aws.amazon.com/AmazonS3/latest/dev/NotificationHowTo.html)
-// If the input was not an S3 Event  notification, it will return a empty slice
+// If the input was not an S3 Event  notification it will return nil
 func parseS3Event(message string) (result []*S3ObjectInfo) {
 	notification := &events.S3Event{}
 	err := jsoniter.UnmarshalFromString(message, notification)
 	if err != nil {
-		return result
+		return nil
 	}
 
+	if len(notification.Records) == 0 {
+		return nil
+	}
 	for _, record := range notification.Records {
+		urlDecodedKey, err := url.PathUnescape(record.S3.Object.Key)
+		if err != nil {
+			return nil
+		}
 		info := &S3ObjectInfo{
-			S3Bucket:    record.S3.Bucket.Name,
-			S3ObjectKey: record.S3.Object.Key,
+			S3Bucket:     record.S3.Bucket.Name,
+			S3ObjectKey:  urlDecodedKey,
+			S3ObjectSize: record.S3.Object.Size,
 		}
 		result = append(result, info)
 	}
@@ -270,6 +292,8 @@ type cloudTrailNotification struct {
 type S3ObjectInfo struct {
 	S3Bucket    string
 	S3ObjectKey string
+	// In case the size is not known, this will have a negative value
+	S3ObjectSize int64
 }
 
 // SnsNotification struct represents an SNS message arriving to Panther SQS from a customer account.
@@ -279,4 +303,13 @@ type S3ObjectInfo struct {
 type SnsNotification struct {
 	events.SNSEntity
 	Token *string `json:"Token"`
+}
+
+// nolint:lll
+// Match `AccountID_CloudTrail_RegionName_YYYYMMDDTHHmmZ_UniqueString.FileNameFormat` format
+// https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-log-file-examples.html
+var rxCloudTrailLog = regexp.MustCompile(`^(?P<account>\d{12})_CloudTrail_(?P<region>[^_]+)_(?P<ts>\d{8}T\d{4}Z)_\w+.json.gz$`)
+
+func isCloudTrailLog(key string) bool {
+	return rxCloudTrailLog.MatchString(path.Base(key))
 }

@@ -19,40 +19,44 @@ package outputs
  */
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
-var githubConfig = &outputmodels.GithubConfig{RepoName: aws.String("profile/reponame"), Token: aws.String("github-token")}
+var githubConfig = &outputModels.GithubConfig{RepoName: "profile/reponame", Token: "github-token"}
 
 func TestGithubAlert(t *testing.T) {
 	httpWrapper := &mockHTTPWrapper{}
 	client := &OutputClient{httpWrapper: httpWrapper}
 
 	var createdAtTime, _ = time.Parse(time.RFC3339, "2019-08-03T11:40:13Z")
-	alert := &alertmodels.Alert{
-		PolicyID:          aws.String("ruleId"),
-		CreatedAt:         &createdAtTime,
-		OutputIDs:         aws.StringSlice([]string{"output-id"}),
-		PolicyDescription: aws.String("description"),
-		PolicyName:        aws.String("rule_name"),
-		Severity:          aws.String("INFO"),
+	alert := &deliverymodel.Alert{
+		AlertID:             aws.String("alertId"),
+		AnalysisID:          "policyId",
+		Type:                deliverymodel.PolicyType,
+		CreatedAt:           createdAtTime,
+		OutputIds:           []string{"output-id"},
+		AnalysisDescription: "description",
+		AnalysisName:        aws.String("policy_name"),
+		Severity:            "INFO",
+		Context:             map[string]interface{}{"key": "value"},
 	}
 
 	githubRequest := map[string]interface{}{
-		"title": "Policy Failure: rule_name",
+		"title": "Policy Failure: policy_name",
 		"body": "**Description:** description\n " +
-			"[Click here to view in the Panther UI](https://panther.io/policies/ruleId)\n" +
-			" **Runbook:** \n **Severity:** INFO\n **Tags:** ",
+			"[Click here to view in the Panther UI](https://panther.io/alerts/alertId)\n" +
+			" **Runbook:** \n **Severity:** INFO\n **Tags:** \n **AlertContext:** {\"key\":\"value\"}",
 	}
 
-	authorization := "token " + *githubConfig.Token
+	authorization := "token " + githubConfig.Token
 	requestHeader := map[string]string{
 		AuthorizationHTTPHeader: authorization,
 	}
@@ -62,9 +66,9 @@ func TestGithubAlert(t *testing.T) {
 		body:    githubRequest,
 		headers: requestHeader,
 	}
+	ctx := context.Background()
+	httpWrapper.On("post", ctx, expectedPostInput).Return((*AlertDeliveryResponse)(nil))
 
-	httpWrapper.On("post", expectedPostInput).Return((*AlertDeliveryError)(nil))
-
-	require.Nil(t, client.Github(alert, githubConfig))
+	assert.Nil(t, client.Github(ctx, alert, githubConfig))
 	httpWrapper.AssertExpectations(t)
 }

@@ -16,11 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../__generated__/schema';
 
 import { IntegrationItemHealthDetails } from './IntegrationItemHealthDetails.generated';
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 
 export type ComplianceIntegrationDetails = Pick<
@@ -33,6 +32,8 @@ export type ComplianceIntegrationDetails = Pick<
   | 'cweEnabled'
   | 'remediationEnabled'
   | 'stackName'
+  | 'regionIgnoreList'
+  | 'resourceTypeIgnoreList'
 > & {
   health: {
     auditRoleStatus: IntegrationItemHealthDetails;
@@ -51,6 +52,8 @@ export const ComplianceIntegrationDetails = gql`
     cweEnabled
     remediationEnabled
     stackName
+    regionIgnoreList
+    resourceTypeIgnoreList
     health {
       auditRoleStatus {
         ...IntegrationItemHealthDetails

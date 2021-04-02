@@ -224,7 +224,7 @@ func TestHandleLogCloudTailInvalid(t *testing.T) {
 
 func TestLogProcessorCloudTrail(t *testing.T) {
 	mockS3 := testutils.S3Mock{}
-	s3Svc = &mockS3
+	s3Client = &mockS3
 
 	var dataBuf bytes.Buffer
 	gzipWriter := gzip.NewWriter(&dataBuf)
@@ -300,11 +300,10 @@ func TestHandleUpdate(t *testing.T) {
 	expectedRequest := poller.ScanMsg{
 		Entries: []*poller.ScanEntry{
 			{
-				AWSAccountID:     aws.String("111111111111"),
-				IntegrationID:    aws.String("ebb4d69f-177b-4eff-a7a6-9251fdc72d21"),
-				ResourceID:       aws.String("arn:aws:s3:::austin-panther"),
-				ResourceType:     aws.String(schemas.S3BucketSchema),
-				ScanAllResources: aws.Bool(false),
+				AWSAccountID:  aws.String("111111111111"),
+				IntegrationID: aws.String("ebb4d69f-177b-4eff-a7a6-9251fdc72d21"),
+				ResourceID:    aws.String("arn:aws:s3:::austin-panther"),
+				ResourceType:  aws.String(schemas.S3BucketSchema),
 			},
 		},
 	}

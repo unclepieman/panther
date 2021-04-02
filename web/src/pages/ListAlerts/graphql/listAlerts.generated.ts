@@ -16,11 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../../__generated__/schema';
 
 import { AlertSummaryFull } from '../../../graphql/fragments/AlertSummaryFull.generated';
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
@@ -84,3 +83,17 @@ export function useListAlertsLazyQuery(
 export type ListAlertsHookResult = ReturnType<typeof useListAlerts>;
 export type ListAlertsLazyQueryHookResult = ReturnType<typeof useListAlertsLazyQuery>;
 export type ListAlertsQueryResult = ApolloReactCommon.QueryResult<ListAlerts, ListAlertsVariables>;
+export function mockListAlerts({
+  data,
+  variables,
+  errors,
+}: {
+  data: ListAlerts;
+  variables?: ListAlertsVariables;
+  errors?: GraphQLError[];
+}) {
+  return {
+    request: { query: ListAlertsDocument, variables },
+    result: { data, errors },
+  };
+}

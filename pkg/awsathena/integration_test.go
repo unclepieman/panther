@@ -25,7 +25,13 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/athena"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	// this needs to match the CF where we create the WG in bootstrap_gateway.yml
+	workgroup = "Panther"
 )
 
 var (
@@ -46,7 +52,7 @@ func TestIntegrationAthenaQuery(t *testing.T) {
 		t.Skip()
 	}
 
-	queryResult, err := RunQuery(athena.New(awsSession), "panther_logs", "select 1 as c", nil)
+	queryResult, err := RunQuery(athena.New(awsSession), workgroup, "panther_logs", "select 1 as c")
 	require.NoError(t, err)
 	expectedCol := "c"
 	expectedResult := "1"
@@ -61,7 +67,7 @@ func TestIntegrationAthenaQueryBadSQLParse(t *testing.T) {
 		t.Skip()
 	}
 
-	_, err := RunQuery(athena.New(awsSession), "panther_logs", "wwwww", nil)
+	_, err := RunQuery(athena.New(awsSession), workgroup, "panther_logs", "wwwww")
 	require.Error(t, err)
 }
 
@@ -70,8 +76,19 @@ func TestIntegrationAthenaQueryBadSQLExecution(t *testing.T) {
 		t.Skip()
 	}
 
-	_, err := RunQuery(athena.New(awsSession), "panther_logs", "select * from idonotexist", nil)
-	require.Error(t, err)
+	// to force an execution failure we need to create an error AFTER the SQL planner, create a table with a non-existent bucket
+	badTable := `panther_temp.test_table_with_bad_s3path`
+	_, err := RunQuery(athena.New(awsSession), workgroup, "panther_logs",
+		`create external table if not exists `+badTable+` (col1 string) location 's3://panthernosuchbucket/nosuchtable/'`)
+	require.NoError(t, err)
+
+	// now query bad table
+	_, err = RunQuery(athena.New(awsSession), workgroup, "panther_logs", `select * from `+badTable)
+	assert.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "query execution failed:")) // confirm we came thru correct code path
+
+	// clean up (best effort)
+	_, _ = RunQuery(athena.New(awsSession), workgroup, "panther_logs", `drop table `+badTable)
 }
 
 func TestIntegrationAthenaQueryStop(t *testing.T) {
@@ -81,7 +98,7 @@ func TestIntegrationAthenaQueryStop(t *testing.T) {
 
 	athenaClient := athena.New(awsSession)
 
-	startOutput, err := StartQuery(athenaClient, "panther_logs", "select 1 as c", nil)
+	startOutput, err := StartQuery(athenaClient, workgroup, "panther_logs", "select 1 as c")
 	require.NoError(t, err)
 
 	_, err = StopQuery(athenaClient, *startOutput.QueryExecutionId)

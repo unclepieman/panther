@@ -17,24 +17,38 @@
  */
 
 import React from 'react';
-import { Button, Spinner, Flex, ButtonProps } from 'pouncejs';
+import { Button, ButtonProps } from 'pouncejs';
+import { useFormikContext } from 'formik';
 
-const SubmitButton: React.FC<Omit<ButtonProps, 'size' | 'variant'> & { submitting: boolean }> = ({
-  submitting,
-  disabled,
-  children,
+export interface SubmitButtonProps extends Omit<ButtonProps, 'size' | 'disabled'> {
+  allowPristineSubmission?: boolean;
+  allowInvalidSubmission?: boolean;
+}
+
+const SubmitButton: React.FC<SubmitButtonProps> = ({
+  allowPristineSubmission,
+  allowInvalidSubmission,
   ...rest
-}) => (
-  <Button {...rest} type="submit" size="large" variant="primary" disabled={disabled}>
-    {submitting ? (
-      <Flex align="center" justify="center">
-        <Spinner size="small" mr={2} />
-        {children}
-      </Flex>
-    ) : (
-      children
-    )}
-  </Button>
-);
+}) => {
+  const { isSubmitting, isValid, dirty, submitForm } = useFormikContext<any>();
+  return (
+    <Button
+      type="submit"
+      onClick={e => {
+        // We force a submission instead of relying in native HTML (from `type="submit"`), in order
+        // to cover cases of a remote form submission
+        e.preventDefault();
+        submitForm();
+      }}
+      loading={isSubmitting}
+      disabled={
+        isSubmitting ||
+        (!isValid && !allowInvalidSubmission) ||
+        (!dirty && !allowPristineSubmission)
+      }
+      {...rest}
+    />
+  );
+};
 
 export default React.memo(SubmitButton);

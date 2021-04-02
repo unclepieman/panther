@@ -14,22 +14,34 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Optional
+from collections.abc import Mapping
+from typing import Any, Dict, Optional, List
 
 
-# pylint: disable=too-many-instance-attributes
+# pylint: disable=too-many-instance-attributes,unsubscriptable-object
 @dataclass
-class EventMatch:
+class EngineResult:
     """Represents an event that matched a rule"""
     rule_id: str
     rule_version: str
     log_type: str
     dedup: str
     dedup_period_mins: int
-    event: Dict[str, Any]
+    event: Mapping
+    # error_message will be populated only if the rule threw an exception
+    error_message: Optional[str] = None
+    rule_tags: List[str] = field(default_factory=list)
+    rule_reports: Dict[str, List[str]] = field(default_factory=dict)
+    alert_context: Optional[str] = None
+    # generated fields
     title: Optional[str] = None
+    description: Optional[str] = None
+    reference: Optional[str] = None
+    severity: Optional[str] = None
+    runbook: Optional[str] = None
+    destinations: Optional[List[str]] = None
 
 
 @dataclass
@@ -46,6 +58,7 @@ class OutputGroupingKey:
     rule_id: str
     log_type: str
     dedup: str
+    is_rule_error: bool = False
 
     def table_name(self) -> str:
         """ Output the name of the Glue table name for this log type"""

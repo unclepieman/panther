@@ -17,58 +17,30 @@
  */
 
 import React from 'react';
-import { Card } from 'pouncejs';
-import urls from 'Source/urls';
-import { extractErrorMessage } from 'Helpers/utils';
+import withSEO from 'Hoc/withSEO';
 import useRouter from 'Hooks/useRouter';
-import LogSourceWizard from 'Components/wizards/LogSourceWizard';
-import { useAddLogSource } from './graphql/addLogSource.generated';
-
-const initialValues = {
-  integrationLabel: '',
-  awsAccountId: '',
-  s3Bucket: '',
-  s3Prefix: '',
-  kmsKey: '',
-  logTypes: [],
-};
+import Page404 from 'Pages/404';
+import { EventEnum, SrcEnum, trackEvent } from 'Helpers/analytics';
+import CreateS3LogSource from './CreateS3LogSource';
+import CreateSqsSource from './CreateSqsLogSource';
 
 const CreateLogSource: React.FC = () => {
-  const { history } = useRouter();
-  const [addLogSource, { error }] = useAddLogSource({
-    update: (cache, { data: { addLogIntegration } }) => {
-      cache.modify('ROOT_QUERY', {
-        listLogIntegrations: (queryData, { toReference }) => {
-          const addedIntegrationCacheRef = toReference(addLogIntegration);
-          return queryData ? [addedIntegrationCacheRef, ...queryData] : [addedIntegrationCacheRef];
-        },
-      });
+  const {
+    match: {
+      params: { type },
     },
-    onCompleted: () => history.push(urls.logAnalysis.sources.list()),
-  });
+  } = useRouter();
 
-  return (
-    <Card p={9} mb={6}>
-      <LogSourceWizard
-        initialValues={initialValues}
-        externalErrorMessage={error && extractErrorMessage(error)}
-        onSubmit={values =>
-          addLogSource({
-            variables: {
-              input: {
-                integrationLabel: values.integrationLabel,
-                awsAccountId: values.awsAccountId,
-                s3Bucket: values.s3Bucket,
-                logTypes: values.logTypes,
-                s3Prefix: values.s3Prefix || null,
-                kmsKey: values.kmsKey || null,
-              },
-            },
-          })
-        }
-      />
-    </Card>
-  );
+  switch (type) {
+    case 'S3':
+      trackEvent({ event: EventEnum.PickedLogSource, src: SrcEnum.LogSources, ctx: 'S3' });
+      return <CreateS3LogSource />;
+    case 'SQS':
+      trackEvent({ event: EventEnum.PickedLogSource, src: SrcEnum.LogSources, ctx: 'SQS' });
+      return <CreateSqsSource />;
+    default:
+      return <Page404 />;
+  }
 };
 
-export default CreateLogSource;
+export default withSEO({ title: 'New Log Analysis Source' })(CreateLogSource);

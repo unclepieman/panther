@@ -17,7 +17,7 @@
  */
 
 import React from 'react';
-import { Flex, Icon, IconButton, Label } from 'pouncejs';
+import { Box, Flex, IconButton } from 'pouncejs';
 
 interface TableControlsPagination {
   page: number;
@@ -32,20 +32,28 @@ const TableControlsPagination: React.FC<TableControlsPagination> = ({
 }) => {
   return (
     <Flex align="center" justify="center">
-      <Flex mr={9} align="center">
-        <IconButton variant="default" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
-          <Icon size="large" type="chevron-left" />
-        </IconButton>
-        <Label size="large" mx={4} color="grey400">
-          {page} of {totalPages}
-        </Label>
+      <Flex align="center">
         <IconButton
-          variant="default"
+          variantColor="navyblue"
+          aria-label="Go to previous page"
+          variant="ghost"
+          variantBorderStyle="circle"
+          icon="chevron-left"
+          disabled={page <= 1}
+          onClick={() => onPageChange(page - 1)}
+        />
+        <Box mx={2} fontSize="medium">
+          {page} of {totalPages}
+        </Box>
+        <IconButton
+          variantColor="navyblue"
+          aria-label="Go to next page"
+          variant="ghost"
+          variantBorderStyle="circle"
+          icon="chevron-right"
           disabled={page >= totalPages}
           onClick={() => onPageChange(page + 1)}
-        >
-          <Icon size="large" type="chevron-right" />
-        </IconButton>
+        />
       </Flex>
     </Flex>
   );

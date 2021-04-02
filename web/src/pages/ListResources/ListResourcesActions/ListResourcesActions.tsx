@@ -17,32 +17,37 @@
  */
 
 import React from 'react';
-import { Alert, Button, Card, Flex, Icon } from 'pouncejs';
+import { Alert, Box, Button, Card, Collapse, Flex } from 'pouncejs';
 import { RESOURCE_TYPES } from 'Source/constants';
 import GenerateFiltersGroup from 'Components/utils/GenerateFiltersGroup';
 import { ComplianceStatusEnum, ListResourcesInput, ComplianceIntegration } from 'Generated/schema';
 import { capitalize } from 'Helpers/utils';
+import { useListComplianceSourceNames } from 'Source/graphql/queries';
 import FormikTextInput from 'Components/fields/TextInput';
 import FormikCombobox from 'Components/fields/ComboBox';
 import FormikMultiCombobox from 'Components/fields/MultiComboBox';
 import ErrorBoundary from 'Components/ErrorBoundary';
-import pick from 'lodash-es/pick';
+import pick from 'lodash/pick';
 import useRequestParamsWithPagination from 'Hooks/useRequestParamsWithPagination';
-import isEmpty from 'lodash-es/isEmpty';
-import { useListAccountIds } from './graphql/listAccountIds.generated';
+import Breadcrumbs from 'Components/Breadcrumbs';
 
 const statusOptions = Object.values(ComplianceStatusEnum);
 
 export const filters = {
+  idContains: {
+    component: FormikTextInput,
+    props: {
+      label: 'ID / Name',
+      placeholder: 'Enter part of an id or a name...',
+    },
+  },
   types: {
     component: FormikMultiCombobox,
     props: {
       items: RESOURCE_TYPES,
       label: 'Types',
       searchable: true,
-      inputProps: {
-        placeholder: 'Start typing resources...',
-      },
+      placeholder: 'Start typing resources...',
     },
   },
   integrationId: {
@@ -52,9 +57,7 @@ export const filters = {
       searchable: true,
       items: [] as Array<Pick<ComplianceIntegration, 'integrationId' | 'integrationLabel'>>,
       itemToString: (integration: ComplianceIntegration) => integration.integrationLabel,
-      inputProps: {
-        placeholder: 'Choose a source...',
-      },
+      placeholder: 'Choose a source...',
     },
   },
   complianceStatus: {
@@ -63,16 +66,7 @@ export const filters = {
       label: 'Status',
       itemToString: (status: ComplianceStatusEnum) => capitalize(status.toLowerCase()),
       items: statusOptions,
-      inputProps: {
-        placeholder: 'Choose a status...',
-      },
-    },
-  },
-  idContains: {
-    component: FormikTextInput,
-    props: {
-      label: 'ID / Name',
-      placeholder: 'Enter part of an id or a name...',
+      placeholder: 'Choose a status...',
     },
   },
 };
@@ -101,7 +95,7 @@ const ListResourcesActions: React.FC = () => {
     ListResourcesInput
   >();
 
-  const { error, data } = useListAccountIds();
+  const { error, data } = useListComplianceSourceNames();
 
   if (data) {
     filters.integrationId.props.items = data.listComplianceIntegrations;
@@ -124,7 +118,7 @@ const ListResourcesActions: React.FC = () => {
   // Mutate initial values since the initial values provide an `integrationId` and we want to map
   // that to an `ComplianceIntegration` object, since that is the kind of items that the MultiCombobox has
   const filterKeys = Object.keys(filters) as (keyof ListResourcesFiltersValues)[];
-  const filtersCount = filterKeys.filter(key => !isEmpty(requestParams[key])).length;
+  const filtersCount = filterKeys.filter(key => key in requestParams).length;
 
   // If there is at least one filter set visibility to true
   React.useEffect(() => {
@@ -147,30 +141,31 @@ const ListResourcesActions: React.FC = () => {
   return (
     <React.Fragment>
       {error && <Alert variant="error" title="Failed to fetch available sources" discardable />}
-      <Flex justify="flex-end" mb={6} position="relative">
-        <Button
-          size="large"
-          variant="default"
-          onClick={() => setFiltersVisibility(!areFiltersVisible)}
-        >
-          <Flex>
-            <Icon type="filter" size="small" mr={3} />
+      <Breadcrumbs.Actions>
+        <Flex justify="flex-end">
+          <Button
+            icon="filter"
+            variant="outline"
+            variantColor="navyblue"
+            onClick={() => setFiltersVisibility(!areFiltersVisible)}
+          >
             Filter Options {filtersCount ? `(${filtersCount})` : ''}
-          </Flex>
-        </Button>
-      </Flex>
-      {areFiltersVisible && (
-        <ErrorBoundary>
-          <Card p={6} mb={6}>
-            <GenerateFiltersGroup<MutatedListResourcesFiltersValues>
-              filters={filters}
-              onCancel={() => setFiltersVisibility(false)}
-              onSubmit={handleFiltersSubmit}
-              initialValues={mutatedInitialValues}
-            />
+          </Button>
+        </Flex>
+      </Breadcrumbs.Actions>
+      <Collapse open={areFiltersVisible}>
+        <Box pb={6} as="section">
+          <Card p={8}>
+            <ErrorBoundary>
+              <GenerateFiltersGroup<MutatedListResourcesFiltersValues>
+                filters={filters}
+                onSubmit={handleFiltersSubmit}
+                initialValues={mutatedInitialValues}
+              />
+            </ErrorBoundary>
           </Card>
-        </ErrorBoundary>
-      )}
+        </Box>
+      </Collapse>
     </React.Fragment>
   );
 };

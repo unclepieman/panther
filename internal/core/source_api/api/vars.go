@@ -19,26 +19,70 @@ package api
  */
 
 import (
-	"os"
-	"time"
-
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/lambda"
+	"github.com/aws/aws-sdk-go/service/lambda/lambdaiface"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
+	"github.com/kelseyhightower/envconfig"
 
+	"github.com/panther-labs/panther/api/lambda/source/models"
 	"github.com/panther-labs/panther/internal/core/source_api/ddb"
 )
 
-var (
-	db                                      = ddb.New(tableName)
-	sess                                    = session.Must(session.NewSession())
-	SQSClient               sqsiface.SQSAPI = sqs.New(sess)
-	maxElapsedTime                          = 5 * time.Second
-	snapshotPollersQueueURL                 = os.Getenv("SNAPSHOT_POLLERS_QUEUE_URL")
-	logProcessorQueueURL                    = os.Getenv("LOG_PROCESSOR_QUEUE_URL")
-	logProcessorQueueArn                    = os.Getenv("LOG_PROCESSOR_QUEUE_ARN")
-	tableName                               = os.Getenv("TABLE_NAME")
+const (
+	LambdaName = "panther-source-api"
+
+	templateBucketRegion = endpoints.UsWest2RegionID
 )
 
+type Config struct {
+	AccountID                  string `required:"true" split_words:"true"`
+	AWSPartition               string `required:"true" envconfig:"aws_partition"`
+	DataCatalogUpdaterQueueURL string `required:"true" split_words:"true"`
+	Debug                      bool   `required:"false"`
+	LogProcessorQueueURL       string `required:"true" split_words:"true"`
+	LogProcessorQueueArn       string `required:"true" split_words:"true"`
+	InputDataRoleArn           string `required:"true" split_words:"true"`
+	InputDataBucketName        string `required:"true" split_words:"true"`
+	InputDataTopicArn          string `required:"true" split_words:"true"`
+	SnapshotPollersQueueURL    string `required:"true" split_words:"true"`
+	TableName                  string `required:"true" split_words:"true"`
+	Version                    string `required:"true" split_words:"true"`
+	// this is not populated by Env variables
+	Region string
+}
+
+// Setup parses the environment and constructs AWS and http clients on a cold Lambda start.
+// All required environment variables must be present or this function will panic.
+func Setup() *API {
+	var env Config
+	envconfig.MustProcess("", &env)
+	awsSession := session.Must(session.NewSession())
+	env.Region = aws.StringValue(awsSession.Config.Region)
+	api := &API{
+		AwsSession:       awsSession,
+		DdbClient:        ddb.New(awsSession, env.TableName),
+		SqsClient:        sqs.New(awsSession),
+		TemplateS3Client: s3.New(awsSession, aws.NewConfig().WithRegion(templateBucketRegion)),
+		LambdaClient:     lambda.New(awsSession),
+		Config:           env,
+	}
+	api.EvaluateIntegrationFunc = api.evaluateIntegration
+	return api
+}
+
 // API provides receiver methods for each route handler.
-type API struct{}
+type API struct {
+	AwsSession              *session.Session
+	DdbClient               *ddb.DDB
+	SqsClient               sqsiface.SQSAPI
+	TemplateS3Client        s3iface.S3API
+	LambdaClient            lambdaiface.LambdaAPI
+	Config                  Config
+	EvaluateIntegrationFunc func(integration *models.CheckIntegrationInput) (string, bool, error)
+}

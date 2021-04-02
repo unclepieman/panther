@@ -21,27 +21,69 @@ Description: AppSync data sources and resolvers
 # This template adds all the configuration: schema, data sources, resolvers
 
 Parameters:
+  # Alphabetize parameters so it's easy to compare side-by-side with other code that passes values
+  # and because the CloudFormation console always shows parameters in alphabetical order.
+  AlarmTopicArn:
+    Type: String
+    Description: SNS topic for CloudWatch alarms
+    # Example: "arn:aws:sns:us-west-2:111122223333:panther-cw-alarms"
+    AllowedPattern: '^arn:(aws|aws-cn|aws-us-gov):sns:[a-z]{2}-[a-z]{4,9}-[1-9]:\d{12}:\S+$'
   ApiId:
     Type: String
     Description: Appsync GraphQL API ID
+    # Example: "hen4qu3cpjgmdmxltuzand5kjm"
+    AllowedPattern: '^[a-z0-9]{10,50}$'
+  CustomResourceVersion:
+    Type: String
+    Description: Forces updates to custom resources when changed
+    MinLength: 1
   ServiceRole:
     Type: String
     Description: Appsync IAM service role ARN
+    # Example: "arn:aws:iam::111122223333:role/panther-bootstrap-AppsyncServiceRole-3NCFADATNZGN"
+    AllowedPattern: '^arn:(aws|aws-cn|aws-us-gov):iam::\d{12}:role\/\S+$'
 
-  AnalysisApi:
-    Type: String
-    Description: API Gateway HTTPS endpoint for panther-analysis-api
-  ComplianceApi:
-    Type: String
-    Description: API Gateway HTTPS endpoint for panther-compliance-api
-  RemediationApi:
-    Type: String
-    Description: API Gateway HTTPS endpoint for panther-remediation-api
-  ResourcesApi:
-    Type: String
-    Description: API Gateway HTTPS endpoint for panther-resources-api
+Mappings:
+  ResponseTemplates:
+    Lambda: # Standard Lambda function error handling
+      VTL: |
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, $ctx.args)
+        #else
+          $util.toJson($ctx.result)
+        #end
+    LambdaStatusCode: # Standard error handling for Lambda functions which return http status codes
+      VTL: |
+        #set ($statusCode = $ctx.result.statusCode)
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, $ctx.args)
+        #elseif($statusCode >= 200 && $statusCode < 300)
+          $ctx.result.body
+        #else
+          $util.error($ctx.result.body, "$statusCode", $ctx.args)
+        #end
+    LambdaStatusCodeNoBody:
+      VTL: |
+        #set ($statusCode = $ctx.result.statusCode)
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, $ctx.args)
+        #elseif($statusCode >= 200 && $statusCode < 300)
+          true
+        #else
+          $util.error($ctx.result.body, "$statusCode", $ctx.args)
+        #end
 
 Resources:
+  AppsyncAlarms:
+    Type: Custom::AppSyncAlarms
+    Properties:
+      ApiId: !Ref ApiId
+      ApiName: panther-graphql-api
+      AlarmTopicArn: !Ref AlarmTopicArn
+      ClientErrorThreshold: 20 # per 5-minute window
+      CustomResourceVersion: !Ref CustomResourceVersion
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
   GraphQLSchema:
     Type: AWS::AppSync::GraphQLSchema
     Properties:
@@ -49,8 +91,20 @@ Resources:
       DefinitionS3Location: ../api/graphql/schema.graphql
 
   ########## Data Sources ##########
+  AlertDeliveryAPILambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref ApiId
+      Name: PantherAlertDeliveryAPILambda
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !Ref ServiceRole
+      LambdaConfig:
+        LambdaFunctionArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-alert-delivery-api
+
   AlertsAPILambdaDataSource:
     Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       Name: PantherAlertsAPILambda
@@ -61,6 +115,7 @@ Resources:
 
   UsersAPILambdaDataSource:
     Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       Name: PantherUsersAPILambda
@@ -71,6 +126,7 @@ Resources:
 
   DestinationsAPILambdaDataSource:
     Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       Name: PantherDestinationsAPILambda
@@ -81,6 +137,7 @@ Resources:
 
   SourceAPILambdaDataSource:
     Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       Name: PantherSourceAPILambda
@@ -91,6 +148,7 @@ Resources:
 
   OrganizationAPILambdaDataSource:
     Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       Name: PantherOrganizationAPILambda
@@ -99,71 +157,76 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-organization-api
 
-  ResourcesAPIHttpDataSource:
+  MetricsAPILambdaDataSource:
     Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
-      Name: PantherResourcesAPIHttp
-      Type: HTTP
+      Name: PantherMetricsAPILambda
+      Type: AWS_LAMBDA
       ServiceRoleArn: !Ref ServiceRole
-      HttpConfig:
-        AuthorizationConfig:
-          AuthorizationType: AWS_IAM
-          AwsIamConfig:
-            SigningRegion: !Ref AWS::Region
-            SigningServiceName: execute-api
-        Endpoint: !Ref ResourcesApi
+      LambdaConfig:
+        LambdaFunctionArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-metrics-api
 
-  ComplianceAPIHttpDataSource:
+  LogTypesAPILambdaDataSource:
     Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
-      Name: PantherComplianceAPIHttp
-      Type: HTTP
+      Name: PantherLogTypesAPILambda
+      Type: AWS_LAMBDA
       ServiceRoleArn: !Ref ServiceRole
-      HttpConfig:
-        AuthorizationConfig:
-          AuthorizationType: AWS_IAM
-          AwsIamConfig:
-            SigningRegion: !Ref AWS::Region
-            SigningServiceName: execute-api
-        Endpoint: !Ref ComplianceApi
+      LambdaConfig:
+        LambdaFunctionArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-logtypes-api
 
-  AnalysisAPIHttpDataSource:
+  ComplianceAPILambdaDataSource:
     Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
-      Name: PantherAnalysisAPIHttp
-      Type: HTTP
+      Name: PantherComplianceAPILambda
+      Type: AWS_LAMBDA
       ServiceRoleArn: !Ref ServiceRole
-      HttpConfig:
-        AuthorizationConfig:
-          AuthorizationType: AWS_IAM
-          AwsIamConfig:
-            SigningRegion: !Ref AWS::Region
-            SigningServiceName: execute-api
-        Endpoint: !Ref AnalysisApi
+      LambdaConfig:
+        LambdaFunctionArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-compliance-api
 
-  RemediationAPIHttpDataSource:
+  RemediationAPILambdaDataSource:
     Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
-      Name: PantherRemediationAPIHttp
-      Type: HTTP
+      Name: PantherRemediationAPILambda
+      Type: AWS_LAMBDA
       ServiceRoleArn: !Ref ServiceRole
-      HttpConfig:
-        AuthorizationConfig:
-          AuthorizationType: AWS_IAM
-          AwsIamConfig:
-            SigningRegion: !Ref AWS::Region
-            SigningServiceName: execute-api
-        Endpoint: !Ref RemediationApi
+      LambdaConfig:
+        LambdaFunctionArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-remediation-api
+
+  ResourcesAPILambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref ApiId
+      Name: PantherResourcesAPILambda
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !Ref ServiceRole
+      LambdaConfig:
+        LambdaFunctionArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-resources-api
+
+  AnalysisAPILambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref ApiId
+      Name: PantherAnalysisAPILambda
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !Ref ServiceRole
+      LambdaConfig:
+        LambdaFunctionArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-analysis-api
 
   ########## Resolvers ##########
 
   ResetUserPasswordResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -175,26 +238,23 @@ Resources:
           "operation": "Invoke",
           "payload": $util.toJson({
             "resetUserPassword": {
+              "requesterId": $ctx.identity.username,
               "id": $ctx.args.id
             }
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   UpdateUserResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
       FieldName: updateUser
       DataSourceName: !GetAtt UsersAPILambdaDataSource.Name
       RequestMappingTemplate: |
+        #set ($input = $ctx.args.input)
+        $util.qr($input.put("requesterId", $ctx.identity.username))
         {
           "version" : "2017-02-28",
           "operation": "Invoke",
@@ -202,16 +262,10 @@ Resources:
             "updateUser": $ctx.args.input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   DeleteUserResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -223,20 +277,20 @@ Resources:
           "operation": "Invoke",
           "payload": $util.toJson({
             "removeUser": {
+              "requesterId": $ctx.identity.username,
               "id": $ctx.args.id
             }
           })
         }
       ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, $ctx.args)
         #else
           true
         #end
 
   ListUsersResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
@@ -251,15 +305,14 @@ Resources:
           })
         }
       ResponseMappingTemplate: |
-        #if( $context.error )
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
+        #if( $ctx.error )
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, {})
         #else
-          $util.toJson($context.result.users)
+          $util.toJson($ctx.result.users)
         #end
 
   InviteUserResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -267,6 +320,7 @@ Resources:
       DataSourceName: !GetAtt UsersAPILambdaDataSource.Name
       RequestMappingTemplate: |
         #set ($input = $util.defaultIfNull($ctx.args.input, {}))
+        $util.qr($input.put("requesterId", $ctx.identity.username))
         {
           "version" : "2017-02-28",
           "operation": "Invoke",
@@ -274,16 +328,10 @@ Resources:
             "inviteUser": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   GetDestinationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
@@ -299,16 +347,10 @@ Resources:
             }
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   ListDestinationsResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
@@ -322,16 +364,10 @@ Resources:
             "getOutputs": {}
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
-        #else
-          $util.toJson($ctx.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   AddDestinationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -339,7 +375,7 @@ Resources:
       DataSourceName: !GetAtt DestinationsAPILambdaDataSource.Name
       RequestMappingTemplate: |
         #set ($input = $util.defaultIfNull($ctx.args.input, {}))
-        $util.qr($input.put("userId", $ctx.identity.sub))
+        $util.qr($input.put("userId", $ctx.identity.username))
         {
           "version" : "2017-02-28",
           "operation": "Invoke",
@@ -347,16 +383,10 @@ Resources:
             "addOutput": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-            $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   DeleteDestinationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -373,16 +403,10 @@ Resources:
             }
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   UpdateDestinationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -390,7 +414,7 @@ Resources:
       DataSourceName: !GetAtt DestinationsAPILambdaDataSource.Name
       RequestMappingTemplate: |
         #set ($input = $util.defaultIfNull($ctx.args.input, {}))
-        $util.qr($input.put("userId", $ctx.identity.sub))
+        $util.qr($input.put("userId", $ctx.identity.username))
         {
           "version" : "2017-02-28",
           "operation": "Invoke",
@@ -398,16 +422,10 @@ Resources:
             "updateOutput": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   ListComplianceIntegrationsResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
@@ -423,16 +441,10 @@ Resources:
             }
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
-        #else
-          $util.toJson($ctx.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   ListLogIntegrationsResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
@@ -443,21 +455,28 @@ Resources:
           "version" : "2017-02-28",
           "operation": "Invoke",
           "payload": $util.toJson({
-            "listIntegrations": {
-              "integrationType": "aws-s3"
-            }
+            "listIntegrations": {}
           })
         }
       ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, {})
         #else
-          $util.toJson($ctx.result)
+          #set($logIntegrations = [])
+          #foreach($item in $ctx.result)
+            #if ($item.integrationType == "aws-s3")
+              $util.qr($item.put("__typename", "S3LogIntegration"))
+              $util.qr($logIntegrations.add($item))
+            #elseif ($item.integrationType == "aws-sqs")
+              $util.qr($item.put("__typename", "SqsLogSourceIntegration"))
+              $util.qr($logIntegrations.add($item))
+            #end
+          #end
+          $util.toJson($logIntegrations)
         #end
 
   ComplianceIntegrationHealthFieldResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: ComplianceIntegration
@@ -481,16 +500,10 @@ Resources:
             "integrationHealthCheck": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
-        #else
-          $util.toJson($ctx.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   GetComplianceIntegrationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
@@ -507,8 +520,8 @@ Resources:
           })
         }
       ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, {})
         #else
           #set ($requestedIntegration = "null")
           #foreach($item in $ctx.result)
@@ -519,13 +532,12 @@ Resources:
           $util.toJson($requestedIntegration)
         #end
 
-  GetLogIntegrationResolver:
+  GetS3LogIntegrationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
-      FieldName: getLogIntegration
+      FieldName: getS3LogIntegration
       DataSourceName: !GetAtt SourceAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
@@ -538,8 +550,8 @@ Resources:
           })
         }
       ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, {})
         #else
           #set ($requestedIntegration = "null")
           #foreach($item in $ctx.result)
@@ -550,12 +562,41 @@ Resources:
           $util.toJson($requestedIntegration)
         #end
 
-  LogIntegrationHealthFieldResolver:
+  GetSqsLogIntegrationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
-      TypeName: LogIntegration
+      TypeName: Query
+      FieldName: getSqsLogIntegration
+      DataSourceName: !GetAtt SourceAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "listIntegrations": {
+              "integrationType": "aws-sqs"
+            }
+          })
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, {})
+        #else
+          #set ($requestedIntegration = "null")
+          #foreach($item in $ctx.result)
+            #if($item.integrationId == $ctx.args.id)
+              #set ($requestedIntegration = $item)
+            #end
+          #end
+          $util.toJson($requestedIntegration)
+        #end
+
+  S3LogIntegrationHealthFieldResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: S3LogIntegration
       FieldName: health
       DataSourceName: !GetAtt SourceAPILambdaDataSource.Name
       RequestMappingTemplate: |
@@ -564,8 +605,10 @@ Resources:
         $util.qr($input.put("awsAccountId", $ctx.source.awsAccountId))
         $util.qr($input.put("integrationLabel", $ctx.source.integrationLabel))
         $util.qr($input.put("s3Bucket", $ctx.source.s3Bucket))
-        $util.qr($input.put("s3Prefix", $ctx.source.s3Prefix))
+        $util.qr($input.put("s3PrefixLogTypes", $ctx.source.s3PrefixLogTypes))
         $util.qr($input.put("kmsKey", $ctx.source.kmsKey))
+        $util.qr($input.put("managedBucketNotifications", $ctx.source.managedBucketNotifications))
+        $util.qr($input.put("pantherVersion", $ctx.source.pantherVersion))
         {
           "version" : "2017-02-28",
           "operation": "Invoke",
@@ -573,16 +616,31 @@ Resources:
             "integrationHealthCheck": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
-        #else
-          $util.toJson($ctx.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
+
+  SqsLogIntegrationHealthFieldResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: SqsLogSourceIntegration
+      FieldName: health
+      DataSourceName: !GetAtt SourceAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = {})
+        $util.qr($input.put("integrationType", "aws-sqs"))
+        $util.qr($input.put("integrationLabel", $ctx.source.integrationLabel))
+        $util.qr($input.put("sqsConfig", $ctx.source.sqsConfig))
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "integrationHealthCheck": $input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   GetComplianceIntegrationTemplateResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
@@ -598,20 +656,14 @@ Resources:
             "getIntegrationTemplate": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
-        #else
-          $util.toJson($ctx.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
-  GetLogIntegrationTemplateResolver:
+  GetS3LogIntegrationTemplateResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
-      FieldName: getLogIntegrationTemplate
+      FieldName: getS3LogIntegrationTemplate
       DataSourceName: !GetAtt SourceAPILambdaDataSource.Name
       RequestMappingTemplate: |
         #set ($input = $util.defaultIfNull($ctx.args.input, {}))
@@ -623,16 +675,10 @@ Resources:
             "getIntegrationTemplate": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
-        #else
-          $util.toJson($ctx.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   AddComplianceIntegrationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -640,7 +686,7 @@ Resources:
       DataSourceName: !GetAtt SourceAPILambdaDataSource.Name
       RequestMappingTemplate: |
         #set ($input = $ctx.args.input)
-        $util.qr($input.put("userId", $ctx.identity.sub))
+        $util.qr($input.put("userId", $ctx.identity.username))
         $util.qr($input.put("scanIntervalMins", 1440))
         $util.qr($input.put("integrationType", "aws-scan"))
         {
@@ -650,24 +696,18 @@ Resources:
             "putIntegration": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
-  AddLogIntegrationResolver:
+  AddS3LogIntegrationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
-      FieldName: addLogIntegration
+      FieldName: addS3LogIntegration
       DataSourceName: !GetAtt SourceAPILambdaDataSource.Name
       RequestMappingTemplate: |
         #set ($input = $ctx.args.input)
-        $util.qr($input.put("userId", $ctx.identity.sub))
+        $util.qr($input.put("userId", $ctx.identity.username))
         $util.qr($input.put("integrationType", "aws-s3"))
         {
           "version" : "2017-02-28",
@@ -676,16 +716,35 @@ Resources:
             "putIntegration": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
+
+  AddSqsLogIntegrationResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: addSqsLogIntegration
+      DataSourceName: !GetAtt SourceAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = $ctx.args.input)
+        #set($data = {
+          "userId": $ctx.identity.sub,
+          "integrationType": "aws-sqs",
+          "integrationLabel": $input.integrationLabel,
+          "sqsConfig": $input.sqsConfig
+        })
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "putIntegration": $data
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   UpdateComplianceIntegrationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -701,20 +760,14 @@ Resources:
             "updateIntegrationSettings": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
-  UpdateLogIntegrationResolver:
+  UpdateS3LogIntegrationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
-      FieldName: updateLogIntegration
+      FieldName: updateS3LogIntegration
       DataSourceName: !GetAtt SourceAPILambdaDataSource.Name
       RequestMappingTemplate: |
         #set ($input = $util.defaultIfNull($ctx.args.input, {}))
@@ -726,16 +779,29 @@ Resources:
             "updateIntegrationSettings": $input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
+
+  UpdateSqsLogIntegrationResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: updateSqsLogIntegration
+      DataSourceName: !GetAtt SourceAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
+        $util.qr($input.put("integrationType", "aws-sqs"))
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "updateIntegrationSettings": $input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   DeleteComplianceIntegrationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -751,16 +817,10 @@ Resources:
             }
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   DeleteLogIntegrationResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -776,16 +836,10 @@ Resources:
             }
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   GetGeneralSettingsResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
@@ -799,16 +853,10 @@ Resources:
             "getSettings": {}
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, {})
-        #else
-          $util.toJson($context.result)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   UpdateGeneralSettingsResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
@@ -822,604 +870,591 @@ Resources:
             "updateSettings": $ctx.args.input
           })
         }
-      ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
-        #else
-          $util.toJson($context.result)
-        #end
-
-  ListPoliciesResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
-    Properties:
-      ApiId: !Ref ApiId
-      TypeName: Query
-      FieldName: policies
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
-      RequestMappingTemplate: |
-        {
-          "version": "2018-05-29",
-          "method": "GET",
-          "resourcePath": "/v1/list",
-          "params": {
-            "query": $util.toJson($ctx.args.input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
-        }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   GetPolicyResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
       FieldName: policy
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "GET",
-          "resourcePath": "/v1/policy",
-          "params": {
-            "query": $util.toJson($ctx.args.input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "getPolicy": $ctx.args.input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
   UpdatePolicyResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
       FieldName: updatePolicy
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
-        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
-        $util.qr($input.put("userId", $ctx.identity.sub))
+        #set ($input = $ctx.args.input)
+        $util.qr($input.put("userId", $ctx.identity.username))
         {
-          "version": "2018-05-29",
-          "method": "POST",
-          "resourcePath": "/v1/update",
-          "params": {
-            "headers": {
-              "Content-Type": "application/json"
-            },
-            "body": $util.toJson($input)
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "updatePolicy": $input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
   AddPolicyResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
       FieldName: addPolicy
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
-        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
-        $util.qr($input.put("userId", $ctx.identity.sub))
+        #set ($input = $ctx.args.input)
+        $util.qr($input.put("userId", $ctx.identity.username))
         {
-          "version": "2018-05-29",
-          "method": "POST",
-          "resourcePath": "/v1/policy",
-          "params": {
-            "headers": {
-              "Content-Type": "application/json"
-            },
-            "body": $util.toJson($input)
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "createPolicy": $input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 201)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
-  DeletePolicyResolver:
+  UploadDetectionsResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
-      FieldName: deletePolicy
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      FieldName: uploadDetections
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
+        #set ($input = $ctx.args.input)
+        $util.qr($input.put("userId", $ctx.identity.username))
         {
-          "version": "2018-05-29",
-          "method": "POST",
-          "resourcePath": "/v1/delete",
-          "params": {
-            "headers": {
-              "Content-Type": "application/json"
-            },
-            "body": $util.toJson({
-              "policies": $ctx.args.input.policies
-            })
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "bulkUpload": $input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            true
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, $statusCode, $ctx.args)
-        #else
-            $util.error($ctx.result.body, $statusCode, $ctx.args)
-        #end
-
-  UploadPoliciesResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
-    Properties:
-      ApiId: !Ref ApiId
-      TypeName: Mutation
-      FieldName: uploadPolicies
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
-      RequestMappingTemplate: |
-        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
-        $util.qr($input.put("userId", $ctx.identity.sub))
-        {
-          "version": "2018-05-29",
-          "method": "POST",
-          "resourcePath": "/v1/upload",
-          "params": {
-            "headers": {
-              "Content-Type": "application/json"
-            },
-            "body": $util.toJson($input)
-          }
-        }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
   ListResourcesResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
       FieldName: resources
-      DataSourceName: !GetAtt ResourcesAPIHttpDataSource.Name
+      DataSourceName: !GetAtt ResourcesAPILambdaDataSource.Name
       RequestMappingTemplate: |
+        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
         {
-          "version": "2018-05-29",
-          "method": "GET",
-          "resourcePath": "/v1/list",
-          "params": {
-            "query": $util.toJson($ctx.args.input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "listResources": $input
+          })
         }
-
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
   GetResourceResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
       FieldName: resource
-      DataSourceName: !GetAtt ResourcesAPIHttpDataSource.Name
+      DataSourceName: !GetAtt ResourcesAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "GET",
-          "resourcePath": "/v1/resource",
-          "params": {
-            "query": $util.toJson($ctx.args.input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "getResource": $ctx.args.input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
   RemediateResourceResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
       FieldName: remediateResource
-      DataSourceName: !GetAtt RemediationAPIHttpDataSource.Name
+      DataSourceName: !GetAtt RemediationAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "POST",
-          "resourcePath": "/v1/remediate",
-          "params": {
-            "headers": {
-              "Content-Type": "application/json"
-            },
-            "body": $util.toJson($ctx.args.input)
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "remediateResource": $ctx.args.input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            true
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCodeNoBody, VTL]
 
   ListRemediationsResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
       FieldName: remediations
-      DataSourceName: !GetAtt RemediationAPIHttpDataSource.Name
+      DataSourceName: !GetAtt RemediationAPILambdaDataSource.Name
       RequestMappingTemplate: |
         #set ($input = $util.defaultIfNull($ctx.args.input, {}))
-        $util.qr($input.put("userId", $ctx.identity.sub))
         {
-          "version": "2018-05-29",
-          "method": "GET",
-          "resourcePath": "/v1/",
-          "params": {
-            "query": $util.toJson($input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "listRemediations": $input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
   OrganizationStatsResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
       FieldName: organizationStats
-      DataSourceName: !GetAtt ComplianceAPIHttpDataSource.Name
+      DataSourceName: !GetAtt ComplianceAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "getOrgOverview": $input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  LogAnalysisMetricsResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: getLogAnalysisMetrics
+      DataSourceName: !GetAtt MetricsAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "GET",
-          "resourcePath": "/v1/org-overview",
-          "params": {
-            "query": $util.toJson($ctx.args.input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "getMetrics": $ctx.args.input
+          })
         }
       ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, {})
         #else
-            $util.error($ctx.result.body, "$statusCode", $input)
+          #set($response = {
+            "eventsProcessed": $ctx.result.eventsProcessed.seriesData,
+            "alertsBySeverity": $ctx.result.alertsBySeverity.seriesData,
+            "eventsLatency": $ctx.result.eventsLatency.seriesData,
+            "totalAlertsDelta": $ctx.result.totalAlertsDelta.singleValue,
+            "alertsByRuleID": $ctx.result.alertsByRuleID.singleValue,
+            "fromDate": $ctx.result.fromDate,
+            "toDate": $ctx.result.toDate,
+            "intervalMinutes": $ctx.result.intervalMinutes
+          })
+          $util.toJson($response)
         #end
 
   ResourcesForPolicyResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
       FieldName: resourcesForPolicy
-      DataSourceName: !GetAtt ComplianceAPIHttpDataSource.Name
+      DataSourceName: !GetAtt ComplianceAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "GET",
-          "resourcePath": "/v1/describe-policy",
-          "params": {
-            "query": $util.toJson($ctx.args.input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "describePolicy": $ctx.args.input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
   PoliciesForResourceResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
       FieldName: policiesForResource
-      DataSourceName: !GetAtt ComplianceAPIHttpDataSource.Name
+      DataSourceName: !GetAtt ComplianceAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "GET",
-          "resourcePath": "/v1/describe-resource",
-          "params": {
-            "query": $util.toJson($ctx.args.input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "describeResource": $ctx.args.input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
   SuppressPoliciesResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
       FieldName: suppressPolicies
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "POST",
-          "resourcePath": "/v1/suppress",
-          "params": {
-            "body": $util.toJson($ctx.args.input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "suppress": $ctx.args.input
+          })
         }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCodeNoBody, VTL]
 
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            true
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
-
-  ListRulesResolver:
+  ListDetectionsResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
-      FieldName: rules
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      FieldName: detections
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "GET",
-          "resourcePath": "/v1/rule/list",
-          "params": {
-            "query": $util.toJson($ctx.args.input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "listDetections": $util.defaultIfNull($ctx.args.input, {})
+          })
         }
       ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, {})
         #else
-            $util.error($ctx.result.body, "$statusCode", $input)
+          #set($result = $util.parseJson($ctx.result.body))
+          #set($detections = [])
+
+          #foreach($item in $result.detections)
+            #if ($item.analysisType == "RULE")
+              $util.qr($item.put("__typename", "Rule"))
+            #elseif ($item.analysisType == "POLICY")
+              $util.qr($item.put("__typename", "Policy"))
+            #else
+              $util.error("Invalid analysisType found")
+            #end
+            $util.qr($detections.add($item))
+          #end
+
+          $util.toJson({
+              "detections": $detections,
+              "paging": $result.paging
+          })
         #end
 
   GetRuleResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
       FieldName: rule
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "GET",
-          "resourcePath": "/v1/rule",
-          "params": {
-            "query": $util.toJson($ctx.args.input),
-            "headers": {
-              "Content-Type": "application/json"
-            }
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "getRule": $ctx.args.input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
   UpdateRuleResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
       FieldName: updateRule
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
-        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
-        $util.qr($input.put("userId", $ctx.identity.sub))
+        #set ($input = $ctx.args.input)
+        $util.qr($input.put("userId", $ctx.identity.username))
         {
-          "version": "2018-05-29",
-          "method": "POST",
-          "resourcePath": "/v1/rule/update",
-          "params": {
-            "headers": {
-              "Content-Type": "application/json"
-            },
-            "body": $util.toJson($input)
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "updateRule": $input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
   AddRuleResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
       FieldName: addRule
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
-        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
-        $util.qr($input.put("userId", $ctx.identity.sub))
+        #set ($input = $ctx.args.input)
+        $util.qr($input.put("userId", $ctx.identity.username))
         {
-          "version": "2018-05-29",
-          "method": "POST",
-          "resourcePath": "/v1/rule",
-          "params": {
-            "headers": {
-              "Content-Type": "application/json"
-            },
-            "body": $util.toJson($input)
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "createRule": $input
+          })
         }
-      ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 201)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
-        #else
-            $util.error($ctx.result.body, "$statusCode", $input)
-        #end
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
 
-  DeleteRuleResolver:
+  DeleteDetectionResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
-      FieldName: deleteRule
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      FieldName: deleteDetections
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "POST",
-          "resourcePath": "/v1/delete",
-          "params": {
-            "headers": {
-              "Content-Type": "application/json"
-            },
-            "body": $util.toJson({
-              "policies": $ctx.args.input.rules
-            })
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "deleteDetections": {
+              "entries": $ctx.args.input.detections
+            }
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCodeNoBody, VTL]
+
+  GetGlobalModuleResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: getGlobalPythonModule
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "getGlobal": $ctx.args.input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  UpdateGlobalModuleResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: updateGlobalPythonlModule
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = $ctx.args.input)
+        $util.qr($input.put("userId", $ctx.identity.username))
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "updateGlobal": $input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  ListGlobalPythonModulesResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: listGlobalPythonModules
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "listGlobals": $ctx.args.input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  AddGlobalPythonModuleResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: addGlobalPythonModule
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = $ctx.args.input)
+        $util.qr($input.put("userId", $ctx.identity.username))
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "createGlobal": $input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  DeleteGlobalPythonModuleResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: deleteGlobalPythonModule
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "deleteGlobals": {
+              "entries": $ctx.args.input.globals
+            }
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCodeNoBody, VTL]
+
+  GetAnalysisPackResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: getAnalysisPack
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "getPack": {
+              "id": $ctx.args.id
+            }
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  UpdateAnalysisPackResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: updateAnalysisPack
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = $ctx.args.input)
+        $util.qr($input.put("userId", $ctx.identity.username))
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "patchPack": $input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  ListAnalysisPacksResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: listAnalysisPacks
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "listPacks": $util.defaultIfNull($ctx.args.input, {})
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  EnumeratePackResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: AnalysisPack
+      FieldName: enumeration
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "enumeratePack": {
+              "id": $ctx.source.id
+            }
+          })
         }
       ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            true
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, $statusCode, $ctx.args)
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, {})
         #else
-            $util.error($ctx.result.body, $statusCode, $ctx.args)
+          #set($result = $util.parseJson($ctx.result.body))
+          #set($detections = [])
+
+          #foreach($item in $result.detections)
+            #if ($item.analysisType == "RULE")
+              $util.qr($item.put("__typename", "Rule"))
+            #elseif ($item.analysisType == "POLICY")
+              $util.qr($item.put("__typename", "Policy"))
+            #else
+              $util.error("Invalid analysisType found")
+            #end
+            $util.qr($detections.add($item))
+          #end
+
+          $util.toJson({
+              "detections": $detections,
+              "globals": $result.globals,
+              "models": $result.models,
+              "paging": $result.paging
+          })
         #end
+
+  SendTestAlertResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: sendTestAlert
+      DataSourceName: !GetAtt AlertDeliveryAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "sendTestAlert": $ctx.args.input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
+
+  DeliverAlertResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: deliverAlert
+      DataSourceName: !GetAtt AlertDeliveryAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "deliverAlert": $ctx.args.input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
 
   ListAlertsResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
@@ -1434,15 +1469,39 @@ Resources:
           })
         }
       ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, $ctx.args)
         #else
-          $util.toJson($context.result)
+          #set($alerts = [])
+
+          #foreach($item in $ctx.result.alertSummaries)
+            #set($alert = $item)
+            #if ($item.type == "POLICY")
+              $util.qr($alert.put("detection", {
+                "__typename": "AlertSummaryPolicyInfo",
+                "policyId": $item.policyId,
+                "policySourceId": $item.policySourceId,
+                "resourceId": $item.resourceId,
+                "resourceTypes": $item.resourceTypes
+              }))
+            #else
+              $util.qr($alert.put("detection", {
+                "__typename": "AlertSummaryRuleInfo",
+                "ruleId": $item.ruleId,
+                "logTypes": $item.logTypes,
+                "eventsMatched": $item.eventsMatched
+              }))
+            #end
+            $util.qr($alerts.add($alert))
+          #end
+          $util.toJson({
+          	"alertSummaries": $alerts,
+            "lastEvaluatedKey": $ctx.result.lastEvaluatedKey
+          })
         #end
 
   GetAlertResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Query
@@ -1457,38 +1516,308 @@ Resources:
           })
         }
       ResponseMappingTemplate: |
-        #if($context.error)
-          $util.error($context.error.errorMessage, $context.error.errorType, $ctx.args)
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, $ctx.args)
         #else
-          $util.toJson($context.result)
+          #set($payload = $ctx.result)
+          #if ($payload.type == "POLICY")
+            $util.qr($payload.put("detection", {
+              "__typename": "AlertSummaryPolicyInfo",
+              "policyId": $ctx.result.policyId,
+              "policySourceId": $ctx.result.policySourceId,
+              "resourceId": $ctx.result.resourceId,
+              "resourceTypes": $ctx.result.resourceTypes
+            }))
+          #else
+            $util.qr($payload.put("detection", {
+              "__typename": "AlertDetailsRuleInfo",
+              "ruleId": $ctx.result.ruleId,
+              "logTypes": $ctx.result.logTypes,
+              "eventsMatched": $ctx.result.eventsMatched,
+              "dedupString": $ctx.result.dedupString,
+              "events": $ctx.result.events,
+              "eventsLastEvaluatedKey": $ctx.result.eventsLastEvaluatedKey
+            }))
+          #end
+          $util.toJson($payload)
+        #end
+
+  UpdateAlertStatusResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: updateAlertStatus
+      DataSourceName: !GetAtt AlertsAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
+        $util.qr($input.put("userId", $ctx.identity.username))
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "updateAlertStatus": $input
+          })
+        }
+      ResponseMappingTemplate: |
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, $ctx.args)
+        #else
+          #set($alerts = [])
+
+          #foreach($item in $ctx.result)
+            #set($alert = $item)
+            #if ($item.type == "POLICY")
+              $util.qr($alert.put("detection", {
+                "__typename": "AlertSummaryPolicyInfo",
+                "policyId": $item.policyId,
+                "policySourceId": $item.policySourceId,
+                "resourceId": $item.resourceId,
+                "resourceTypes": $item.resourceTypes
+              }))
+            #else
+              $util.qr($alert.put("detection", {
+                "__typename": "AlertSummaryRuleInfo",
+                "ruleId": $item.ruleId,
+                "logTypes": $item.logTypes,
+                "eventsMatched": $item.eventsMatched
+              }))
+            #end
+            $util.qr($alerts.add($alert))
+          #end
+          $util.toJson($alerts)
         #end
 
   TestPolicyResolver:
     Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref ApiId
       TypeName: Mutation
       FieldName: testPolicy
-      DataSourceName: !GetAtt AnalysisAPIHttpDataSource.Name
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
       RequestMappingTemplate: |
         {
-          "version": "2018-05-29",
-          "method": "POST",
-          "resourcePath": "/v1/test",
-          "params": {
-            "headers": {
-              "Content-Type": "application/json"
-            },
-            "body": $util.toJson($ctx.args.input)
-          }
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "testPolicy": $ctx.args.input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  TestRuleResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: testRule
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+           "version" : "2017-02-28",
+           "operation": "Invoke",
+           "payload": $util.toJson({
+             "testRule": $ctx.args.input
+           })
+         }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  LogTypesResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: listAvailableLogTypes
+      DataSourceName: !GetAtt LogTypesAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "ListAvailableLogTypes": {}
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
+
+  AddCustomLogResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: addCustomLog
+      DataSourceName: !GetAtt LogTypesAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "PutCustomLog": $ctx.args.input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
+
+  UpdateCustomLogResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: updateCustomLog
+      DataSourceName: !GetAtt LogTypesAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "PutCustomLog": $ctx.args.input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
+
+  GetCustomLogResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: getCustomLog
+      DataSourceName: !GetAtt LogTypesAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "GetCustomLog": $ctx.args.input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
+
+  ListCustomLogsResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: listCustomLogs
+      DataSourceName: !GetAtt LogTypesAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "ListCustomLogs": {}
+          })
         }
       ResponseMappingTemplate: |
-        #set ($statusCode = $ctx.result.statusCode)
-        #if($statusCode == 200)
-            $ctx.result.body
-        #elseif($statusCode >= 400 && $statusCode < 500)
-            $util.error($util.parseJson($ctx.result.body).message, "$statusCode", $input)
+        #if($ctx.error)
+          $util.error($ctx.error.errorMessage, $ctx.error.errorType, $ctx.args)
         #else
-            $util.error($ctx.result.body, "$statusCode", $input)
+          $util.toJson($ctx.result.customLogs)
         #end
+
+  DeleteCustomLogResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: deleteCustomLog
+      DataSourceName: !GetAtt LogTypesAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "DelCustomLog": $ctx.args.input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, Lambda, VTL]
+
+  AddDataModelResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: addDataModel
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
+        $util.qr($input.put("userId", $ctx.identity.username))
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "createDataModel": $input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  UpdateDataModelResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: updateDataModel
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        #set ($input = $util.defaultIfNull($ctx.args.input, {}))
+        $util.qr($input.put("userId", $ctx.identity.username))
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "updateDataModel": $input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  GetDataModelResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: getDataModel
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "getDataModel": {
+              "id": $ctx.args.id
+            }
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  ListDataModelsResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Query
+      FieldName: listDataModels
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "listDataModels": $ctx.args.input
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCode, VTL]
+
+  DeleteDataModelResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref ApiId
+      TypeName: Mutation
+      FieldName: deleteDataModel
+      DataSourceName: !GetAtt AnalysisAPILambdaDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version" : "2017-02-28",
+          "operation": "Invoke",
+          "payload": $util.toJson({
+            "deleteDataModels": {
+              "entries": $ctx.args.input.dataModels
+            }
+          })
+        }
+      ResponseMappingTemplate: !FindInMap [ResponseTemplates, LambdaStatusCodeNoBody, VTL]

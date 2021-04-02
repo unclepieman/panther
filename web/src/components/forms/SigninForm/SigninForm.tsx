@@ -17,12 +17,14 @@
  */
 
 import * as Yup from 'yup';
-import { Field, Formik } from 'formik';
+import { Field, Form, Formik } from 'formik';
+import { Link as RRLink } from 'react-router-dom';
 import React from 'react';
-import { Box } from 'pouncejs';
 import FormikTextInput from 'Components/fields/TextInput';
 import SubmitButton from 'Components/buttons/SubmitButton';
 import useAuth from 'Hooks/useAuth';
+import { Link, Flex, Box } from 'pouncejs';
+import urls from 'Source/urls';
 
 interface SignInFormValues {
   username: string;
@@ -35,9 +37,7 @@ const initialValues = {
 };
 
 const validationSchema = Yup.object().shape({
-  username: Yup.string()
-    .email('Needs to be a valid email')
-    .required(),
+  username: Yup.string().email('Needs to be a valid email').required(),
   password: Yup.string().required(),
 });
 
@@ -52,23 +52,28 @@ const SignInForm: React.FC = () => {
         signIn({
           email: username,
           password,
-          onError: ({ message }) =>
-            setErrors({
-              password: message,
-            }),
+          onError: ({ message }) => {
+            // FIXME: There is weird issue returning wrong error message on submit
+            // correlated heavily on this https://github.com/aws-amplify/amplify-js/pull/4427
+            return setErrors({
+              password:
+                message === 'Only radix 2, 4, 8, 16, 32 are supported'
+                  ? 'Incorrect username or password.'
+                  : message,
+            });
+          },
         })
       }
     >
-      {({ handleSubmit, isSubmitting, isValid, dirty }) => (
-        <Box width={1} as="form" onSubmit={handleSubmit}>
+      <Form>
+        <Flex direction="column" spacing={4}>
           <Field
             as={FormikTextInput}
             label="Email"
             placeholder="Enter your company email..."
             type="email"
             name="username"
-            aria-required
-            mb={6}
+            required
           />
           <Field
             as={FormikTextInput}
@@ -76,18 +81,18 @@ const SignInForm: React.FC = () => {
             placeholder="The name of your cat"
             name="password"
             type="password"
-            aria-required
-            mb={6}
+            required
           />
-          <SubmitButton
-            width={1}
-            submitting={isSubmitting}
-            disabled={isSubmitting || !isValid || !dirty}
-          >
-            Sign in
-          </SubmitButton>
-        </Box>
-      )}
+          <Flex ml="auto">
+            <Link as={RRLink} to={urls.account.auth.forgotPassword()} fontSize="medium">
+              Forgot your password?
+            </Link>
+          </Flex>
+          <Box mt={4}>
+            <SubmitButton fullWidth>Sign in</SubmitButton>
+          </Box>
+        </Flex>
+      </Form>
     </Formik>
   );
 };

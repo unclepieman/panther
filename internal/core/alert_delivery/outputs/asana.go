@@ -19,13 +19,13 @@ package outputs
  */
 
 import (
+	"context"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go/aws"
 	"go.uber.org/zap"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
 const (
@@ -34,7 +34,12 @@ const (
 )
 
 // Asana creates a task in Asana projects
-func (client *OutputClient) Asana(alert *alertmodels.Alert, config *outputmodels.AsanaConfig) *AlertDeliveryError {
+func (client *OutputClient) Asana(
+	ctx context.Context,
+	alert *deliverymodel.Alert,
+	config *outputModels.AsanaConfig,
+) *AlertDeliveryResponse {
+
 	zap.L().Debug("sending alert to Asana")
 	payload := map[string]interface{}{
 		"data": map[string]interface{}{
@@ -48,8 +53,8 @@ func (client *OutputClient) Asana(alert *alertmodels.Alert, config *outputmodels
 		url:  asanaCreateTaskURL,
 		body: payload,
 		headers: map[string]string{
-			AuthorizationHTTPHeader: fmt.Sprintf(asanaAuthorizationHeaderFormat, aws.StringValue(config.PersonalAccessToken)),
+			AuthorizationHTTPHeader: fmt.Sprintf(asanaAuthorizationHeaderFormat, config.PersonalAccessToken),
 		},
 	}
-	return client.httpWrapper.post(postInput)
+	return client.httpWrapper.post(ctx, postInput)
 }

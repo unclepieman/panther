@@ -18,11 +18,11 @@
 
 import { History } from 'history';
 import { LocationErrorState } from 'Components/utils/ApiErrorFallback';
-import { getOperationName } from '@apollo/client/utilities/graphql/getFromAST';
+import { getOperationName } from 'apollo-utilities';
 import { ListRemediationsDocument } from 'Components/forms/PolicyForm';
-import { RuleTeaserDocument } from 'Pages/AlertDetails';
+import { GetRuleSummaryDocument } from 'Pages/AlertDetails/RuleAlertDetails';
 import { ErrorResponse, onError } from 'apollo-link-error';
-import { logError } from 'Helpers/loggers';
+import { logError } from 'Helpers/errors';
 import { ApolloLink } from '@apollo/client';
 
 /**
@@ -33,7 +33,7 @@ const createErrorLink = (history: History<LocationErrorState>) => {
   // still be handled by the component independently)
   const silentFailingOperations = [
     getOperationName(ListRemediationsDocument),
-    getOperationName(RuleTeaserDocument),
+    getOperationName(GetRuleSummaryDocument),
   ];
 
   return (onError(({ graphQLErrors, networkError, operation }: ErrorResponse) => {
@@ -45,8 +45,12 @@ const createErrorLink = (history: History<LocationErrorState>) => {
     if (graphQLErrors) {
       graphQLErrors.forEach(error => {
         logError(error, { operation });
-        history.replace(history.location.pathname + history.location.search, {
-          errorType: error.errorType,
+        history.replace({
+          ...history.location,
+          state: {
+            ...history.location.state,
+            errorType: error.errorType,
+          },
         });
       });
     }

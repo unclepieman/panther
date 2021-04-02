@@ -17,42 +17,40 @@
  */
 
 import React from 'react';
-import useModal from 'Hooks/useModal';
-import { Button, Flex, Modal, Text } from 'pouncejs';
-import SubmitButton from 'Components/buttons/SubmitButton/SubmitButton';
+import { Box, Button, Flex, Modal, ModalProps, Text } from 'pouncejs';
 
-export interface OptimisticConfirmModalProps {
-  title: string;
+export interface OptimisticConfirmModalProps extends ModalProps {
   subtitle: React.ReactNode;
   onConfirm: () => void;
 }
 
 const OptimisticConfirmModal: React.FC<OptimisticConfirmModalProps> = ({
-  title,
   subtitle,
   onConfirm,
+  onClose,
+  ...rest
 }) => {
-  const { hideModal } = useModal();
-
   const handleConfirm = () => {
+    onClose();
     onConfirm();
-    hideModal();
   };
 
   return (
-    <Modal open onClose={hideModal} title={title}>
-      <Text size="large" color="grey500" mb={8} textAlign="center">
-        {subtitle}
-      </Text>
+    <Modal aria-describedby="modal-subtitle" onClose={onClose} {...rest}>
+      <Box maxWidth={700}>
+        <Text mb={8} textAlign="center" id="modal-subtitle">
+          {subtitle}
+        </Text>
 
-      <Flex justify="flex-end">
-        <Button size="large" variant="default" onClick={hideModal} mr={3}>
-          Cancel
-        </Button>
-        <SubmitButton onClick={handleConfirm} submitting={false} disabled={false}>
-          Confirm
-        </SubmitButton>
-      </Flex>
+        <Flex justify="flex-end" spacing={3}>
+          <Button variant="outline" variantColor="navyblue" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variantColor="red" onClick={handleConfirm}>
+            Confirm
+          </Button>
+        </Flex>
+      </Box>
     </Modal>
   );
 };

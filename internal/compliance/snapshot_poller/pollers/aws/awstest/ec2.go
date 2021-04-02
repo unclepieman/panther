@@ -44,7 +44,7 @@ var (
 		InstanceId:     ExampleInstanceId,
 		InstanceType:   aws.String("t2.micro"),
 		KeyName:        aws.String("ec2-instance-key-pair"),
-		LaunchTime:     ExampleDate,
+		LaunchTime:     &ExampleTime,
 		Monitoring: &ec2.Monitoring{
 			State: aws.String("disabled"),
 		},
@@ -70,7 +70,7 @@ var (
 			{
 				DeviceName: aws.String("/dev/sda1"),
 				Ebs: &ec2.EbsInstanceBlockDevice{
-					AttachTime:          ExampleDate,
+					AttachTime:          &ExampleTime,
 					DeleteOnTermination: aws.Bool(true),
 					Status:              aws.String("attached"),
 					VolumeId:            ExampleVolumeId,
@@ -89,7 +89,7 @@ var (
 					PublicIp:      aws.String("54.0.0.0"),
 				},
 				Attachment: &ec2.InstanceNetworkInterfaceAttachment{
-					AttachTime:          ExampleDate,
+					AttachTime:          &ExampleTime,
 					AttachmentId:        aws.String("eni-attach-112233445566"),
 					DeleteOnTermination: aws.Bool(true),
 					DeviceIndex:         aws.Int64(0),
@@ -158,12 +158,24 @@ var (
 		},
 	}
 
+	ExampleDescribeInstancesOutputContinue = &ec2.DescribeInstancesOutput{
+		Reservations: []*ec2.Reservation{
+			{
+				Instances: []*ec2.Instance{
+					ExampleInstance,
+					ExampleInstance,
+				},
+			},
+		},
+		NextToken: aws.String("1"),
+	}
+
 	ExampleDescribeVolumesOutput = &ec2.DescribeVolumesOutput{
 		Volumes: []*ec2.Volume{
 			{
 				Attachments: []*ec2.VolumeAttachment{
 					{
-						AttachTime:          ExampleDate,
+						AttachTime:          &ExampleTime,
 						Device:              aws.String("/dev/sda1"),
 						InstanceId:          ExampleInstanceId,
 						State:               aws.String("attached"),
@@ -172,7 +184,7 @@ var (
 					},
 				},
 				AvailabilityZone: aws.String("us-west-2b"),
-				CreateTime:       ExampleDate,
+				CreateTime:       &ExampleTime,
 				Encrypted:        aws.Bool(false),
 				Size:             aws.Int64(10),
 				SnapshotId:       aws.String("snap-abcdefg012345"),
@@ -182,6 +194,13 @@ var (
 				VolumeType:       aws.String("gp2"),
 			},
 		},
+	}
+	ExampleDescribeVolumesOutputContinue = &ec2.DescribeVolumesOutput{
+		Volumes: []*ec2.Volume{
+			ExampleDescribeVolumesOutput.Volumes[0],
+			ExampleDescribeVolumesOutput.Volumes[0],
+		},
+		NextToken: aws.String("1"),
 	}
 
 	ExampleDescribeImagesOutput = &ec2.DescribeImagesOutput{
@@ -275,6 +294,14 @@ var (
 		},
 	}
 
+	ExampleDescribeVpcsOutputContinue = &ec2.DescribeVpcsOutput{
+		Vpcs: []*ec2.Vpc{
+			ExampleVpc,
+			ExampleVpc,
+		},
+		NextToken: aws.String("1"),
+	}
+
 	ExampleDescribeSecurityGroupsOutput = &ec2.DescribeSecurityGroupsOutput{
 		SecurityGroups: []*ec2.SecurityGroup{
 			{
@@ -291,6 +318,13 @@ var (
 				VpcId:               aws.String("vpc-6aa60b12"),
 			},
 		},
+	}
+	ExampleDescribeSecurityGroupsOutputContinue = &ec2.DescribeSecurityGroupsOutput{
+		SecurityGroups: []*ec2.SecurityGroup{
+			ExampleDescribeSecurityGroupsOutput.SecurityGroups[0],
+			ExampleDescribeSecurityGroupsOutput.SecurityGroups[0],
+		},
+		NextToken: aws.String("1"),
 	}
 
 	ExampleDescribeNetworkAclsOutput = &ec2.DescribeNetworkAclsOutput{
@@ -320,10 +354,18 @@ var (
 		},
 	}
 
+	ExampleDescribeNetworkAclsOutputContinue = &ec2.DescribeNetworkAclsOutput{
+		NetworkAcls: []*ec2.NetworkAcl{
+			ExampleDescribeNetworkAclsOutput.NetworkAcls[0],
+			ExampleDescribeNetworkAclsOutput.NetworkAcls[0],
+		},
+		NextToken: aws.String("1"),
+	}
+
 	ExampleDescribeFlowLogsOutput = &ec2.DescribeFlowLogsOutput{
 		FlowLogs: []*ec2.FlowLog{
 			{
-				CreationTime:             ExampleDate,
+				CreationTime:             &ExampleTime,
 				DeliverLogsPermissionArn: aws.String("arn:aws:iam::123456789012:role/PantherDevNickAdministrator"),
 				DeliverLogsStatus:        aws.String("SUCCESS"),
 				FlowLogStatus:            aws.String("ACTIVE"),
@@ -420,7 +462,7 @@ var (
 				OwnerId:     ExampleAccountId,
 				Progress:    aws.String("100%"),
 				SnapshotId:  ExampleSnapshotId,
-				StartTime:   ExampleDate,
+				StartTime:   &ExampleTime,
 				State:       aws.String("completed"),
 				VolumeId:    ExampleVolumeId,
 				VolumeSize:  aws.Int64(16),
@@ -563,7 +605,7 @@ var (
 // EC2 mock
 
 // SetupMockEC2 is used to override the EC2 Client initializer
-func SetupMockEC2(sess *session.Session, cfg *aws.Config) interface{} {
+func SetupMockEC2(_ *session.Session, _ *aws.Config) interface{} {
 	return MockEC2ForSetup
 }
 

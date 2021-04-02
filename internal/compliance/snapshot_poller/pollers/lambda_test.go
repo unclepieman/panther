@@ -19,25 +19,43 @@ package pollers
  */
 
 import (
+	"context"
+	"net/http"
 	"testing"
+	"time"
 
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambdacontext"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/sts"
+	lru "github.com/hashicorp/golang-lru"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
-	resourcesapi "github.com/panther-labs/panther/api/gateway/resources/models"
+	resourcesapi "github.com/panther-labs/panther/api/lambda/resources/models"
 	awsmodels "github.com/panther-labs/panther/internal/compliance/snapshot_poller/models/aws"
+	pollermodels "github.com/panther-labs/panther/internal/compliance/snapshot_poller/models/poller"
+	pollers "github.com/panther-labs/panther/internal/compliance/snapshot_poller/pollers/aws"
+	"github.com/panther-labs/panther/internal/compliance/snapshot_poller/pollers/aws/awstest"
+	"github.com/panther-labs/panther/internal/compliance/snapshot_poller/pollers/utils"
+	"github.com/panther-labs/panther/pkg/gatewayapi"
 )
 
 var testIntegrationID = "0aab70c6-da66-4bb9-a83c-bbe8f5717fde"
 
 func TestBatchResources(t *testing.T) {
-	var testResources []*resourcesapi.AddResourceEntry
+	var testResources []resourcesapi.AddResourceEntry
 	for i := 0; i < 1100; i++ {
-		testResources = append(testResources, &resourcesapi.AddResourceEntry{
+		testResources = append(testResources, resourcesapi.AddResourceEntry{
 			Attributes:      &awsmodels.CloudTrailMeta{},
 			ID:              "arn:aws:cloudtrail:region:account-id:trail/trailname",
-			IntegrationID:   resourcesapi.IntegrationID(testIntegrationID),
-			IntegrationType: resourcesapi.IntegrationTypeAws,
+			IntegrationID:   testIntegrationID,
+			IntegrationType: "aws",
 			Type:            "AWS.CloudTrail",
 		})
 	}
@@ -50,9 +68,6 @@ func TestBatchResources(t *testing.T) {
 	assert.Len(t, testBatches[2], 100)
 }
 
-/*
- skipping until resources-api mock is in place
-
 func testContext() context.Context {
 	return lambdacontext.NewContext(
 		context.Background(),
@@ -63,24 +78,136 @@ func testContext() context.Context {
 	)
 }
 
-var (
-	mockTime          = time.Time{}
-)
-
 func mockTimeFunc() time.Time {
-	return mockTime
+	return time.Time{}
+}
+
+// Replace global logger with an in-memory observer for tests.
+func mockLogger(level zapcore.Level) *observer.ObservedLogs {
+	core, mockLog := observer.New(level)
+	zap.ReplaceGlobals(zap.New(core))
+	return mockLog
+}
+
+// Skip global logger creation
+func setupTestLogger(ctx context.Context, _ map[string]interface{}) *lambdacontext.LambdaContext {
+	lc, ok := lambdacontext.FromContext(ctx)
+	if !ok {
+		panic("lambdacontext.FromContext failed")
+	}
+	return lc
 }
 
 func TestHandlerNonExistentIntegration(t *testing.T) {
-	t.Skip("skipping until resources-api mock is in place")
+	loggerSetupFunc = setupTestLogger
+	logger := mockLogger(zapcore.InfoLevel)
+
+	pollers.RateLimitTracker, _ = lru.NewARC(10)
+	mockResourceClient := &gatewayapi.MockClient{}
+	apiClient = mockResourceClient
+	pollers.AuditRoleName = "TestAuditRole"
+
+	testIntegrations := &pollermodels.ScanMsg{
+		Entries: []*pollermodels.ScanEntry{
+			{
+				AWSAccountID:  aws.String("123456789012"),
+				IntegrationID: &testIntegrationID,
+				ResourceID:    aws.String("arn:aws:s3:::test"),
+				ResourceType:  aws.String("AWS.NonExistentResource.Type"),
+			},
+		},
+	}
+	testIntegrationStr, err := jsoniter.MarshalToString(testIntegrations)
+	require.NoError(t, err)
+
+	sampleEvent := events.SQSEvent{
+		Records: []events.SQSMessage{
+			{
+				AWSRegion:     "us-west-2",
+				MessageId:     "702a0aba-ab1f-11e8-b09c-f218981400a1",
+				ReceiptHandle: "AQEBCki01vLygW9L6Xq1hcSNR90swZdtgZHP1N5hEU1Dt22p66gQFxKEsVo7ObxpC+b/",
+				Body:          testIntegrationStr,
+				Md5OfBody:     "d3673b20e6c009a81c73961b798f838a",
+			},
+		},
+	}
+	require.NoError(t, Handle(testContext(), sampleEvent))
+
+	mockResourceClient.AssertNumberOfCalls(t, "Invoke", 0)
+	expected := []observer.LoggedEntry{
+		{
+			Entry:   zapcore.Entry{Level: zapcore.ErrorLevel, Message: "unable to perform scan of specified resource type"},
+			Context: []zapcore.Field{zap.String("resourceType", "AWS.NonExistentResource.Type")},
+		},
+	}
+	logs := logger.AllUntimed()
+	require.Len(t, logs, 2)
+	assert.Equal(t, expected, logs[:1]) // throw out last oplog msg
+}
+
+func TestPollSourceNotEnabled(t *testing.T) {
+	loggerSetupFunc = setupTestLogger
+	logger := mockLogger(zapcore.InfoLevel)
+	mockResourceClient := &gatewayapi.MockClient{}
+	apiClient = mockResourceClient
+	pollers.AuditRoleName = "TestAuditRole"
+
+	testIntegrations := &pollermodels.ScanMsg{
+		Entries: []*pollermodels.ScanEntry{
+			{
+				AWSAccountID:  aws.String("123456789012"),
+				IntegrationID: &testIntegrationID,
+				Region:        aws.String("us-west-2"),
+				ResourceType:  aws.String(awsmodels.KmsKeySchema),
+				Enabled:       aws.Bool(false),
+			},
+		},
+	}
+	testIntegrationStr, err := jsoniter.MarshalToString(testIntegrations)
+	require.NoError(t, err)
+
+	sampleEvent := events.SQSEvent{
+		Records: []events.SQSMessage{
+			{
+				AWSRegion:     "us-west-2",
+				MessageId:     "702a0aba-ab1f-11e8-b09c-f218981400a1",
+				ReceiptHandle: "AQEBCki01vLygW9L6Xq1hcSNR90swZdtgZHP1N5hEU1Dt22p66gQFxKEsVo7ObxpC+b/",
+				Body:          testIntegrationStr,
+				Md5OfBody:     "d3673b20e6c009a81c73961b798f838a",
+			},
+		},
+	}
+	require.NoError(t, Handle(testContext(), sampleEvent))
+
+	mockResourceClient.AssertExpectations(t)
+	expected := []observer.LoggedEntry{
+		{
+			Entry: zapcore.Entry{Level: zapcore.InfoLevel, Message: "source integration disabled"},
+			Context: []zapcore.Field{
+				zap.String("integration id", "0aab70c6-da66-4bb9-a83c-bbe8f5717fde"),
+			},
+		},
+	}
+	logs := logger.AllUntimed()
+	require.Len(t, logs, 2)
+	assert.Equal(t, expected, logs[:1])
+}
+
+func TestPollRegionIgnored(t *testing.T) {
+	loggerSetupFunc = setupTestLogger
+	logger := mockLogger(zapcore.InfoLevel)
+	mockResourceClient := &gatewayapi.MockClient{}
+	apiClient = mockResourceClient
+	pollers.AuditRoleName = "TestAuditRole"
+
 	testIntegrations := &pollermodels.ScanMsg{
 		Entries: []*pollermodels.ScanEntry{
 			{
 				AWSAccountID:     aws.String("123456789012"),
 				IntegrationID:    &testIntegrationID,
-				ResourceID:       aws.String("arn:aws:s3:::test"),
-				ResourceType:     aws.String("AWS.NonExistentResource.Type"),
-				ScanAllResources: aws.Bool(false),
+				Region:           aws.String("us-west-2"),
+				ResourceType:     aws.String(awsmodels.KmsKeySchema),
+				RegionIgnoreList: []string{"us-west-2"},
 			},
 		},
 	}
@@ -100,78 +227,99 @@ func TestHandlerNonExistentIntegration(t *testing.T) {
 	}
 
 	require.NoError(t, Handle(testContext(), sampleEvent))
+
+	mockResourceClient.AssertExpectations(t)
+	expected := []observer.LoggedEntry{
+		{
+			Entry: zapcore.Entry{Level: zapcore.InfoLevel, Message: "processing single region service scan"},
+			Context: []zapcore.Field{
+				zap.String("region", "us-west-2"),
+				zap.String("resourceType", "AWS.KMS.Key"),
+			},
+		},
+		{
+			Entry: zapcore.Entry{Level: zapcore.InfoLevel, Message: "matched ignoreList region - skipping scan"},
+			Context: []zapcore.Field{
+				zap.String("region", "us-west-2"),
+			},
+		},
+	}
+	logs := logger.AllUntimed()
+	require.Len(t, logs, 3)
+	assert.Equal(t, expected, logs[:2]) // throw out last oplog msg
 }
 
-func TestHandler(t *testing.T) {
-	t.Skip("skipping until resources-api mock is in place")
+func TestPollResourceTypeIgnored(t *testing.T) {
+	loggerSetupFunc = setupTestLogger
+	logger := mockLogger(zapcore.InfoLevel)
+	mockResourceClient := &gatewayapi.MockClient{}
+	apiClient = mockResourceClient
+	pollers.AuditRoleName = "TestAuditRole"
+
 	testIntegrations := &pollermodels.ScanMsg{
 		Entries: []*pollermodels.ScanEntry{
 			{
-				AWSAccountID:     aws.String("123456789012"),
-				IntegrationID:    &testIntegrationID,
-				ScanAllResources: aws.Bool(true),
+				AWSAccountID:           aws.String("123456789012"),
+				IntegrationID:          &testIntegrationID,
+				Region:                 aws.String("us-west-2"),
+				ResourceType:           aws.String(awsmodels.KmsKeySchema),
+				ResourceTypeIgnoreList: []string{"AWS.KMS.Key"},
 			},
 		},
 	}
 	testIntegrationStr, err := jsoniter.MarshalToString(testIntegrations)
 	require.NoError(t, err)
 
-	// Setup ACM client and function mocks
-	awstest.MockAcmForSetup = awstest.BuildMockAcmSvcAll()
+	sampleEvent := events.SQSEvent{
+		Records: []events.SQSMessage{
+			{
+				AWSRegion:     "us-west-2",
+				MessageId:     "702a0aba-ab1f-11e8-b09c-f218981400a1",
+				ReceiptHandle: "AQEBCki01vLygW9L6Xq1hcSNR90swZdtgZHP1N5hEU1Dt22p66gQFxKEsVo7ObxpC+b/",
+				Body:          testIntegrationStr,
+				Md5OfBody:     "d3673b20e6c009a81c73961b798f838a",
+			},
+		},
+	}
 
-	// Setup CloudFormation client and function mocks
-	awstest.MockCloudFormationForSetup = awstest.BuildMockCloudFormationSvcAll()
+	require.NoError(t, Handle(testContext(), sampleEvent))
 
-	// Setup CloudWatchLogs client and function mocks
-	awstest.MockCloudWatchLogsForSetup = awstest.BuildMockCloudWatchLogsSvcAll()
+	mockResourceClient.AssertExpectations(t)
+	expected := []observer.LoggedEntry{
+		{
+			Entry: zapcore.Entry{Level: zapcore.InfoLevel, Message: "resource type filtered"},
+			Context: []zapcore.Field{
+				zap.String("resource type", "AWS.KMS.Key"),
+			},
+		},
+	}
+	logs := logger.AllUntimed()
+	require.Len(t, logs, 2)
+	assert.Equal(t, expected, logs[:1]) // throw out last oplog msg
+}
 
-	// Setup CloudTrail client and function mocks
-	awstest.MockCloudTrailForSetup = awstest.BuildMockCloudTrailSvcAll()
+// End-to-end unit test
+func TestHandler(t *testing.T) {
+	loggerSetupFunc = setupTestLogger
+	logger := mockLogger(zapcore.InfoLevel)
+	mockResourceClient := &gatewayapi.MockClient{}
+	apiClient = mockResourceClient
+	pollers.AuditRoleName = "TestAuditRole"
 
-	// Setup IAM client and function mocks
-	awstest.MockIAMForSetup = awstest.BuildMockIAMSvcAll()
+	testIntegrations := &pollermodels.ScanMsg{
+		Entries: []*pollermodels.ScanEntry{
+			{
+				AWSAccountID:  aws.String("123456789012"),
+				IntegrationID: &testIntegrationID,
+				Region:        aws.String("us-west-2"),
+				ResourceType:  aws.String(awsmodels.KmsKeySchema),
+			},
+		},
+	}
+	testIntegrationStr, err := jsoniter.MarshalToString(testIntegrations)
+	require.NoError(t, err)
 
-	// Setup Lambda client and function mocks
-	awstest.MockLambdaForSetup = awstest.BuildMockLambdaSvcAll()
-
-	// Setup S3 client and function mocks
-	awstest.MockS3ForSetup = awstest.BuildMockS3SvcAll()
-
-	// Setup EC2 client and function mocks
-	awstest.MockEC2ForSetup = awstest.BuildMockEC2SvcAll()
-
-	// Setup ECS client and function mocks
-	awstest.MockEcsForSetup = awstest.BuildMockEcsSvcAll()
-
-	// Setup KMS client and function mocks
 	awstest.MockKmsForSetup = awstest.BuildMockKmsSvcAll()
-
-	// Setup ConfigService client with mock functions
-	awstest.MockConfigServiceForSetup = awstest.BuildMockConfigServiceSvcAll()
-
-	// Setup ELBV2 client and function mocks
-	awstest.MockElbv2ForSetup = awstest.BuildMockElbv2SvcAll()
-
-	// Setup WAF client and function mocks
-	awstest.MockWafForSetup = awstest.BuildMockWafSvcAll()
-
-	// Setup WAF Regional client and function mocks
-	awstest.MockWafRegionalForSetup = awstest.BuildMockWafRegionalSvcAll()
-
-	// Setup GuardDuty client and function mocks
-	awstest.MockGuardDutyForSetup = awstest.BuildMockGuardDutySvcAll()
-
-	// Setup DynamoDB client and function mocks
-	awstest.MockDynamoDBForSetup = awstest.BuildMockDynamoDBSvcAll()
-
-	// Setup DynamoDB client and function mocks
-	awstest.MockApplicationAutoScalingForSetup = awstest.BuildMockApplicationAutoScalingSvcAll()
-
-	// Setup RDS client and function mocks
-	awstest.MockRdsForSetup = awstest.BuildMockRdsSvcAll()
-
-	// Setup Redshift client and function mocks
-	awstest.MockRedshiftForSetup = awstest.BuildMockRedshiftSvcAll()
 
 	mockStsClient := &awstest.MockSTS{}
 	mockStsClient.
@@ -186,30 +334,14 @@ func TestHandler(t *testing.T) {
 		)
 	awstest.MockSTSForSetup = mockStsClient
 
-	awspollers.AcmClientFunc = awstest.SetupMockAcm
-	awspollers.ApplicationAutoScalingClientFunc = awstest.SetupMockApplicationAutoScaling
-	awspollers.CloudTrailClientFunc = awstest.SetupMockCloudTrail
-	awspollers.CloudWatchLogsClientFunc = awstest.SetupMockCloudWatchLogs
-	awspollers.CloudFormationClientFunc = awstest.SetupMockCloudFormation
-	awspollers.ConfigServiceClientFunc = awstest.SetupMockConfigService
-	awspollers.DynamoDBClientFunc = awstest.SetupMockDynamoDB
-	awspollers.EC2ClientFunc = awstest.SetupMockEC2
-	awspollers.EcsClientFunc = awstest.SetupMockEcs
-	awspollers.Elbv2ClientFunc = awstest.SetupMockElbv2
-	awspollers.GuardDutyClientFunc = awstest.SetupMockGuardDuty
-	awspollers.IAMClientFunc = awstest.SetupMockIAM
-	awspollers.KmsClientFunc = awstest.SetupMockKms
-	awspollers.LambdaClientFunc = awstest.SetupMockLambda
-	awspollers.RDSClientFunc = awstest.SetupMockRds
-	awspollers.RedshiftClientFunc = awstest.SetupMockRedshift
-	awspollers.S3ClientFunc = awstest.SetupMockS3
-	awspollers.WafClientFunc = awstest.SetupMockWaf
-	awspollers.WafRegionalClientFunc = awstest.SetupMockWafRegional
+	pollers.KmsClientFunc = awstest.SetupMockKms
+	pollers.AssumeRoleFunc = awstest.AssumeRoleMock
+	pollers.VerifyAssumedCredsFunc = func(sess *session.Session, region string) error {
+		return nil
+	}
+	// Provide stub poller session
+	pollers.SnapshotPollerSession = &session.Session{}
 
-	awspollers.assumeRoleFunc = awstest.AssumeRoleMock
-	awspollers.assumeRoleProviderFunc = awstest.STSAssumeRoleProviderMock
-
-	// Time mock
 	utils.TimeNowFunc = mockTimeFunc
 
 	sampleEvent := events.SQSEvent{
@@ -224,7 +356,88 @@ func TestHandler(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, Handle(testContext(), sampleEvent))
-}
+	lambdaInput := &resourcesapi.LambdaInput{
+		AddResources: &resourcesapi.AddResourcesInput{
+			Resources: []resourcesapi.AddResourceEntry{
+				{
+					Attributes: &awsmodels.KmsKey{
+						GenericAWSResource: awsmodels.GenericAWSResource{
+							AccountID: aws.String("123456789012"),
+							Region:    aws.String("us-west-2"),
+							ARN:       aws.String("arn:aws:kms:us-west-2:111111111111:key/188c57ed-b28a-4c0e-9821-f4940d15cb0a"),
+							ID:        aws.String("188c57ed-b28a-4c0e-9821-f4940d15cb0a"),
+						},
+						GenericResource: awsmodels.GenericResource{
+							ResourceID:   aws.String("arn:aws:kms:us-west-2:111111111111:key/188c57ed-b28a-4c0e-9821-f4940d15cb0a"),
+							ResourceType: aws.String(awsmodels.KmsKeySchema),
+							TimeCreated:  &awstest.ExampleTime,
+						},
+						Description:        aws.String("Encryption key for panther-snapshot-queue data"),
+						Enabled:            aws.Bool(true),
+						KeyManager:         aws.String("CUSTOMER"),
+						KeyState:           aws.String("Enabled"),
+						KeyUsage:           aws.String("ENCRYPT_DECRYPT"),
+						Origin:             aws.String("AWS_KMS"),
+						KeyRotationEnabled: aws.Bool(true),
+						Policy:             awstest.ExampleGetKeyPolicyOutput.Policy,
+					},
+					ID:              "arn:aws:kms:us-west-2:111111111111:key/188c57ed-b28a-4c0e-9821-f4940d15cb0a",
+					IntegrationID:   "0aab70c6-da66-4bb9-a83c-bbe8f5717fde",
+					IntegrationType: "aws",
+					Type:            awsmodels.KmsKeySchema,
+				},
+				{
+					Attributes: &awsmodels.KmsKey{
+						GenericAWSResource: awsmodels.GenericAWSResource{
+							AccountID: aws.String("123456789012"),
+							Region:    aws.String("us-west-2"),
+							ARN:       aws.String("arn:aws:kms:us-west-2:111111111111:key/d15a1e37-3ef7-4882-9be5-ef3a024114db"),
+							ID:        aws.String("d15a1e37-3ef7-4882-9be5-ef3a024114db"),
+						},
+						GenericResource: awsmodels.GenericResource{
+							ResourceID:   aws.String("arn:aws:kms:us-west-2:111111111111:key/d15a1e37-3ef7-4882-9be5-ef3a024114db"),
+							ResourceType: aws.String(awsmodels.KmsKeySchema),
+							TimeCreated:  &awstest.ExampleTime,
+						},
+						Description:        aws.String("Encryption key for panther-snapshot-queue data"),
+						Enabled:            aws.Bool(true),
+						KeyManager:         aws.String("CUSTOMER"),
+						KeyState:           aws.String("Enabled"),
+						KeyUsage:           aws.String("ENCRYPT_DECRYPT"),
+						Origin:             aws.String("AWS_KMS"),
+						KeyRotationEnabled: aws.Bool(true),
+						Policy:             awstest.ExampleGetKeyPolicyOutput.Policy,
+					},
+					ID:              "arn:aws:kms:us-west-2:111111111111:key/d15a1e37-3ef7-4882-9be5-ef3a024114db",
+					IntegrationID:   "0aab70c6-da66-4bb9-a83c-bbe8f5717fde",
+					IntegrationType: "aws",
+					Type:            awsmodels.KmsKeySchema,
+				},
+			},
+		},
+	}
+	mockResourceClient.On("Invoke", lambdaInput, nil).Return(http.StatusOK, nil, nil)
 
-*/
+	require.NoError(t, Handle(testContext(), sampleEvent))
+
+	mockResourceClient.AssertExpectations(t)
+	expected := []observer.LoggedEntry{
+		{
+			Entry: zapcore.Entry{Level: zapcore.InfoLevel, Message: "processing single region service scan"},
+			Context: []zapcore.Field{
+				zap.String("region", "us-west-2"),
+				zap.String("resourceType", "AWS.KMS.Key"),
+			},
+		},
+		{
+			Entry: zapcore.Entry{Level: zapcore.InfoLevel, Message: "resources generated"},
+			Context: []zapcore.Field{
+				zap.Int64("numResources", 2),
+				zap.String("resourcePoller", "KMSKey"),
+			},
+		},
+	}
+	logs := logger.AllUntimed()
+	require.Len(t, logs, 3)
+	assert.Equal(t, expected, logs[:2]) // throw out last oplog msg
+}

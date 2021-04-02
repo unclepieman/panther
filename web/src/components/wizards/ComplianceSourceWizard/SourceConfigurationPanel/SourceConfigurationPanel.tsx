@@ -16,87 +16,114 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { Box, Flex, Heading, InputElementLabel, Text } from 'pouncejs';
-import ErrorBoundary from 'Components/ErrorBoundary';
-import { Field, useFormikContext } from 'formik';
+import { Box, Flex, FormHelperText, Link } from 'pouncejs';
+import { FastField, Field, useFormikContext } from 'formik';
 import FormikTextInput from 'Components/fields/TextInput';
 import React from 'react';
-import FormikCheckbox from 'Components/fields/Checkbox';
-import { PANTHER_SCHEMA_DOCS_LINK } from 'Source/constants';
+import FormikSwitch from 'Components/fields/Switch';
+import logo from 'Assets/aws-minimal-logo.svg';
+import { AWS_REGIONS, REMEDIATION_DOC_URL, RESOURCE_TYPES } from 'Source/constants';
 import { ComplianceSourceWizardValues } from 'Components/wizards/ComplianceSourceWizard/ComplianceSourceWizard';
+import { WizardPanel } from 'Components/Wizard';
+import FormikMultiCombobox from 'Components/fields/MultiComboBox';
 
 const SourceConfigurationPanel: React.FC = () => {
-  const { initialValues } = useFormikContext<ComplianceSourceWizardValues>();
+  const { initialValues, dirty, isValid } = useFormikContext<ComplianceSourceWizardValues>();
 
   return (
-    <Box width={460} m="auto">
-      <Heading size="medium" m="auto" mb={2} color="grey400">
-        {initialValues.integrationId ? 'Update source' : 'First things first'}
-      </Heading>
-      <Text size="large" color="grey200" mb={10} as="p">
-        {initialValues.integrationId
-          ? 'Feel free to make any changes to your Cloud Security source'
-          : "Let's configure your Cloud Security Source"}
-      </Text>
-      <ErrorBoundary>
-        <Field
-          name="integrationLabel"
-          as={FormikTextInput}
-          label="Name"
-          placeholder="A nickname for the AWS account you're onboarding"
-          aria-required
-          mb={6}
+    <WizardPanel>
+      <Box width={400} m="auto">
+        <WizardPanel.Heading
+          title={
+            initialValues.integrationId
+              ? `Update ${initialValues.integrationLabel}`
+              : 'First things first'
+          }
+          subtitle={
+            initialValues.integrationId
+              ? 'Feel free to make any changes to you want'
+              : 'Let’s configure your Cloud Security Source'
+          }
+          logo={logo}
         />
-        <Field
-          name="awsAccountId"
-          as={FormikTextInput}
-          label="AWS Account ID"
-          placeholder="Your 12-digit AWS Account ID"
-          aria-required
-          disabled={!!initialValues.integrationId}
-          mb={6}
-        />
-        <Box ml={-2}>
-          <Flex align="flex-start" mb={6}>
-            <Field as={FormikCheckbox} name="cweEnabled" id="cweEnabled" />
-            <Box ml={2}>
-              <InputElementLabel htmlFor="cweEnabled">
-                Real-Time AWS Resource Scans
-              </InputElementLabel>
-              <Text color="grey300" size="medium" as="p">
-                Configure Panther to monitor all AWS resource changes in real-time through
-                CloudWatch Events.{' '}
-                <a
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  href={`${PANTHER_SCHEMA_DOCS_LINK}/amazon-web-services/aws-setup/real-time-events`}
-                >
-                  Read more
-                </a>
-              </Text>
-            </Box>
+        <Flex direction="column" spacing={4}>
+          <Field
+            name="integrationLabel"
+            as={FormikTextInput}
+            label="Name"
+            placeholder="A nickname for the AWS account you're onboarding"
+            required
+          />
+          <Field
+            name="awsAccountId"
+            as={FormikTextInput}
+            label="AWS Account ID"
+            placeholder="Your 12-digit AWS Account ID"
+            required
+            disabled={!!initialValues.integrationId}
+          />
+        </Flex>
+        <Flex direction="column" spacing={6} my={4}>
+          <Flex as="fieldset" spacing={8}>
+            <FormHelperText id="cweEnabled-description">
+              Configure Panther to monitor all AWS resource changes in real-time through CloudWatch
+              Events.
+            </FormHelperText>
+            <Field
+              as={FormikSwitch}
+              aria-label="Real-Time AWS Resource Scans"
+              name="cweEnabled"
+              aria-describedby="cweEnabled-description"
+            />
           </Flex>
-          <Flex align="flex-start" mb={6}>
-            <Field as={FormikCheckbox} name="remediationEnabled" id="remediationEnabled" />
-            <Box ml={2}>
-              <InputElementLabel htmlFor="remediationEnabled">
-                AWS Automatic Remediations
-              </InputElementLabel>
-              <Text color="grey300" size="medium" as="p">
-                Allow Panther to fix misconfigured infrastructure as soon as it is detected.{' '}
-                <a
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  href={`${PANTHER_SCHEMA_DOCS_LINK}/amazon-web-services/aws-setup/automatic-remediation`}
-                >
-                  Read more
-                </a>
-              </Text>
-            </Box>
+          <Flex as="fieldset" spacing={8}>
+            <FormHelperText id="remediationEnabled-description">
+              Allow Panther to fix misconfigured infrastructure as soon as it is detected.{' '}
+              <Link external href={REMEDIATION_DOC_URL}>
+                Read more
+              </Link>
+            </FormHelperText>
+            <Field
+              as={FormikSwitch}
+              aria-label="AWS Automatic Remediations"
+              name="remediationEnabled"
+              aria-describedby="remediationEnabled-description"
+            />
           </Flex>
-        </Box>
-      </ErrorBoundary>
-    </Box>
+          <Box as="fieldset">
+            <FastField
+              as={FormikMultiCombobox}
+              searchable
+              label="Exclude AWS Regions"
+              name="regionIgnoreList"
+              items={AWS_REGIONS}
+              aria-describedby="exclude-aws-regions-description"
+            />
+            <FormHelperText id="exclude-aws-regions-description" mt={2}>
+              Disable Cloud Security Scanning for certain AWS regions
+            </FormHelperText>
+          </Box>
+          <Box as="fieldset">
+            <FastField
+              as={FormikMultiCombobox}
+              searchable
+              label="Exclude Resource Types"
+              name="resourceTypeIgnoreList"
+              items={RESOURCE_TYPES}
+              aria-describedby="exclude-resourceTypes-description"
+            />
+            <FormHelperText id="exclude-resourceTypes-description" mt={2}>
+              Disable Cloud Security Scanning for certain Resource types
+            </FormHelperText>
+          </Box>
+        </Flex>
+        <WizardPanel.Actions>
+          <WizardPanel.ActionNext disabled={!dirty || !isValid}>
+            Continue Setup
+          </WizardPanel.ActionNext>
+        </WizardPanel.Actions>
+      </Box>
+    </WizardPanel>
   );
 };
 

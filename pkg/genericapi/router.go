@@ -20,13 +20,14 @@ package genericapi
  */
 
 import (
+	"context"
+	"fmt"
 	"reflect"
 
 	"github.com/aws/aws-lambda-go/lambdacontext"
 	"go.uber.org/zap"
 	"gopkg.in/go-playground/validator.v9"
 
-	"github.com/panther-labs/panther/pkg/gatewayapi"
 	"github.com/panther-labs/panther/pkg/oplog"
 )
 
@@ -78,7 +79,24 @@ func (r *Router) Handle(input interface{}) (output interface{}, err error) {
 	}()
 
 	if err = r.validate.Struct(input); err != nil {
-		return nil, &InvalidInputError{Route: req.route, Message: err.Error()}
+		var msg string
+		if vErr, ok := err.(validator.ValidationErrors); ok {
+			// The default error message looks like this:
+			//     Key: 'Input.Name' Error:Field validation for 'Name' failed on the 'excludesall' tag
+			// Restructure to be more user friendly:
+			//     Name invalid, failed to satisfy the condition: excludesall=&<>
+			fieldErr := []validator.FieldError(vErr)[0]
+			property := fieldErr.Tag()
+			if param := fieldErr.Param(); param != "" {
+				// If the validation tag has parameters, include them in the message
+				property += "=" + param
+			}
+			msg = fmt.Sprintf("%s invalid, failed to satisfy the condition: %s", fieldErr.Field(), property)
+		} else {
+			msg = err.Error()
+		}
+
+		return nil, &InvalidInputError{Route: req.route, Message: msg}
 	}
 
 	// Find the handler function, either cached or reflected.
@@ -92,15 +110,104 @@ func (r *Router) Handle(input interface{}) (output interface{}, err error) {
 
 	results := handler.Call([]reflect.Value{req.input})
 
-	if len(results) == 1 {
-		return nil, toError(results[0], req.route)
+	var payload interface{}
+	switch len(results) {
+	case 1:
+		// single return: could be an error or the payload
+		if results[0].IsNil() {
+			return nil, nil
+		}
+
+		payload = results[0].Interface()
+		if _, ok := payload.(error); ok {
+			return nil, toError(results[0], req.route)
+		}
+	case 2:
+		payload, err = results[0].Interface(), toError(results[1], req.route)
+	default:
+		panic(fmt.Sprintf("%s has %d returns, expected 1 or 2", req.route, len(results)))
 	}
 
-	result, err := results[0].Interface(), toError(results[1], req.route)
-	if result != nil {
-		gatewayapi.ReplaceMapSliceNils(&result)
+	if payload != nil {
+		ReplaceMapSliceNils(&payload)
 	}
-	return result, err
+	return payload, err
+}
+
+// Handle validates the Lambda input and invokes the appropriate handler with a context.
+//
+// For the sake of efficiency, no attempt is made to validate the routes or function signatures.
+// As a result, this function will panic if a handler does not exist or is invalid.
+// Be sure to VerifyHandlers as part of the unit tests for your function!
+func (r *Router) HandleWithContext(ctx context.Context, input interface{}) (output interface{}, err error) {
+	req, err := findRequest(input)
+	if err != nil {
+		// we do not have the route yet, special case, use oplog to keep logging standard
+		operation := oplog.NewManager(r.namespace, r.component).Start("findRequest")
+		operation.Stop()
+		operation.Log(err)
+		return nil, err
+	}
+
+	operation := oplog.NewManager(r.namespace, r.component).Start(req.route).WithMemUsed(lambdacontext.MemoryLimitInMB)
+	defer func() {
+		operation.Stop().Log(err, zap.Any("input", redactedInput(req.input)))
+	}()
+
+	if err = r.validate.Struct(input); err != nil {
+		var msg string
+		if vErr, ok := err.(validator.ValidationErrors); ok {
+			// The default error message looks like this:
+			//     Key: 'Input.Name' Error:Field validation for 'Name' failed on the 'excludesall' tag
+			// Restructure to be more user friendly:
+			//     Name invalid, failed to satisfy the condition: excludesall=&<>
+			fieldErr := []validator.FieldError(vErr)[0]
+			property := fieldErr.Tag()
+			if param := fieldErr.Param(); param != "" {
+				// If the validation tag has parameters, include them in the message
+				property += "=" + param
+			}
+			msg = fmt.Sprintf("%s invalid, failed to satisfy the condition: %s", fieldErr.Field(), property)
+		} else {
+			msg = err.Error()
+		}
+
+		return nil, &InvalidInputError{Route: req.route, Message: msg}
+	}
+
+	// Find the handler function, either cached or reflected.
+	var handler reflect.Value
+	var ok bool
+	if handler, ok = r.routesByName[req.route]; !ok {
+		// Cache miss - use reflection to find the function.
+		handler = r.routes.MethodByName(req.route)
+		r.routesByName[req.route] = handler
+	}
+
+	results := handler.Call([]reflect.Value{reflect.ValueOf(ctx), req.input})
+
+	var payload interface{}
+	switch len(results) {
+	case 1:
+		// single return: could be an error or the payload
+		if results[0].IsNil() {
+			return nil, nil
+		}
+
+		payload = results[0].Interface()
+		if _, ok := payload.(error); ok {
+			return nil, toError(results[0], req.route)
+		}
+	case 2:
+		payload, err = results[0].Interface(), toError(results[1], req.route)
+	default:
+		panic(fmt.Sprintf("%s has %d returns, expected 1 or 2", req.route, len(results)))
+	}
+
+	if payload != nil {
+		ReplaceMapSliceNils(&payload)
+	}
+	return payload, err
 }
 
 type request struct {
@@ -117,31 +224,46 @@ func findRequest(lambdaInput interface{}) (*request, error) {
 	structValue := reflect.Indirect(reflect.ValueOf(lambdaInput))
 
 	// Check the name and value of each field in the input struct - only one should be non-nil.
-	var result *request
+	requests := findNonNullPtrs(structValue)
+	switch len(requests) {
+	case 1:
+		return &requests[0], nil
+	case 0:
+		return nil, &InvalidInputError{
+			Route: "nil", Message: "exactly one route must be specified: found none",
+		}
+	default:
+		// There is more than one route
+		var routes []string
+		for _, request := range requests {
+			routes = append(routes, request.route)
+		}
+		return nil, &InvalidInputError{
+			Route:   "",
+			Message: fmt.Sprintf("exactly one route must be specified: %v", routes),
+		}
+	}
+}
+
+func findNonNullPtrs(structValue reflect.Value) (requests []request) {
 	for i := 0; i < structValue.NumField(); i++ {
 		fieldValue := structValue.Field(i)
+
+		// embedded structs are used for API composition
+		if fieldValue.Type().Kind() == reflect.Struct {
+			requests = append(requests, findNonNullPtrs(fieldValue)...)
+			continue
+		}
+
 		if fieldValue.IsNil() {
 			continue
 		}
 
 		fieldName := structValue.Type().Field(i).Name
-		if result == nil {
-			// We found the first defined route
-			result = &request{route: fieldName, input: fieldValue}
-		} else {
-			// There is more than one route
-			return nil, &InvalidInputError{
-				Route:   result.route,
-				Message: "exactly one route must be specified: also found " + fieldName,
-			}
-		}
+		requests = append(requests, request{route: fieldName, input: fieldValue})
 	}
 
-	if result == nil {
-		return nil, &InvalidInputError{
-			Route: "nil", Message: "exactly one route must be specified: found none"}
-	}
-	return result, nil
+	return requests
 }
 
 // Convert a return value into an error, injecting the route name if applicable.

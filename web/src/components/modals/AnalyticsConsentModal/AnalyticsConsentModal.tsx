@@ -17,21 +17,29 @@
  */
 
 import React from 'react';
-import { Modal, Text, Box, useSnackbar, Alert } from 'pouncejs';
-import useModal from 'Hooks/useModal';
+import { Modal, Text, Box, useSnackbar, Alert, ModalProps } from 'pouncejs';
 import AnalyticsConsentForm from 'Components/forms/AnalyticsConsentForm';
 import { extractErrorMessage } from 'Helpers/utils';
 import { useUpdateGeneralSettingsConsents } from './graphql/updateGeneralSettingsConsents.generated';
 
-const AnalyticsConsentModal: React.FC = () => {
+export interface AnalyticsConsentModalProps extends ModalProps {
+  showErrorConsent: boolean;
+  showProductAnalyticsConsent: boolean;
+}
+
+const AnalyticsConsentModal: React.FC<AnalyticsConsentModalProps> = ({
+  onClose,
+  showErrorConsent = true,
+  showProductAnalyticsConsent = true,
+  ...rest
+}) => {
   const { pushSnackbar } = useSnackbar();
-  const { hideModal } = useModal();
   const [
     saveConsentPreferences,
     { error: updateGeneralPreferencesError },
   ] = useUpdateGeneralSettingsConsents({
     onCompleted: () => {
-      hideModal();
+      onClose();
       pushSnackbar({ variant: 'success', title: `Successfully updated your preferences` });
     },
     onError: error => {
@@ -46,16 +54,16 @@ const AnalyticsConsentModal: React.FC = () => {
 
   return (
     <Modal
-      open
-      disableBackdropClick
-      disableEscapeKeyDown
-      onClose={hideModal}
-      title="Help Improve Panther!"
+      onClose={() => {}}
+      title={showErrorConsent ? 'Welcome to Panther!' : 'Help us improve Panther!'}
+      aria-describedby="modal-subtitle"
+      {...rest}
     >
-      <Box width={600} px={100} pb={25}>
-        <Text size="large" color="grey300" mb={8}>
-          Opt-in to occasionally provide diagnostic information for improving reliability.
-          <b> All information is anonymized.</b>
+      <Box width={500} px={10}>
+        <Text fontSize="medium" mb={8} id="modal-subtitle">
+          {showErrorConsent
+            ? "We know you 're excited to begin securing your organization, but first, we need your consent on a couple of things"
+            : 'There a couple of things that need your review before continuing.'}
         </Text>
         {updateGeneralPreferencesError ? (
           <Alert
@@ -65,6 +73,8 @@ const AnalyticsConsentModal: React.FC = () => {
           />
         ) : (
           <AnalyticsConsentForm
+            showErrorConsent={showErrorConsent}
+            showProductAnalyticsConsent={showProductAnalyticsConsent}
             onSubmit={values =>
               saveConsentPreferences({
                 variables: {

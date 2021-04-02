@@ -21,15 +21,22 @@ package testutil
 // used for test code that should NOT be in production code
 
 import (
+	"bufio"
+	"io/ioutil"
+	"os"
+	"strings"
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/pkg/errors"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/panther-labs/panther/internal/log_analysis/log_processor/parsers"
 )
 
-// used by log parsers to validate records
+// For new parser tests use `CheckPantherParser` instead
+// Used by log parsers to validate records
 func EqualPantherLog(t *testing.T, expectedEvent *parsers.PantherLog, events []*parsers.PantherLog, parseErr error) {
 	require.NoError(t, parseErr)
 	require.Equal(t, 1, len(events))
@@ -72,4 +79,117 @@ func CheckPantherParser(t *testing.T, log string, parser parsers.LogParser, expe
 		expect := expectMore[i]
 		EqualPantherLog(t, expect, []*parsers.PantherLog{result}, nil)
 	}
+}
+
+func MustReadFileString(filename string) string {
+	data, err := ioutil.ReadFile(filename)
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
+}
+
+func CheckParserSamplesJSONL(t *testing.T, filename string, parser parsers.LogParser) {
+	t.Helper()
+	blank := parser.New()
+	lines := MustReadFileJSONLines(filename)
+	for i, line := range lines {
+		_, err := blank.Parse(line)
+		require.NoError(t, err, "failed to parse line %d", i)
+	}
+}
+
+func MustReadFileJSONLines(filename string) (lines []string) {
+	fd, err := os.Open(filename)
+	if err != nil {
+		panic(errors.Wrapf(err, "Failed to open file %q", filename))
+	}
+	scanner := bufio.NewScanner(fd)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) > 0 {
+			lines = append(lines, scanner.Text())
+		}
+	}
+	if scanner.Err() != nil {
+		panic(errors.Wrap(scanner.Err(), "encountered issue while reading file"))
+	}
+	return
+}
+
+type ParserConfig map[string]interface{}
+
+func AlwaysFailParser(err error) *MockParser {
+	p := MockParser{}
+	p.On("Parse", mock.AnythingOfType("string")).Return(([]*parsers.Result)(nil), err)
+	return &p
+}
+
+type MockParser struct {
+	mock.Mock
+}
+
+func (args ParserConfig) Parser() *MockParser {
+	p := &MockParser{}
+	for log, result := range args {
+		var err error
+		var results []*parsers.Result
+		switch x := result.(type) {
+		case error:
+			err = x
+		case []*parsers.PantherLog:
+			results, err = parsers.ToResults(x, nil)
+		case *parsers.PantherLog:
+			results, err = x.Results()
+		case []*parsers.Result:
+			results = x
+		case parsers.Result:
+			results = []*parsers.Result{&x}
+		case *parsers.Result:
+			results = []*parsers.Result{x}
+		}
+		p.On("Parse", log).Return(results, err)
+	}
+	p.On("Parse", mock.AnythingOfType("string")).Return(([]*parsers.Result)(nil), errors.New("invalid log"))
+	return p
+}
+
+func (p *MockParser) ParseLog(log string) ([]*parsers.Result, error) {
+	args := p.MethodCalled("Parse", log)
+	return args.Get(0).([]*parsers.Result), args.Error(1)
+}
+
+func (p *MockParser) RequireLessOrEqualNumberOfCalls(t *testing.T, method string, number int) {
+	t.Helper()
+	timesCalled := 0
+	for _, call := range p.Calls {
+		if call.Method == method {
+			timesCalled++
+		}
+	}
+	require.LessOrEqual(t, timesCalled, number)
+}
+
+func CheckPantherMultiline(t *testing.T, logs string, parser parsers.LogParser, expect ...*parsers.PantherLog) {
+	t.Helper()
+	p := parser.New()
+	scanner := bufio.NewScanner(strings.NewReader(logs))
+	var actual []*parsers.PantherLog
+	for scanner.Scan() {
+		log := scanner.Text()
+
+		results, err := p.Parse(log)
+		require.NoError(t, err)
+		actual = append(actual, results...)
+	}
+	require.Equal(t, len(expect), len(actual))
+	for i, result := range actual {
+		expect := expect[i]
+		EqualPantherLog(t, expect, []*parsers.PantherLog{result}, nil)
+	}
+}
+
+func NewRawMessage(jsonString string) *jsoniter.RawMessage {
+	rawMsg := (jsoniter.RawMessage)(jsonString)
+	return &rawMsg
 }

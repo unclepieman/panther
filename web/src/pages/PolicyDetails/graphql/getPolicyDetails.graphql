@@ -1,0 +1,22 @@
+query GetPolicyDetails(
+  $policyDetailsInput: GetPolicyInput!
+  $resourcesForPolicyInput: ResourcesForPolicyInput!
+) {
+  policy(input: $policyDetailsInput) {
+    ...PolicyDetails
+  }
+  resourcesForPolicy(input: $resourcesForPolicyInput) {
+    totals {
+      active {
+        fail
+        pass
+        error
+      }
+      suppressed {
+        fail
+        pass
+        error
+      }
+    }
+  }
+}

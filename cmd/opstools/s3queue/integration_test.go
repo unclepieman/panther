@@ -1,6 +1,25 @@
 package s3queue
 
+/**
+ * Panther is a Cloud-Native SIEM for the Modern Security Team.
+ * Copyright (C) 2020 Panther Labs Inc
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -13,6 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/panther-labs/panther/cmd/opstools"
 	"github.com/panther-labs/panther/cmd/opstools/testutils"
 )
 
@@ -65,12 +85,23 @@ func TestIntegrationS3queue(t *testing.T) {
 	err = testutils.CreateQueue(sqsClient, toq)
 	require.NoError(t, err)
 
-	stats := &Stats{}
-	err = S3Queue(awsSession, fakeAccountID, s3Path, s3Region, toq, concurrency, numberOfFiles, false, stats)
+	input := &Input{
+		DriverInput: DriverInput{
+			Logger:      opstools.MustBuildLogger(true),
+			Account:     fakeAccountID,
+			QueueName:   toq,
+			Concurrency: concurrency,
+		},
+		Session:  awsSession,
+		S3Path:   s3Path,
+		S3Region: s3Region,
+		Limit:    numberOfFiles,
+	}
+	err = S3Queue(context.TODO(), input)
 	require.NoError(t, err)
-	assert.Equal(t, numberOfFiles, (int)(stats.NumFiles))
+	assert.Equal(t, numberOfFiles, (int)(input.Stats.NumFiles))
 
-	numberSentMessages, err := testutils.CountMessagesInQueue(sqsClient, toq, messageBatchSize, visibilityTimeoutSeconds)
+	numberSentMessages, _, err := testutils.CountMessagesInQueue(sqsClient, toq, messageBatchSize, visibilityTimeoutSeconds)
 	assert.NoError(t, err)
 	assert.Equal(t, numberOfFiles, numberSentMessages)
 

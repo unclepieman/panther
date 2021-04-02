@@ -17,39 +17,54 @@
  */
 
 import React from 'react';
-import { Card, useSnackbar } from 'pouncejs';
-import urls from 'Source/urls';
+import { useSnackbar } from 'pouncejs';
 import Page404 from 'Pages/404';
 import useRouter from 'Hooks/useRouter';
+import withSEO from 'Hoc/withSEO';
 import { extractErrorMessage } from 'Helpers/utils';
+import { EventEnum, SrcEnum, trackError, TrackErrorEnum, trackEvent } from 'Helpers/analytics';
 import ComplianceSourceWizard from 'Components/wizards/ComplianceSourceWizard';
 import { useGetComplianceSource } from './graphql/getComplianceSource.generated';
 import { useUpdateComplianceSource } from './graphql/updateComplianceSource.generated';
 
 const EditComplianceSource: React.FC = () => {
   const { pushSnackbar } = useSnackbar();
-  const { match, history } = useRouter<{ id: string }>();
+  const { match } = useRouter<{ id: string }>();
+
   const { data, error: getError } = useGetComplianceSource({
     variables: { id: match.params.id },
     onError: error => {
       pushSnackbar({
-        title: extractErrorMessage(error) || 'An unknown error occured',
+        title: extractErrorMessage(error) || 'An unknown error occurred',
         variant: 'error',
       });
     },
   });
 
-  const [updateComplianceSource, { error: updateError }] = useUpdateComplianceSource({
-    onCompleted: () => history.push(urls.compliance.sources.list()),
+  const [updateComplianceSource] = useUpdateComplianceSource({
+    onCompleted: () =>
+      trackEvent({ event: EventEnum.UpdatedComplianceSource, src: SrcEnum.ComplianceSources }),
+    onError: err => {
+      trackError({
+        event: TrackErrorEnum.FailedToUpdateComplianceSource,
+        src: SrcEnum.ComplianceSources,
+      });
+
+      // Defining an `onError` catches the API exception. We need to re-throw it so that it
+      // can be caught by `ValidationPanel` which checks for API errors
+      throw err;
+    },
   });
 
   const initialValues = React.useMemo(
     () => ({
-      integrationId: data?.getComplianceIntegration.integrationId,
+      integrationId: match.params.id,
       integrationLabel: data?.getComplianceIntegration.integrationLabel ?? 'Loading...',
       awsAccountId: data?.getComplianceIntegration.awsAccountId ?? 'Loading...',
       cweEnabled: data?.getComplianceIntegration.cweEnabled ?? false,
       remediationEnabled: data?.getComplianceIntegration.remediationEnabled ?? false,
+      regionIgnoreList: data?.getComplianceIntegration.regionIgnoreList ?? [],
+      resourceTypeIgnoreList: data?.getComplianceIntegration.resourceTypeIgnoreList ?? [],
     }),
     [data]
   );
@@ -60,25 +75,24 @@ const EditComplianceSource: React.FC = () => {
   }
 
   return (
-    <Card p={9} mb={6}>
-      <ComplianceSourceWizard
-        initialValues={initialValues}
-        externalErrorMessage={updateError && extractErrorMessage(updateError)}
-        onSubmit={values =>
-          updateComplianceSource({
-            variables: {
-              input: {
-                integrationId: match.params.id,
-                integrationLabel: values.integrationLabel,
-                cweEnabled: values.cweEnabled,
-                remediationEnabled: values.remediationEnabled,
-              },
+    <ComplianceSourceWizard
+      initialValues={initialValues}
+      onSubmit={values =>
+        updateComplianceSource({
+          variables: {
+            input: {
+              integrationId: values.integrationId,
+              integrationLabel: values.integrationLabel,
+              cweEnabled: values.cweEnabled,
+              remediationEnabled: values.remediationEnabled,
+              regionIgnoreList: values.regionIgnoreList,
+              resourceTypeIgnoreList: values.resourceTypeIgnoreList,
             },
-          })
-        }
-      />
-    </Card>
+          },
+        })
+      }
+    />
   );
 };
 
-export default EditComplianceSource;
+export default withSEO({ title: 'Edit Cloud Security Source' })(EditComplianceSource);

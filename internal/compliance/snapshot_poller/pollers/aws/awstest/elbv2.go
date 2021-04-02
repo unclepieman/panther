@@ -36,7 +36,7 @@ var (
 				LoadBalancerArn:       aws.String("arn:aws:elasticloadbalancing:us-west-2:111111111111:loadbalancer/app/panther-test/aaaaaaaaaaaaa"),
 				DNSName:               aws.String("internal-panther-test-123456789.us-west-2.elb.amazonaws.com"),
 				CanonicalHostedZoneId: aws.String("AAAAA123"),
-				CreatedTime:           ExampleDate,
+				CreatedTime:           &ExampleTime,
 				LoadBalancerName:      aws.String("panther-test"),
 				Scheme:                aws.String("internal"),
 				VpcId:                 aws.String("vpc-aaaa66666"),
@@ -60,6 +60,44 @@ var (
 				IpAddressType: aws.String("ipv4"),
 			},
 		},
+	}
+	ExampleDescribeNetworkLoadBalancersOutput = &elbv2.DescribeLoadBalancersOutput{
+		LoadBalancers: []*elbv2.LoadBalancer{
+			{
+				LoadBalancerArn:       aws.String("arn:aws:elasticloadbalancing:us-west-2:222222222222:loadbalancer/app/panther-test/bbbbbbbbbbbb"),
+				DNSName:               aws.String("internal-panther-test-987654321.us-west-2.elb.amazonaws.com"),
+				CanonicalHostedZoneId: aws.String("BBBB123"),
+				CreatedTime:           &ExampleTime,
+				LoadBalancerName:      aws.String("panther-test"),
+				Scheme:                aws.String("internal"),
+				VpcId:                 aws.String("vpc-bbbb66666"),
+				State: &elbv2.LoadBalancerState{
+					Code: aws.String("active"),
+				},
+				Type: aws.String("network"),
+				AvailabilityZones: []*elbv2.AvailabilityZone{
+					{
+						ZoneName: aws.String("us-west-2c"),
+						SubnetId: aws.String("subnet-1234eee"),
+					},
+					{
+						ZoneName: aws.String("us-west-2d"),
+						SubnetId: aws.String("subnet-1234fff"),
+					},
+				},
+				SecurityGroups: []*string{
+					aws.String("sg-1234asdf"),
+				},
+				IpAddressType: aws.String("ipv4"),
+			},
+		},
+	}
+	ExampleDescribeLoadBalancersOutputContinue = &elbv2.DescribeLoadBalancersOutput{
+		LoadBalancers: []*elbv2.LoadBalancer{
+			ExampleDescribeLoadBalancersOutput.LoadBalancers[0],
+			ExampleDescribeLoadBalancersOutput.LoadBalancers[0],
+		},
+		NextMarker: aws.String("1"),
 	}
 
 	ExampleDescribeTags = &elbv2.DescribeTagsOutput{
@@ -164,7 +202,7 @@ var (
 // Elbv2 mock
 
 // SetupMockElbv2 is used to override the Elbv2 Client initializer
-func SetupMockElbv2(sess *session.Session, cfg *aws.Config) interface{} {
+func SetupMockElbv2(_ *session.Session, _ *aws.Config) interface{} {
 	return MockElbv2ForSetup
 }
 

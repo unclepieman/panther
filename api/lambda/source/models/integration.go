@@ -18,68 +18,212 @@ package models
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
 
-// SourceIntegration is the dynamodb item corresponding to the PutIntegration route.
+	"github.com/panther-labs/panther/internal/compliance/snapshotlogs"
+	"github.com/panther-labs/panther/internal/log_analysis/log_processor/logtypes"
+	"github.com/panther-labs/panther/pkg/stringset"
+)
+
+// SourceIntegration represents a Panther integration with a source.
 type SourceIntegration struct {
-	*SourceIntegrationMetadata
-	*SourceIntegrationStatus
-	*SourceIntegrationScanInformation
+	SourceIntegrationMetadata
+	SourceIntegrationStatus
+	SourceIntegrationScanInformation
 }
 
-// SourceIntegrationMetadata is general settings and metadata for an integration.
-type SourceIntegrationMetadata struct {
-	AWSAccountID       *string    `json:"awsAccountId"`
-	CreatedAtTime      *time.Time `json:"createdAtTime"`
-	CreatedBy          *string    `json:"createdBy"`
-	IntegrationID      *string    `json:"integrationId"`
-	IntegrationLabel   *string    `json:"integrationLabel"`
-	IntegrationType    *string    `json:"integrationType"`
-	RemediationEnabled *bool      `json:"remediationEnabled"`
-	CWEEnabled         *bool      `json:"cweEnabled"`
-	ScanIntervalMins   *int       `json:"scanIntervalMins"`
-	S3Bucket           *string    `json:"s3Bucket,omitempty"`
-	S3Prefix           *string    `json:"s3Prefix,omitempty"`
-	KmsKey             *string    `json:"kmsKey,omitempty"`
-	LogTypes           []*string  `json:"logTypes,omitempty"`
-	LogProcessingRole  *string    `json:"logProcessingRole,omitempty"`
-	StackName          *string    `json:"stackName,omitempty"`
-}
-
-// SourceIntegrationStatus provides context that the full scan works and that events are being received.
+// SourceIntegrationStatus provides information about the status of a source
 type SourceIntegrationStatus struct {
-	ScanStatus  *string `json:"scanStatus"`
-	EventStatus *string `json:"eventStatus"`
+	ScanStatus        string     `json:"scanStatus,omitempty"`
+	EventStatus       string     `json:"eventStatus,omitempty"`
+	LastEventReceived *time.Time `json:"lastEventReceived,omitempty"`
 }
 
 // SourceIntegrationScanInformation is detail about the last snapshot.
 type SourceIntegrationScanInformation struct {
-	LastScanEndTime      *time.Time `json:"lastScanEndTime"`
-	LastScanErrorMessage *string    `json:"lastScanErrorMessage"`
-	LastScanStartTime    *time.Time `json:"lastScanStartTime"`
+	LastScanStartTime    *time.Time `json:"lastScanStartTime,omitempty"`
+	LastScanEndTime      *time.Time `json:"lastScanEndTime,omitempty"`
+	LastScanErrorMessage string     `json:"lastScanErrorMessage,omitempty"`
+}
+
+// SourceIntegrationMetadata is general settings and metadata for an integration.
+//nolint:maligned
+type SourceIntegrationMetadata struct {
+	AWSAccountID       string    `json:"awsAccountId,omitempty"`
+	CreatedAtTime      time.Time `json:"createdAtTime,omitempty"`
+	CreatedBy          string    `json:"createdBy,omitempty"`
+	IntegrationID      string    `json:"integrationId,omitempty"`
+	IntegrationLabel   string    `json:"integrationLabel,omitempty"`
+	IntegrationType    string    `json:"integrationType,omitempty"`
+	RemediationEnabled *bool     `json:"remediationEnabled,omitempty"`
+	CWEEnabled         *bool     `json:"cweEnabled,omitempty"`
+	ScanIntervalMins   int       `json:"scanIntervalMins,omitempty"`
+
+	// optional fields for snapshot-poller filtering
+	Enabled                 *bool    `json:"enabled,omitempty"`
+	RegionIgnoreList        []string `json:"regionIgnoreList,omitempty"`
+	ResourceTypeIgnoreList  []string `json:"resourceTypeIgnoreList,omitempty"`
+	ResourceRegexIgnoreList []string `json:"resourceRegexIgnoreList,omitempty"`
+
+	// fields specific for an s3 integration (plus AWSAccountID, StackName)
+	S3Bucket          string           `json:"s3Bucket,omitempty"`
+	S3PrefixLogTypes  S3PrefixLogtypes `json:"s3PrefixLogTypes,omitempty"`
+	KmsKey            string           `json:"kmsKey,omitempty"`
+	LogProcessingRole string           `json:"logProcessingRole,omitempty"`
+	// Whether Panther should configure the user's bucket notifications.
+	ManagedBucketNotifications bool `json:"managedBucketNotifications"`
+	// This is only needed for the API response, so that the UI can show a warning message
+	// if Panther couldn't setup bucket notifications. Failing to do so doesn't
+	// block any other source operations like saving to the DB.
+	NotificationsConfigurationSucceeded bool `json:"notificationsConfigurationSucceeded"`
+
+	StackName string `json:"stackName,omitempty"`
+
+	SqsConfig *SqsConfig `json:"sqsConfig,omitempty"`
+
+	// PantherVersion is the version of Panther that the source was created with.
+	PantherVersion string `json:"pantherVersion,omitempty"`
+}
+
+type ManagedS3Resources struct {
+	// Storing the topic's ARN
+	// - saves us from an extra network call when checking whether Panther managed to create the topic
+	// - we don't ever delete it from AWS, so we need to show to the user the exact resource that will be kept.
+	TopicARN *string `json:"topicARN"`
+	// Only the IDs from configurations that Panther manages. The bucket may have
+	// other user-created topic configurations as well.
+	TopicConfigurationIDs []string `json:"topicConfigIds"`
+}
+
+// S3PrefixLogtypesMapping contains the logtypes Panther should parse for this s3 prefix.
+type S3PrefixLogtypesMapping struct {
+	S3Prefix string   `json:"prefix"`
+	LogTypes []string `json:"logTypes" validate:"required,min=1"`
+}
+
+type S3PrefixLogtypes []S3PrefixLogtypesMapping
+
+func (pl S3PrefixLogtypes) LogTypes() []string {
+	var logTypes []string
+	for _, m := range pl {
+		logTypes = stringset.Append(logTypes, m.LogTypes...)
+	}
+	return logTypes
+}
+
+func (pl S3PrefixLogtypes) S3Prefixes() []string {
+	prefixes := make([]string, len(pl))
+	for i, m := range pl {
+		prefixes[i] = m.S3Prefix
+	}
+	return prefixes
+}
+
+// Return the S3PrefixLogtypesMapping whose prefix is the longest one that matches the objectKey.
+func (pl S3PrefixLogtypes) LongestPrefixMatch(objectKey string) (bestMatch S3PrefixLogtypesMapping, matched bool) {
+	for _, m := range pl {
+		if strings.HasPrefix(objectKey, m.S3Prefix) && len(m.S3Prefix) >= len(bestMatch.S3Prefix) {
+			bestMatch = m
+			matched = true
+		}
+	}
+	return bestMatch, matched
+}
+
+// Note: Don't use this for classification as the S3 source has different
+// log types per prefix defined.
+func (s *SourceIntegration) RequiredLogTypes() (logTypes []string) {
+	switch s.IntegrationType {
+	case IntegrationTypeAWSScan:
+		return logtypes.CollectNames(snapshotlogs.LogTypes())
+	case IntegrationTypeAWS3:
+		return s.S3PrefixLogTypes.LogTypes()
+	case IntegrationTypeSqs:
+		return s.SqsConfig.LogTypes
+	default:
+		// should not be reached
+		panic(fmt.Sprintf("Could not determine logtypes for source {id:%s label:%s type:%s}",
+			s.IntegrationID, s.IntegrationLabel, s.IntegrationType))
+	}
+}
+
+func (s *SourceIntegration) RequiredLogProcessingRole() string {
+	switch typ := s.IntegrationType; typ {
+	case IntegrationTypeAWS3, IntegrationTypeAWSScan:
+		return s.LogProcessingRole
+	case IntegrationTypeSqs:
+		return s.SqsConfig.LogProcessingRole
+	default:
+		panic("Unknown type " + typ)
+	}
+}
+
+// Return the s3 bucket and prefixes configured to hold input data for this source.
+// For an s3 source, bucket and prefixes are user inputs.
+func (s *SourceIntegration) S3Info() (bucket string, prefixes []string) {
+	switch s.IntegrationType {
+	case IntegrationTypeAWSScan:
+		return s.S3Bucket, []string{"cloudsecurity"}
+	case IntegrationTypeAWS3:
+		return s.S3Bucket, s.S3PrefixLogTypes.S3Prefixes()
+	case IntegrationTypeSqs:
+		return s.SqsConfig.S3Bucket, []string{"forwarder"}
+	default:
+		// should not be reached
+		panic(fmt.Sprintf("Could not determine s3 info for source {id:%s label:%s type:%s}",
+			s.IntegrationID, s.IntegrationLabel, s.IntegrationType))
+	}
 }
 
 type SourceIntegrationHealth struct {
-	AWSAccountID    string `json:"awsAccountId"`
 	IntegrationType string `json:"integrationType"`
 
 	// Checks for cloudsec integrations
-	AuditRoleStatus       SourceIntegrationItemStatus `json:"auditRoleStatus"`
-	CWERoleStatus         SourceIntegrationItemStatus `json:"cweRoleStatus"`
-	RemediationRoleStatus SourceIntegrationItemStatus `json:"remediationRoleStatus"`
+	AuditRoleStatus       SourceIntegrationItemStatus `json:"auditRoleStatus,omitempty"`
+	CWERoleStatus         SourceIntegrationItemStatus `json:"cweRoleStatus,omitempty"`
+	RemediationRoleStatus SourceIntegrationItemStatus `json:"remediationRoleStatus,omitempty"`
 
 	// Checks for log analysis integrations
-	ProcessingRoleStatus SourceIntegrationItemStatus `json:"processingRoleStatus"`
-	S3BucketStatus       SourceIntegrationItemStatus `json:"s3BucketStatus"`
-	KMSKeyStatus         SourceIntegrationItemStatus `json:"kmsKeyStatus"`
+	ProcessingRoleStatus SourceIntegrationItemStatus `json:"processingRoleStatus,omitempty"`
+	S3BucketStatus       SourceIntegrationItemStatus `json:"s3BucketStatus,omitempty"`
+	KMSKeyStatus         SourceIntegrationItemStatus `json:"kmsKeyStatus,omitempty"`
+	// GetObject check is not available to sources created in Panther<1.16
+	GetObjectStatus *SourceIntegrationItemStatus `json:"getObjectStatus,omitempty"`
+	// BucketNotificationsStatus is the result of checking the bucket's notifications configuration.
+	// It is populated only if the log processing role has the s3:GetBucketNotification permission. This is
+	// added to our provided CFN template if user opts for Panther-managed bucket notifications.
+	BucketNotificationsStatus *SourceIntegrationItemStatus `json:"bucketNotificationsStatus,omitempty"`
+
+	// Checks for Sqs integrations
+	SqsStatus SourceIntegrationItemStatus `json:"sqsStatus"`
 }
 
 type SourceIntegrationItemStatus struct {
-	Healthy      *bool   `json:"healthy"`
-	ErrorMessage *string `json:"errorMessage"`
+	Healthy      bool   `json:"healthy"`
+	Message      string `json:"message"`
+	ErrorMessage string `json:"rawErrorMessage,omitempty"`
 }
 
 type SourceIntegrationTemplate struct {
-	Body      *string `json:"body"`
-	StackName *string `json:"stackName"`
+	Body      string `json:"body"`
+	StackName string `json:"stackName"`
+}
+
+type SqsConfig struct {
+	// The log types associated with the source. Needs to be set by UI.
+	LogTypes []string `json:"logTypes" validate:"required,min=1"`
+	// The AWS Principals that are allowed to send data to this source. Needs to be set by UI.
+	AllowedPrincipalArns []string `json:"allowedPrincipalArns"`
+	// The ARNS (e.g. SNS topic ARNs) that are allowed to send data to this source. Needs to be set by UI.
+	AllowedSourceArns []string `json:"allowedSourceArns"`
+
+	// The Panther-internal S3 bucket where the data from this source will be available
+	S3Bucket string `json:"s3Bucket"`
+	// The Role that the log processor can use to access this data
+	LogProcessingRole string `json:"logProcessingRole"`
+	// THe URL of the SQS queue
+	QueueURL string `json:"queueUrl"`
 }

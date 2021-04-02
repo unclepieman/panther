@@ -16,16 +16,22 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { Box, Breadcrumbs as PounceBreadcrumbs } from 'pouncejs';
+import { Breadcrumbs as PounceBreadcrumbs } from 'pouncejs';
 import * as React from 'react';
 import { isGuid, capitalize, shortenId, isHash } from 'Helpers/utils';
 import { Link as RRLink } from 'react-router-dom';
 import useRouter from 'Hooks/useRouter';
+import ReactDOM from 'react-dom';
+import useForceUpdate from 'Hooks/useForceUpdate';
 
 const transformBreadcrumbText = text =>
   isHash(text.toLowerCase()) ? shortenId(text).toLowerCase() : text;
 
-const Breadcrumbs: React.FC = () => {
+interface BreadcrumbComposition {
+  Actions: React.FC;
+}
+
+const Breadcrumbs: React.FC & BreadcrumbComposition = () => {
   const {
     location: { pathname },
   } = useRouter();
@@ -40,34 +46,64 @@ const Breadcrumbs: React.FC = () => {
     // is before-and-including our key). The key is essentially the URL path itself just prettified
     // for displat
     if (!pathKeys.length) {
-      return [
-        {
-          href: '/',
-          text: 'Home',
-        },
-      ];
+      return [];
     }
 
-    return pathKeys.map(key => ({
-      href: `${pathname.substr(0, pathname.indexOf(`/${key}/`))}/${key}/`,
-      text: decodeURIComponent(key)
-        .replace(/([-_])+/g, ' ')
-        .split(' ')
-        .map(capitalize)
-        .join(' '),
-    }));
+    return [
+      {
+        href: '/',
+        text: 'Home',
+      },
+      ...pathKeys.map(key => ({
+        href: `${pathname.substr(0, pathname.indexOf(`/${key}/`))}/${key}/`,
+        text: decodeURIComponent(key)
+          .replace(/([-_])+/g, ' ')
+          .split(' ')
+          .map(capitalize)
+          .map(transformBreadcrumbText)
+          .join(' '),
+      })),
+    ];
   }, [pathname]);
 
-  return (
-    <PounceBreadcrumbs
-      items={fragments}
-      itemRenderer={item => (
-        <Box as={RRLink} to={item.href} display="block" maxWidth="450px" truncated>
-          {transformBreadcrumbText(item.text)}
-        </Box>
-      )}
-    />
-  );
+  return <PounceBreadcrumbs items={fragments} as={RRLink} />;
 };
+
+const BreadcrumbActions: React.FC = ({ children }) => {
+  const getMountPoint = () => document.querySelector('#main-header') as HTMLElement;
+
+  const mountpoint = React.useRef<HTMLElement>(getMountPoint());
+  const forceUpdate = useForceUpdate();
+
+  // This may look extremely weird, I know. This is here to prevent race conditions. You see, when
+  // a page initially loads the DOM isn't constructed yet by React.
+  //
+  // This component expects a `main-header` element to be present, which will only be, if React has
+  // already rendered the app. Unfortunately, React synchronizes all flushes to the DOM, so in some
+  // pages, this component, will be rendered at *the same time* as the entire app.
+  //
+  // This means  that the mountpoint is `null` since the code in this component executes before the
+  // initial flushing to the DOM has happened. To handle  such scenarios, we return early if there
+  // is no mountpoint available and "force a re-render" when the DOM has been constructed (we know that
+  // since effects happen after the DOM is constructed) which will  guarantee that the
+  // mountpoint exists.
+  //
+  // This behavior only happens when the `<Breadcrumb.Actions>` renders at the same time as the
+  // entire app. Sometimes though the app is already loaded when a `<Breadcrumb.Actions>` renders,
+  // so to avoid un-necessarily "forcing a re-render", we use the `mountpoint ref` below with
+  // certain checks to see if that needs to be done or not
+  React.useLayoutEffect(() => {
+    // if we originally tried and failed to mount
+    if (!mountpoint.current) {
+      // calculate the mountpoint element and try once again
+      mountpoint.current = getMountPoint();
+      forceUpdate();
+    }
+  }, []);
+
+  return mountpoint.current ? ReactDOM.createPortal(children, mountpoint.current) : null;
+};
+
+Breadcrumbs.Actions = React.memo(BreadcrumbActions);
 
 export default Breadcrumbs;

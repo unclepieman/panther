@@ -19,77 +19,137 @@ Transform: AWS::Serverless-2016-10-31
 Description: Shared infrastructure for both cloud security and log analysis
 
 Parameters:
-  # Passed from bootstrap.yml or api_gateway.yml
+  # Alphabetize parameters so it's easy to compare side-by-side with other code that passes values
+  # and because the CloudFormation console always shows parameters in alphabetical order.
+  AlarmTopicArn:
+    Type: String
+    Description: SNS topic for CloudWatch alarms
+    # Example: "arn:aws:sns:us-west-2:111122223333:panther-cw-alarms"
+    AllowedPattern: '^arn:(aws|aws-cn|aws-us-gov):sns:[a-z]{2}-[a-z]{4,9}-[1-9]:\d{12}:\S+$'
+  AnalysisVersionsBucket:
+    Type: String
+    Description: Name of the S3 bucket which will store python revision history
+    AllowedPattern: '^[a-z0-9.-]{3,63}$'
   AppDomainURL:
     Type: String
     Description: Panther App Domain used as a link for the customer in the password reset email
-  AnalysisVersionsBucket:
-    Type: String
-    Description: S3 bucket for python revision history
-  AnalysisApiId:
-    Type: String
-    Description: Analysis API gateway ID
-  ComplianceApiId:
-    Type: String
-    Description: Compliance API gateway ID
-  OutputsKeyId:
-    Type: String
-    Description: KMS key for encrypting alert outputs
-  SqsKeyId:
-    Type: String
-    Description: KMS key for encrypting SQS queues
-  UserPoolId:
-    Type: String
-    Description: Cognito user pool ID
-
-  # Options from config file
+    # Example: "web-115120885.us-west-2.elb.amazonaws.com" or "app.example.com"
+    AllowedPattern: '^[a-z0-9.-]+\.[a-z]{2,}$'
   CloudWatchLogRetentionDays:
     Type: Number
     Description: CloudWatch log retention period
-    Default: 365
+    MinValue: 1
+  CompanyDisplayName:
+    Type: String
+    Description: Company name displayed in Settings > General
+    MinLength: 1
+  CompanyEmail:
+    Type: String
+    Description: Company email displayed in Settings > General
+    AllowedPattern: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+  CustomResourceVersion:
+    Type: String
+    Description: Forces updates to custom resources when changed
+    MinLength: 1
   Debug:
     Type: String
-    Default: false
     Description: Toggle debug logging
     AllowedValues: [true, false]
+  DynamoScalingRoleArn:
+    Type: String
+    Description: IAM role arn for DynamoDB auto-scaling
+    # Example: "arn:aws:iam::111122223333:role/panther-bootstrap-DynamoScalingRole-UVZQF2N2BBRN"
+    AllowedPattern: '^arn:(aws|aws-cn|aws-us-gov):iam::\d{12}:role\/\S+$'
+  InputDataBucket:
+    Type: String
+    Description: Name of the S3 bucket will contain data meant to be processed by log analysis
+    AllowedPattern: '^[a-z0-9.-]{3,63}$'
+  InputDataTopicArn:
+    Type: String
+    Description: SNS topic ARN for data that is sent as input to Log Analysis
+    AllowedPattern: '^arn:(aws|aws-cn|aws-us-gov):sns:[a-z]{2}-[a-z]{4,9}-[1-9]:\d{12}:\S+$'
+  KvTableBillingMode:
+    Type: String
+    Description: Configure billing mode for DynamoDB table panther-kv-store. This table is used by python policies & rules to store state, and provisioned billing may be cheaper if this feature is used heavily.
+    AllowedValues: [PROVISIONED, PAY_PER_REQUEST]
   LayerVersionArns:
     Type: CommaDelimitedList
     Description: List of LayerVersion ARNs to attach to each function
-    Default: ''
+  OutputsKeyId:
+    Type: String
+    Description: KMS key for encrypting alert outputs
+    # Example: "484fb80c-4ae5-40d0-b22a-bdd5d0953b3e"
+    AllowedPattern: '^[0-9a-f-]{36}$'
+  PantherVersion:
+    Type: String
+    Description: The base semantic version of the current deployment (e.g. `1.3.0`)
+    AllowedPattern: '^\d+\.\d+\.\d+(-.+)?$'
+  SqsKeyId:
+    Type: String
+    Description: KMS key for encrypting SQS queues
+    AllowedPattern: '^[0-9a-f-]{36}$'
   TracingMode:
     Type: String
     Description: Enable XRay tracing on Lambda and API Gateway
     AllowedValues: ['', Active, PassThrough]
-    Default: ''
+  UserPoolId:
+    Type: String
+    Description: Cognito user pool ID
+    # Example: "us-west-2_iHzBYf5SA"
+    AllowedPattern: '^[a-zA-Z0-9_-]{15,}$'
 
-  # Other
-  AlertRetryDurationMins:
-    Type: Number
-    Description: Alerts which fail to send will be retried for this duration
-    Default: 30
-    MinValue: 5
-    MaxValue: 10080 # 1 week
-  MinRetryDelaySecs:
-    Type: Number
-    Description: Wait at least this long before retrying a failed alert
-    Default: 30
-    MinValue: 1
-    MaxValue: 86400 # 1 day
-  MaxRetryDelaySecs:
-    Type: Number
-    Description: Wait at most this long before retrying a failed alert
-    Default: 300 # 5 mins
-    MinValue: 1
-    MaxValue: 86400 # 1 day
-  AlertSqsRetentionSec:
-    Type: Number
-    Description: Number of seconds SQS will retain a message in the alerts queue
-    Default: 259200 # 3 days
-    MinValue: 60
-    MaxValue: 1209600
+Mappings:
+  Alerts:
+    QueueRetention:
+      Seconds: 259200 # (3 days) How long SQS will retain messages in the alerts queue
+    RetryCount:
+      Max: 10 # Alerts which fail to send will be retried this many times
+    RetryDuration:
+      Minutes: 30 # Alerts which fail to send will be retried for this duration
+    MinRetryDelay:
+      Seconds: 30 # Wait at least this long before retrying a failed alert
+    MaxRetryDelay:
+      Seconds: 300 # Wait at most this long before retrying a failed alert
+
+  Functions:
+    AlertDelivery:
+      Memory: 128
+      Timeout: 60
+    AlertsAPI:
+      Memory: 256
+      Timeout: 60
+    AnalysisAPI:
+      Memory: 512
+      Timeout: 120
+    LayerManager:
+      Memory: 512
+      Timeout: 60
+    # The metrics API has a slightly higher timeout and memory size than most functions. The metrics
+    # API is only invoked based on user activity so should be called relatively infrequently, but
+    # when it is called it may make several AWS API calls and may need to hold several hundred
+    # thousand data points in memory before returning them.
+    MetricsAPI:
+      Memory: 256
+      Timeout: 180
+    OrganizationAPI:
+      Memory: 128
+      Timeout: 60
+    OutputsAPI:
+      Memory: 512
+      Timeout: 60
+    SourceAPI:
+      Memory: 128
+      Timeout: 60
+    UsersAPI:
+      Memory: 128
+      Timeout: 60
+    LogTypesAPI:
+      Memory: 128
+      Timeout: 60
 
 Conditions:
   AttachLayers: !Not [!Equals [!Join ['', !Ref LayerVersionArns], '']]
+  KvProvisioningEnabled: !Equals [!Ref KvTableBillingMode, PROVISIONED]
   TracingEnabled: !Not [!Equals ['', !Ref TracingMode]]
 
 Resources:
@@ -100,10 +160,17 @@ Resources:
       LogGroupName: /aws/lambda/panther-users-api
       RetentionInDays: !Ref CloudWatchLogRetentionDays
 
+  UsersAPIMetricFilters:
+    Type: Custom::LambdaMetricFilters
+    Properties:
+      CustomResourceVersion: !Ref CustomResourceVersion
+      LogGroupName: !Ref UsersAPILogGroup
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
   UsersAPIFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ../out/bin/internal/core/users_api/main
+      CodeUri: ../internal/core/users_api/main
       Description: CRUD actions for the cognito api
       Environment:
         Variables:
@@ -118,11 +185,11 @@ Resources:
       # * Failure of this lambda will impact user administration in the Panther user interface.
       # </cfndoc>
       Handler: main
-      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref 'AWS::NoValue']
-      MemorySize: 128
+      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref AWS::NoValue]
+      MemorySize: !FindInMap [Functions, UsersAPI, Memory]
       Runtime: go1.x
-      Timeout: 60
-      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref 'AWS::NoValue']
+      Timeout: !FindInMap [Functions, UsersAPI, Timeout]
+      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref AWS::NoValue]
       Policies:
         - Id: CognitoUserManagement
           Version: 2012-10-17
@@ -131,29 +198,28 @@ Resources:
               Action:
                 - cognito-idp:AdminCreateUser
                 - cognito-idp:AdminDeleteUser
-                - cognito-idp:AdminDisableUser
-                - cognito-idp:AdminEnableUser
                 - cognito-idp:AdminGetUser
                 - cognito-idp:AdminResetUserPassword
                 - cognito-idp:AdminUpdateUserAttributes
-                - cognito-idp:GetUser
+                - cognito-idp:AdminUserGlobalSignOut
                 - cognito-idp:ListUsers
               Resource: !Sub arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}
-        - Id: AppsyncManagement
-          Version: 2012-10-17
-          Statement:
-            - Effect: Allow
-              Action:
-                - appsync:GetGraphqlApi
-                - appsync:ListGraphqlApis
-                - appsync:UpdateGraphqlApi
-              Resource: !Sub arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:*
+
+  UsersAPIAlarms:
+    Type: Custom::LambdaAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      FunctionMemoryMB: !FindInMap [Functions, UsersAPI, Memory]
+      FunctionName: panther-users-api
+      FunctionTimeoutSec: !FindInMap [Functions, UsersAPI, Timeout]
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
 
   # Allow Cognito to invoke the users-api for custom triggers
   CustomMessageTriggerInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !GetAtt UsersAPIFunction.Arn
+      FunctionName: !Ref UsersAPIFunction
       Action: lambda:InvokeFunction
       Principal: cognito-idp.amazonaws.com
       SourceArn: !Sub arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}
@@ -178,16 +244,31 @@ Resources:
       # This ddb table stores general settings about an organizations.
       # </cfndoc>
 
+  OrganizationTableAlarms:
+    Type: Custom::DynamoDBAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+      TableName: panther-organization
+
   OrganizationAPILogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /aws/lambda/panther-organization-api
       RetentionInDays: !Ref CloudWatchLogRetentionDays
 
+  OrganizationAPIMetricFilters:
+    Type: Custom::LambdaMetricFilters
+    Properties:
+      CustomResourceVersion: !Ref CustomResourceVersion
+      LogGroupName: !Ref OrganizationAPILogGroup
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
   OrganizationAPIFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ../out/bin/internal/core/organization_api/main
+      CodeUri: ../internal/core/organization_api/main
       Description: CRUD actions for the organization database
       Environment:
         Variables:
@@ -198,11 +279,11 @@ Resources:
       # This lambda implements organization API to manage settings.
       # </cfndoc>
       Handler: main
-      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref 'AWS::NoValue']
-      MemorySize: 128
+      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref AWS::NoValue]
+      MemorySize: !FindInMap [Functions, OrganizationAPI, Memory]
       Runtime: go1.x
-      Timeout: 60
-      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref 'AWS::NoValue']
+      Timeout: !FindInMap [Functions, OrganizationAPI, Timeout]
+      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref AWS::NoValue]
       Policies:
         - Id: ManageOrganizationTable
           Version: 2012-10-17
@@ -213,23 +294,48 @@ Resources:
                 - dynamodb:Scan
               Resource: !GetAtt OrganizationTable.Arn
 
+  OrganizationAPIAlarms:
+    Type: Custom::LambdaAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      FunctionMemoryMB: !FindInMap [Functions, OrganizationAPI, Memory]
+      FunctionName: panther-organization-api
+      FunctionTimeoutSec: !FindInMap [Functions, OrganizationAPI, Timeout]
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  PantherSettings:
+    Type: Custom::PantherSettings
+    DependsOn: OrganizationAPIFunction
+    Properties:
+      # No CustomResourceVersion here because then every release would overwrite these settings,
+      # which the user might have changed from the general settings page in the web app.
+      DisplayName: !Ref CompanyDisplayName
+      Email: !Ref CompanyEmail
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
   ##### Analysis API #####
   AnalysisApiFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ../out/bin/internal/core/analysis_api/main
+      CodeUri: ../internal/core/analysis_api/main
       Description: Analysis API
       Environment:
         Variables:
           BUCKET: !Ref AnalysisVersionsBucket
-          COMPLIANCE_API_HOST: !Sub '${ComplianceApiId}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
-          COMPLIANCE_API_PATH: v1
           DEBUG: !Ref Debug
           LAYER_MANAGER_QUEUE_URL: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/panther-layer-manager-queue
+          PACK_TABLE: !Ref AnalysisPackTable
           POLICY_ENGINE: panther-policy-engine
           RULES_ENGINE: panther-rules-engine
           RESOURCE_QUEUE_URL: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/panther-resources-queue
           TABLE: !Ref AnalysisTable
+      Events:
+        SchedulePolling:
+          Type: Schedule
+          Properties:
+            Input: '{"PollPacks": {}}'
+            Schedule: rate(24 hours)
       FunctionName: panther-analysis-api
       # <cfndoc>
       # This lambda implements the analysis API which is responsible for
@@ -239,24 +345,20 @@ Resources:
       # * Failure of this lambda will prevent policies/rules from being created, updated, deleted. Additionally, policies and rules will stop being evaluated by the policy/rules engines.
       # </cfndoc>
       Handler: main
-      MemorySize: 512
-      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref 'AWS::NoValue']
+      MemorySize: !FindInMap [Functions, AnalysisAPI, Memory]
+      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref AWS::NoValue]
       Runtime: go1.x
-      Timeout: 120
-      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref 'AWS::NoValue']
+      Timeout: !FindInMap [Functions, AnalysisAPI, Timeout]
+      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref AWS::NoValue]
       Policies:
         - Id: InvokeApis
           Version: 2012-10-17
           Statement:
             - Effect: Allow
-              Action: execute-api:Invoke
-              Resource:
-                - !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ComplianceApiId}/v1/GET/describe-org
-                - !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ComplianceApiId}/v1/POST/delete
-                - !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${ComplianceApiId}/v1/POST/update
-            - Effect: Allow
               Action: lambda:InvokeFunction
               Resource:
+                - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-compliance-api
+                - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-logtypes-api
                 - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-policy-engine
                 - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-rules-engine
         - Id: ManageDataStores
@@ -270,6 +372,12 @@ Resources:
               Resource: !GetAtt AnalysisTable.Arn
             - Effect: Allow
               Action:
+                - dynamodb:*Item
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource: !GetAtt AnalysisPackTable.Arn
+            - Effect: Allow
+              Action:
                 - s3:DeleteObject # Does NOT grant permission to permanently delete versions
                 - s3:GetObject*
                 - s3:PutObject
@@ -279,25 +387,28 @@ Resources:
                 - s3:ListBucket
                 - s3:ListBucketVersions
               Resource: !Sub arn:${AWS::Partition}:s3:::${AnalysisVersionsBucket}
-        - Id: PublishToResourceQueue
+        - Id: PublishToQueues
           Version: 2012-10-17
           Statement:
             - Effect: Allow
               Action:
                 - sqs:SendMessage
                 - sqs:SendMessageBatch
-              Resource: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:panther-resources-queue
+              Resource:
+                - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:panther-layer-manager-queue
+                - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:panther-resources-queue
             - Effect: Allow
               Action:
                 - kms:Decrypt
                 - kms:GenerateDataKey
               Resource: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${SqsKeyId}
-        - Id: PublishToLayerManagerQueue
+        - Id: VerifyPantherAnalysis
           Version: 2012-10-17
           Statement:
             - Effect: Allow
-              Action: sqs:SendMessage
-              Resource: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:panther-layer-manager-queue
+              Action:
+                - kms:Verify
+              Resource: arn:aws:kms:us-west-2:349240696275:key/57e3be93-237b-4de2-886f-d1e1aaa38b09
 
   AnalysisApiLogGroup:
     Type: AWS::Logs::LogGroup
@@ -305,13 +416,22 @@ Resources:
       LogGroupName: /aws/lambda/panther-analysis-api
       RetentionInDays: !Ref CloudWatchLogRetentionDays
 
-  GatewayInvocationPermission: # allow API gateway to invoke analysis-api Lambda function
-    Type: AWS::Lambda::Permission
+  AnalysisApiMetricFilters:
+    Type: Custom::LambdaMetricFilters
     Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !Ref AnalysisApiFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AnalysisApiId}/*
+      CustomResourceVersion: !Ref CustomResourceVersion
+      LogGroupName: !Ref AnalysisApiLogGroup
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  AnalysisApiAlarms:
+    Type: Custom::LambdaAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      FunctionMemoryMB: !FindInMap [Functions, AnalysisAPI, Memory]
+      FunctionName: panther-analysis-api
+      FunctionTimeoutSec: !FindInMap [Functions, AnalysisAPI, Timeout]
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
 
   AnalysisTable:
     Type: AWS::DynamoDB::Table
@@ -336,6 +456,45 @@ Resources:
       # * Processing of policies could be slowed or stopped if there are errors/throttles.
       # * The Panther user interface could be impacted.
       # </cfndoc>
+
+  AnalysisTableAlarms:
+    Type: Custom::DynamoDBAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+      TableName: panther-analysis
+
+  AnalysisPackTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: True
+      TableName: panther-analysis-packs
+      # <cfndoc>
+      # This ddb table holds the packs that manages packs in `panther-analysis-packs` ddb and
+      # is managed by the `panther-analysis-api`.
+      #
+      # Failure Impact
+      # * Updates or rollbacks to enabled detection packs could be delayed
+      # </cfndoc>
+
+  AnalysisPackTableAlarms:
+    Type: Custom::DynamoDBAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+      TableName: panther-analysis-packs
 
   ##### Outputs API #####
   OutputsTable:
@@ -370,10 +529,18 @@ Resources:
       # * The Panther user interface for managing destinations may be impacted.
       # </cfndoc>
 
+  OutputsTableAlarms:
+    Type: Custom::DynamoDBAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+      TableName: panther-outputs
+
   OutputsApiFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ../out/bin/internal/core/outputs_api/main
+      CodeUri: ../internal/core/outputs_api/main
       Description: CRUD actions for alert outputs
       Environment:
         Variables:
@@ -389,11 +556,11 @@ Resources:
       # * Failure of this lambda will impact the Panther user interface for managing destinations.
       # </cfndoc>
       Handler: main
-      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref 'AWS::NoValue']
-      MemorySize: 512
+      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref AWS::NoValue]
+      MemorySize: !FindInMap [Functions, OutputsAPI, Memory]
       Runtime: go1.x
-      Timeout: 60
-      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref 'AWS::NoValue']
+      Timeout: !FindInMap [Functions, OutputsAPI, Timeout]
+      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref AWS::NoValue]
       Policies:
         - Id: OutputsTables
           Version: 2012-10-17
@@ -425,6 +592,23 @@ Resources:
       LogGroupName: /aws/lambda/panther-outputs-api
       RetentionInDays: !Ref CloudWatchLogRetentionDays
 
+  OutputsApiMetricFilters:
+    Type: Custom::LambdaMetricFilters
+    Properties:
+      CustomResourceVersion: !Ref CustomResourceVersion
+      LogGroupName: !Ref OutputsApiLogGroup
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  OutputsApiAlarms:
+    Type: Custom::LambdaAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      FunctionMemoryMB: !FindInMap [Functions, OutputsAPI, Memory]
+      FunctionName: panther-outputs-api
+      FunctionTimeoutSec: !FindInMap [Functions, OutputsAPI, Timeout]
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
   ##### Alert Delivery #####
   AlertQueue:
     Type: AWS::SQS::Queue
@@ -437,12 +621,20 @@ Resources:
       # * Failure of this sqs q will impact delivery of alerts to output destinations.
       # * Failed events will go into the `panther-alerts-queue-dlq`. When the system has recovered they should be re-queued to the `panther-alerts-queue` using the Panther tool `requeue`.
       # </cfndoc>
-      MessageRetentionPeriod: !Ref AlertSqsRetentionSec
+      MessageRetentionPeriod: !FindInMap [Alerts, QueueRetention, Seconds]
       KmsMasterKeyId: !Ref SqsKeyId
-      VisibilityTimeout: 60 # Should match lambda timeout
+      VisibilityTimeout: !FindInMap [Functions, AlertDelivery, Timeout]
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt AlertDLQ.Arn
         maxReceiveCount: 10
+
+  AlertQueueAlarms:
+    Type: Custom::SQSAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      QueueName: panther-alerts-queue
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
 
   AlertDLQ:
     Type: AWS::SQS::Queue
@@ -454,33 +646,46 @@ Resources:
       # When the system has recovered they should be re-queued to the `panther-alerts-queue` using
       # the Panther tool `requeue`.
       # </cfndoc>
-      MessageRetentionPeriod: '1209600' # Max duration - 14 days
+      MessageRetentionPeriod: 1209600 # Max duration - 14 days
       VisibilityTimeout: 60
+
+  AlertDLQAlarms:
+    Type: Custom::SQSAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      IsDLQ: true
+      QueueName: panther-alerts-queue-dlq
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
 
   AlertDeliveryFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ../out/bin/internal/core/alert_delivery/main
+      CodeUri: ../internal/core/alert_delivery/main
       Description: Dispatch alerts to their specified outputs
       Environment:
         Variables:
           DEBUG: !Ref Debug
           ALERT_QUEUE_URL: !Ref AlertQueue
-          ALERT_RETRY_DURATION_MINS: !Ref AlertRetryDurationMins
+          ALERT_RETRY_COUNT: !FindInMap [Alerts, RetryCount, Max]
           ALERT_URL_PREFIX: !Sub https://${AppDomainURL}/log-analysis/alerts/
-          MAX_RETRY_DELAY_SECS: !Ref MaxRetryDelaySecs
-          MIN_RETRY_DELAY_SECS: !Ref MinRetryDelaySecs
+          ALERTS_API: panther-alerts-api
+          ALERTS_TABLE_NAME: panther-log-alert-info
+          APP_DOMAIN_URL: !Sub https://${AppDomainURL}
+          MAX_RETRY_DELAY_SECS: !FindInMap [Alerts, MaxRetryDelay, Seconds]
+          MIN_RETRY_DELAY_SECS: !FindInMap [Alerts, MinRetryDelay, Seconds]
           OUTPUTS_API: panther-outputs-api
-          OUTPUTS_REFRESH_INTERVAL_MIN: '5'
-          POLICY_URL_PREFIX: !Sub https://${AppDomainURL}/cloud-security/policies/
+          OUTPUTS_REFRESH_INTERVAL: '30s'
+          RULE_INDEX_NAME: ruleId-creationTime-index
+          TIME_INDEX_NAME: timePartition-creationTime-index
       Events:
         AlertQueue:
           Type: SQS
           Properties:
             Queue: !GetAtt AlertQueue.Arn
             BatchSize: 10
-      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref 'AWS::NoValue']
-      FunctionName: panther-alert-delivery
+      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref AWS::NoValue]
+      FunctionName: panther-alert-delivery-api
       # <cfndoc>
       # This lambda dispatches alerts to their specified outputs (destinations).
       #
@@ -489,17 +694,20 @@ Resources:
       # * Failed events will go into the `panther-alerts-queue-dlq`. When the system has recovered they should be re-queued to the `panther-alerts-queue` using the Panther tool `requeue`.
       # </cfndoc>
       Handler: main
-      MemorySize: 128
+      MemorySize: !FindInMap [Functions, AlertDelivery, Memory]
       Runtime: go1.x
-      Timeout: 60
-      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref 'AWS::NoValue']
+      Timeout: !FindInMap [Functions, AlertDelivery, Timeout]
+      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref AWS::NoValue]
       Policies:
-        - Id: OutputsAPI
+        - Id: PantherAPIs
           Version: 2012-10-17
           Statement:
             - Effect: Allow
               Action: lambda:InvokeFunction
-              Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-outputs-api'
+              Resource:
+                - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-alerts-api
+                - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-analysis-api
+                - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-outputs-api
         - Id: PublishSnsMessage
           Version: 2012-10-17
           Statement:
@@ -520,21 +728,35 @@ Resources:
                 - kms:Decrypt
                 - kms:GenerateDataKey
               Resource: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${SqsKeyId}
-        - Id: ReceiveAndDeleteAlerts
+        - Id: UpdateAlertDeliveryStatus
           Version: 2012-10-17
           Statement:
             - Effect: Allow
-              Action:
-                - sqs:DeleteMessage
-                - sqs:GetQueueAttributes
-                - sqs:ReceiveMessage
-              Resource: !GetAtt AlertQueue.Arn
+              Action: dynamodb:GetItem
+              Resource: !Sub arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/panther-log-alert-info
 
   AlertDeliveryLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /aws/lambda/panther-alert-delivery
+      LogGroupName: /aws/lambda/panther-alert-delivery-api
       RetentionInDays: !Ref CloudWatchLogRetentionDays
+
+  AlertDeliveryMetricFilters:
+    Type: Custom::LambdaMetricFilters
+    Properties:
+      CustomResourceVersion: !Ref CustomResourceVersion
+      LogGroupName: !Ref AlertDeliveryLogGroup
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  AlertDeliveryAlarms:
+    Type: Custom::LambdaAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      FunctionMemoryMB: !FindInMap [Functions, AlertDelivery, Memory]
+      FunctionName: panther-alert-delivery-api
+      FunctionTimeoutSec: !FindInMap [Functions, AlertDelivery, Timeout]
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
 
   ##### Source API #####
   IntegrationsTable:
@@ -560,18 +782,33 @@ Resources:
       SSESpecification: # Enable server-side encryption
         SSEEnabled: True
 
+  IntegrationsTableAlarms:
+    Type: Custom::DynamoDBAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+      TableName: panther-source-integrations
+
   SourceApiFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ../out/bin/internal/core/source_api/main
+      CodeUri: ../internal/core/source_api/main
       Description: Manages database of source integrations
       Environment:
         Variables:
+          ACCOUNT_ID: !Ref AWS::AccountId
+          AWS_PARTITION: !Ref AWS::Partition
+          DATA_CATALOG_UPDATER_QUEUE_URL: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/panther-datacatalog-updater-queue
           DEBUG: !Ref Debug
-          SNAPSHOT_POLLERS_QUEUE_URL: !Sub https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/panther-snapshot-queue
-          LOG_PROCESSOR_QUEUE_URL: !Sub https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/panther-input-data-notifications-queue
+          INPUT_DATA_ROLE_ARN: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/PantherInputDataLogProcessingRole-${AWS::Region}
+          INPUT_DATA_BUCKET_NAME: !Ref InputDataBucket
+          INPUT_DATA_TOPIC_ARN: !Ref InputDataTopicArn
+          LOG_PROCESSOR_QUEUE_URL: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/panther-input-data-notifications-queue
           LOG_PROCESSOR_QUEUE_ARN: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:panther-input-data-notifications-queue
+          SNAPSHOT_POLLERS_QUEUE_URL: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/panther-snapshot-queue
           TABLE_NAME: !Ref IntegrationsTable
+          VERSION: !Ref PantherVersion
       FunctionName: panther-source-api
       # <cfndoc>
       # The `panther-source-api` lambda manages Cloud Security and Log Analysis sources. This includes
@@ -581,11 +818,11 @@ Resources:
       # * Failure of this lambda will prevent sources from being manageable, and will interrupt daily scans.
       # </cfndoc>
       Handler: main
-      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref 'AWS::NoValue']
-      MemorySize: 128
+      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref AWS::NoValue]
+      MemorySize: !FindInMap [Functions, SourceAPI, Memory]
       Runtime: go1.x
-      Timeout: 60
-      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref 'AWS::NoValue']
+      Timeout: !FindInMap [Functions, SourceAPI, Timeout]
+      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref AWS::NoValue]
       Policies:
         - Id: IntegrationsTablePermissions
           Version: 2012-10-17
@@ -603,7 +840,9 @@ Resources:
               Action:
                 - sqs:SendMessage
                 - sqs:SendMessageBatch
-              Resource: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:panther-snapshot-queue
+              Resource:
+                - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:panther-snapshot-queue
+                - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:panther-datacatalog-updater-queue
             - Effect: Allow
               Action:
                 - kms:Decrypt
@@ -630,13 +869,49 @@ Resources:
           Statement:
             - Effect: Allow
               Action: s3:GetObject
-              Resource: arn:aws:s3:::panther-public-cloudformation-templates/*
+              Resource: !Sub arn:${AWS::Partition}:s3:::panther-public-cloudformation-templates/*
+        - Id: CreateSqsQueues # Allows Lambda to manage SQS source queues - these are SQS queues users send data to for log analysis
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - sqs:CreateQueue
+                - sqs:DeleteQueue
+                - sqs:SetQueueAttributes
+                - sqs:GetQueueAttributes
+              Resource: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:panther-source-*
+        - Id: ConfigureMessageForwarderLambda
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - lambda:CreateEventSourceMapping
+                - lambda:ListEventSourceMappings
+                - lambda:DeleteEventSourceMapping
+              Resource: '*'
 
   SourceApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /aws/lambda/panther-source-api
       RetentionInDays: !Ref CloudWatchLogRetentionDays
+
+  SourceApiMetricFilters:
+    Type: Custom::LambdaMetricFilters
+    Properties:
+      CustomResourceVersion: !Ref CustomResourceVersion
+      LogGroupName: !Ref SourceApiLogGroup
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  SourceApiAlarms:
+    Type: Custom::LambdaAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      FunctionMemoryMB: !FindInMap [Functions, SourceAPI, Memory]
+      FunctionName: panther-source-api
+      FunctionTimeoutSec: !FindInMap [Functions, SourceAPI, Timeout]
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
 
   ##### Layer Management #####
   LayerQueue:
@@ -650,12 +925,20 @@ Resources:
       # * Failure of this sqs queue will prevent users from updating the globals layer.
       # * Failed events will go into the `panther-layer-manager-queue-dlq`. When the system has recovered, one event should be re-queued to the `panther-layer-manager-queue` using the Panther tool `requeue` and the rest should be purged.
       # </cfndoc>
-      MessageRetentionPeriod: '86400' # 24 hours
+      MessageRetentionPeriod: 86400 # 24 hours
       KmsMasterKeyId: !Ref SqsKeyId
-      VisibilityTimeout: 60 # Should match lambda timeout
+      VisibilityTimeout: !FindInMap [Functions, LayerManager, Timeout]
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt LayerDLQ.Arn
         maxReceiveCount: 10
+
+  LayerQueueAlarms:
+    Type: Custom::SQSAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      QueueName: panther-layer-manager-queue
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
 
   LayerDLQ:
     Type: AWS::SQS::Queue
@@ -667,30 +950,37 @@ Resources:
       # When the system has recovered they should be re-queued to the `panther-layer-manager-queue` using
       # the Panther tool `requeue`.
       # </cfndoc>
-      MessageRetentionPeriod: '1209600' # Max duration - 14 days
+      MessageRetentionPeriod: 1209600 # Max duration - 14 days
       VisibilityTimeout: 60
+
+  LayerDLQAlarms:
+    Type: Custom::SQSAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      IsDLQ: true
+      QueueName: panther-layer-manager-queue-dlq
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
 
   LayerManagerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ../out/bin/internal/core/layer_manager/main
+      CodeUri: ../internal/core/layer_manager/main
       Description: Manage updates to the layers on the panther python engines.
       Environment:
         Variables:
           DEBUG: !Ref Debug
           GLOBAL_LAYER_NAME: panther-engine-globals
-          GLOBAL_LAYER_ARN: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:layer:panther-engine-globals'
-          POLICY_ENGINE: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-policy-engine'
-          RULE_ENGINE: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-rules-engine'
-          ANALYSIS_API_HOST: !Sub '${AnalysisApiId}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
-          ANALYSIS_API_PATH: v1
+          GLOBAL_LAYER_ARN: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:layer:panther-engine-globals
+          POLICY_ENGINE: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-policy-engine
+          RULE_ENGINE: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-rules-engine
       Events:
         LayerQueue:
           Type: SQS
           Properties:
             Queue: !GetAtt LayerQueue.Arn
             BatchSize: 10
-      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref 'AWS::NoValue']
+      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref AWS::NoValue]
       FunctionName: panther-layer-manager
       # <cfndoc>
       # This lambda manages updates to the lambda layers attached to the Panther policy and rule engines.
@@ -700,18 +990,17 @@ Resources:
       # * Failed events will go into the `panther-layer-manager-queue-dlq`. When the system has recovered they should be re-queued to the `panther-layer-manager-queue` using the Panther tool `requeue`.
       # </cfndoc>
       Handler: main
-      MemorySize: 512
+      MemorySize: !FindInMap [Functions, LayerManager, Memory]
       Runtime: go1.x
-      Timeout: 60
-      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref 'AWS::NoValue']
+      Timeout: !FindInMap [Functions, LayerManager, Timeout]
+      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref AWS::NoValue]
       Policies:
         - Id: GetAnalyses
           Version: 2012-10-17
           Statement:
             - Effect: Allow
-              Action: execute-api:Invoke
-              Resource:
-                - !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${AnalysisApiId}/v1/GET/global
+              Action: lambda:InvokeFunction
+              Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-analysis-api
         - Id: ManageEngines
           Version: 2012-10-17
           Statement:
@@ -720,25 +1009,19 @@ Resources:
                 - lambda:GetFunctionConfiguration
                 - lambda:UpdateFunctionConfiguration
               Resource:
-                - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-policy-engine'
-                - !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-rules-engine'
-        - Id: PublishLayer
+                - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-policy-engine
+                - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-rules-engine
+        - Id: ManageLayers
           Version: 2012-10-17
           Statement:
             - Effect: Allow
               Action:
-                - lambda:PublishLayerVersion
+                - lambda:DeleteLayerVersion
                 - lambda:ListLayerVersions
-              Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:layer:panther-engine-globals'
-        - Id: DeleteLayerVersions
-          Version: 2012-10-17
-          Statement:
-            - Effect: Allow
-              Action: lambda:DeleteLayerVersion
-              Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:layer:panther-engine-globals:*'
-        - Id: MaintainExistingLayers
-          Version: 2012-10-17
-          Statement:
+                - lambda:PublishLayerVersion
+              Resource:
+                - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:layer:panther-engine-globals
+                - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:layer:panther-engine-globals:*
             - Effect: Allow
               Action: lambda:GetLayerVersion
               Resource: '*'
@@ -750,18 +1033,277 @@ Resources:
                 - kms:Decrypt
                 - kms:GenerateDataKey
               Resource: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${SqsKeyId}
-        - Id: ReceiveAndDeleteMessages
-          Version: 2012-10-17
-          Statement:
-            - Effect: Allow
-              Action:
-                - sqs:DeleteMessage
-                - sqs:GetQueueAttributes
-                - sqs:ReceiveMessage
-              Resource: !GetAtt LayerQueue.Arn
 
   LayerManagerLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /aws/lambda/panther-layer-manager
       RetentionInDays: !Ref CloudWatchLogRetentionDays
+
+  LayerManagerMetricFilters:
+    Type: Custom::LambdaMetricFilters
+    Properties:
+      CustomResourceVersion: !Ref CustomResourceVersion
+      LogGroupName: !Ref LayerManagerLogGroup
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  LayerManagerAlarms:
+    Type: Custom::LambdaAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      FunctionMemoryMB: !FindInMap [Functions, LayerManager, Memory]
+      FunctionName: panther-layer-manager
+      FunctionTimeoutSec: !FindInMap [Functions, LayerManager, Timeout]
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  ##### Key-Value store for Python policies/rules #####
+  KeyValueStoreTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: panther-kv-store
+      # <cfndoc>
+      # Key-value store for Python policies/rules to use however they like
+      #
+      # Failure Impact
+      # * Custom rules / policies which leverage the table may be failing
+      # * Panther itself is not affected
+      # </cfndoc>
+      BillingMode: !Ref KvTableBillingMode
+      AttributeDefinitions:
+        - AttributeName: key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: key
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      ProvisionedThroughput: !If
+        - KvProvisioningEnabled
+        - ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+        - !Ref AWS::NoValue
+      SSESpecification:
+        SSEEnabled: True
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  KeyValueStoreTableAlarms:
+    Type: Custom::DynamoDBAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+      TableName: panther-kv-store
+
+  ReadCapacityScalableTarget:
+    Condition: KvProvisioningEnabled
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 100
+      MinCapacity: 5
+      ResourceId: !Sub table/${KeyValueStoreTable}
+      RoleARN: !Ref DynamoScalingRoleArn
+      ScalableDimension: dynamodb:table:ReadCapacityUnits
+      ServiceNamespace: dynamodb
+
+  ReadScalingPolicy:
+    Condition: KvProvisioningEnabled
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: ReadAutoScalingPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ReadCapacityScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 50.0
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification:
+          PredefinedMetricType: DynamoDBReadCapacityUtilization
+
+  WriteCapacityScalableTarget:
+    Condition: KvProvisioningEnabled
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 100
+      MinCapacity: 5
+      ResourceId: !Sub table/${KeyValueStoreTable}
+      RoleARN: !Ref DynamoScalingRoleArn
+      ScalableDimension: dynamodb:table:WriteCapacityUnits
+      ServiceNamespace: dynamodb
+
+  WriteScalingPolicy:
+    Condition: KvProvisioningEnabled
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: WriteAutoScalingPolicy
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref WriteCapacityScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 50.0
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification:
+          PredefinedMetricType: DynamoDBWriteCapacityUtilization
+
+  ##### Metrics API #####
+  MetricsApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../internal/core/metrics_api/main
+      Description: Handles requests for metric data
+      Environment:
+        Variables:
+          DEBUG: !Ref Debug
+      FunctionName: panther-metrics-api
+      # <cfndoc>
+      # The `panther-metrics-api` lambda handles requests for metric data by properly translating
+      # them to CloudWatch requests and then translating the results back.
+      #
+      # Failure Impact
+      # * Failure of this lambda will prevent requests for metric data.
+      # </cfndoc>
+      Handler: main
+      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref AWS::NoValue]
+      MemorySize: !FindInMap [Functions, MetricsAPI, Memory]
+      Runtime: go1.x
+      Timeout: !FindInMap [Functions, MetricsAPI, Timeout]
+      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref AWS::NoValue]
+      Policies:
+        - Id: RequestMetrics
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - cloudwatch:ListMetrics
+                - cloudwatch:GetMetricData
+                - cloudwatch:GetMetricStatistics
+              Resource: '*'
+
+  MetricsApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/panther-metrics-api
+      RetentionInDays: !Ref CloudWatchLogRetentionDays
+
+  MetricsApiMetricFilters:
+    Type: Custom::LambdaMetricFilters
+    Properties:
+      CustomResourceVersion: !Ref CustomResourceVersion
+      LogGroupName: !Ref MetricsApiLogGroup
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  MetricsApiAlarms:
+    Type: Custom::LambdaAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      FunctionMemoryMB: !FindInMap [Functions, MetricsAPI, Memory]
+      FunctionName: panther-metrics-api
+      FunctionTimeoutSec: !FindInMap [Functions, MetricsAPI, Timeout]
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  ##### LogTypes API #####
+  LogTypesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: RecordID
+          AttributeType: S
+        - AttributeName: RecordKind
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: RecordKind
+          KeyType: HASH
+        - AttributeName: RecordID
+          KeyType: RANGE
+      PointInTimeRecoverySpecification: # Create periodic table backups
+        PointInTimeRecoveryEnabled: True
+      SSESpecification: # Enable server-side encryption
+        SSEEnabled: True
+      TableName: panther-logtypes
+      # <cfndoc>
+      # This ddb table stores settings about log types.
+      # </cfndoc>
+
+  LogTypesTableAlarms:
+    Type: Custom::DynamoDBAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+      TableName: panther-logtypes
+
+  LogTypesAPILogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/panther-logtypes-api
+      RetentionInDays: !Ref CloudWatchLogRetentionDays
+
+  LogTypesAPIMetricFilters:
+    Type: Custom::LambdaMetricFilters
+    Properties:
+      CustomResourceVersion: !Ref CustomResourceVersion
+      LogGroupName: !Ref LogTypesAPILogGroup
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  LogTypesAPIAlarms:
+    Type: Custom::LambdaAlarms
+    Properties:
+      AlarmTopicArn: !Ref AlarmTopicArn
+      CustomResourceVersion: !Ref CustomResourceVersion
+      FunctionMemoryMB: !FindInMap [Functions, LogTypesAPI, Memory]
+      FunctionName: panther-logtypes-api
+      FunctionTimeoutSec: !FindInMap [Functions, LogTypesAPI, Timeout]
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-cfn-custom-resources
+
+  LogTypesAPIFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../internal/core/logtypesapi/main
+      Description: Implements logtypes API to manage logtypes.
+      Environment:
+        Variables:
+          DEBUG: !Ref Debug
+          LOG_TYPES_TABLE_NAME: !Ref LogTypesTable
+          DATA_CATALOG_QUEUE_URL: !Sub https://sqs.${AWS::Region}.${AWS::URLSuffix}/${AWS::AccountId}/panther-datacatalog-updater-queue
+      FunctionName: panther-logtypes-api
+      # <cfndoc>
+      # This lambda implements logtypes API to manage logtypes.
+      # </cfndoc>
+      Handler: main
+      Layers: !If [AttachLayers, !Ref LayerVersionArns, !Ref AWS::NoValue]
+      MemorySize: !FindInMap [Functions, LogTypesAPI, Memory]
+      Runtime: go1.x
+      Timeout: !FindInMap [Functions, LogTypesAPI, Timeout]
+      Tracing: !If [TracingEnabled, !Ref TracingMode, !Ref AWS::NoValue]
+      Policies:
+        - Id: ManageLogTypesTable
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:*Item
+                - dynamodb:Scan
+              Resource: !GetAtt LogTypesTable.Arn
+        - Id: InvokeSourceAPI
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:panther-source-api
+        - Id: SendSQSMessages
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource:
+                - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:panther-datacatalog-updater-queue
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/${SqsKeyId}

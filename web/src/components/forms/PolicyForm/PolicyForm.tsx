@@ -17,73 +17,136 @@
  */
 
 import React from 'react';
-import { PolicyDetails, PolicyUnitTest } from 'Generated/schema';
+import { AddPolicyInput, DetectionTestDefinition, UpdatePolicyInput } from 'Generated/schema';
 import * as Yup from 'yup';
-import { Box, Heading } from 'pouncejs';
-import BaseRuleForm, {
-  BaseRuleFormProps,
-  BaseRuleFormTestFields as PolicyFormTestFields,
-  BaseRuleFormCoreFields,
-  ruleCoreEditableFields,
-} from 'Components/forms/BaseRuleForm';
+import { Button, Flex, Box, Card, TabList, TabPanel, TabPanels, Tabs } from 'pouncejs';
+import { BorderedTab, BorderTabDivider } from 'Components/BorderedTab';
+import { Form, Formik } from 'formik';
+import useRouter from 'Hooks/useRouter';
+import useUrlParams from 'Hooks/useUrlParams';
+import invert from 'lodash/invert';
+import Breadcrumbs from 'Components/Breadcrumbs';
+import SaveButton from 'Components/buttons/SaveButton';
+import { BaseDetectionFormEditorSection } from 'Components/forms/BaseDetectionForm';
 import ErrorBoundary from 'Components/ErrorBoundary';
-import PolicyFormAutoRemediationFields from './PolicyFormAutoRemediationFields';
-
-export const policyEditableFields = [
-  ...ruleCoreEditableFields,
-  'autoRemediationId',
-  'autoRemediationParameters',
-  'suppressions',
-  'resourceTypes',
-  'tests',
-] as const;
+import FormSessionRestoration from 'Components/utils/FormSessionRestoration';
+import PolicyFormAutoRemediationSection from './PolicyFormAutoRemediationSection';
+import PolicyFormTestSection from './PolicyFormTestSection';
+import PolicyFormCoreSection from './PolicyFormCoreSection';
 
 // The validation checks that Formik will run
 const validationSchema = Yup.object().shape({
   id: Yup.string().required(),
   body: Yup.string().required(),
   severity: Yup.string().required(),
-  tests: Yup.array<PolicyUnitTest>()
-    .of(
-      Yup.object().shape({
-        name: Yup.string().required(),
-      })
-    )
-    .unique('Test names must be unique', 'name'),
+  tests: Yup.array<DetectionTestDefinition>().of(
+    Yup.object().shape({
+      name: Yup.string().required(),
+      expectedResult: Yup.boolean().required(),
+      resource: Yup.string().required(),
+    })
+  ),
 });
 
-export type PolicyFormValues = Pick<PolicyDetails, typeof policyEditableFields[number]>;
-export type PolicyFormProps = Pick<
-  BaseRuleFormProps<PolicyFormValues>,
-  'initialValues' | 'onSubmit'
+export interface PolicyFormUrlParams {
+  section?: 'settings' | 'functions' | 'remediation';
+}
+
+const sectionToTabIndex: Record<PolicyFormUrlParams['section'], number> = {
+  settings: 0,
+  functions: 1,
+  remediation: 2,
+};
+
+const tabIndexToSection = invert(sectionToTabIndex) as Record<
+  number,
+  PolicyFormUrlParams['section']
 >;
 
+export type PolicyFormValues = Required<AddPolicyInput> | Required<UpdatePolicyInput>;
+export type PolicyFormProps = {
+  /** The initial values of the form */
+  initialValues: PolicyFormValues;
+
+  /** callback for the submission of the form */
+  onSubmit: (values: PolicyFormValues) => void;
+};
+
 const PolicyForm: React.FC<PolicyFormProps> = ({ initialValues, onSubmit }) => {
+  const { history } = useRouter();
+  const { urlParams, updateUrlParams } = useUrlParams<PolicyFormUrlParams>();
+
   return (
-    <BaseRuleForm<PolicyFormValues>
-      initialValues={initialValues}
-      onSubmit={onSubmit}
-      validationSchema={validationSchema}
-    >
-      <Box as="article">
-        <ErrorBoundary>
-          <BaseRuleFormCoreFields type="policy" />
-        </ErrorBoundary>
-        <ErrorBoundary>
-          <PolicyFormTestFields />
-        </ErrorBoundary>
-      </Box>
-      <Box as="article" mt={10}>
-        <Heading size="medium" pb={8} borderBottom="1px solid" borderColor="grey100">
-          Auto Remediation Settings
-        </Heading>
-        <Box mt={8}>
-          <ErrorBoundary>
-            <PolicyFormAutoRemediationFields />
-          </ErrorBoundary>
-        </Box>
-      </Box>
-    </BaseRuleForm>
+    <Card position="relative">
+      <Formik<PolicyFormValues>
+        initialValues={initialValues}
+        onSubmit={onSubmit}
+        enableReinitialize
+        validationSchema={validationSchema}
+      >
+        <FormSessionRestoration sessionId={`policy-form-${initialValues.id || 'create'}`}>
+          {({ clearFormSession }) => (
+            <Form>
+              <Breadcrumbs.Actions>
+                <Flex spacing={4} justify="flex-end">
+                  <Button
+                    variantColor="darkgray"
+                    icon="close-outline"
+                    aria-label="Cancel Policy editing"
+                    onClick={() => {
+                      clearFormSession();
+                      history.goBack();
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <SaveButton>{initialValues.id ? 'Update' : 'Save'}</SaveButton>
+                </Flex>
+              </Breadcrumbs.Actions>
+
+              <Tabs
+                index={sectionToTabIndex[urlParams.section] || 0}
+                onChange={index => updateUrlParams({ section: tabIndexToSection[index] })}
+              >
+                <Box px={2}>
+                  <TabList>
+                    <BorderedTab>Policy Settings</BorderedTab>
+                    <BorderedTab>Functions & Tests</BorderedTab>
+                    <BorderedTab>Auto Remediation</BorderedTab>
+                  </TabList>
+                </Box>
+
+                <BorderTabDivider />
+                <Box p={6}>
+                  <TabPanels>
+                    <TabPanel data-testid="policy-settings-tabpanel" lazy>
+                      <ErrorBoundary>
+                        <PolicyFormCoreSection />
+                      </ErrorBoundary>
+                    </TabPanel>
+                    <TabPanel data-testid="policy-functions-tabpanel" lazy>
+                      <Flex spacing="6" direction="column">
+                        <ErrorBoundary>
+                          <BaseDetectionFormEditorSection type="policy" />
+                        </ErrorBoundary>
+                        <ErrorBoundary>
+                          <PolicyFormTestSection />
+                        </ErrorBoundary>
+                      </Flex>
+                    </TabPanel>
+                    <TabPanel data-testid="policy-auto-remediation" lazy>
+                      <ErrorBoundary>
+                        <PolicyFormAutoRemediationSection />
+                      </ErrorBoundary>
+                    </TabPanel>
+                  </TabPanels>
+                </Box>
+              </Tabs>
+            </Form>
+          )}
+        </FormSessionRestoration>
+      </Formik>
+    </Card>
   );
 };
 

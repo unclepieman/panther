@@ -1,0 +1,225 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`Wizard renders a step 1`] = `
+@keyframes animation-0 {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+.panther-12 {
+  background-color: #23344e;
+  border-radius: 4px;
+  padding: 24px;
+  margin-bottom: 24px;
+  width: 100%;
+  position: relative;
+}
+
+.panther-3 {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-pack: center;
+  -ms-flex-pack: center;
+  -webkit-justify-content: center;
+  justify-content: center;
+  padding-top: 10px;
+  margin-bottom: 60px;
+  z-index: 2;
+}
+
+.panther-2 {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-pack: center;
+  -ms-flex-pack: center;
+  -webkit-justify-content: center;
+  justify-content: center;
+  -webkit-align-items: center;
+  -webkit-box-align: center;
+  -ms-flex-align: center;
+  align-items: center;
+  z-index: 2;
+  opacity: 1;
+}
+
+.panther-0 {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-pack: center;
+  -ms-flex-pack: center;
+  -webkit-justify-content: center;
+  justify-content: center;
+  -webkit-align-items: center;
+  -webkit-box-align: center;
+  -ms-flex-align: center;
+  align-items: center;
+  width: 25px;
+  height: 25px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 99999px;
+  border: 1px solid;
+  border-color: #bdbdbd;
+  background-color: transparent;
+}
+
+.panther-1 {
+  font-size: 0.875rem;
+  margin-left: 8px;
+}
+
+.panther-11 {
+  padding-top: 12px;
+}
+
+
+
+.panther-9 {
+  will-change: opacity;
+  -webkit-animation: animation-0 300ms 0ms ease-in-out both;
+  animation: animation-0 300ms 0ms ease-in-out both;
+}
+
+.panther-6 {
+  margin-bottom: 40px;
+  text-align: center;
+}
+
+.panther-4 {
+  font-weight: 500;
+  font-size: 1.25rem;
+}
+
+.panther-5 {
+  font-size: 0.875rem;
+  margin-top: 8px;
+  color: #bdbdbd;
+}
+
+.panther-8 {
+  display: -webkit-box;
+  display: -webkit-flex;
+  display: -ms-flexbox;
+  display: flex;
+  -webkit-box-pack: center;
+  -ms-flex-pack: center;
+  -webkit-justify-content: center;
+  justify-content: center;
+  margin-top: 32px;
+  margin-bottom: 16px;
+}
+
+.panther-7 {
+  width: auto;
+  outline: none;
+  padding-left: 20px;
+  padding-right: 20px;
+  height: 46px;
+  font-size: 0.938rem;
+  -webkit-transition: border-color 100ms cubic-bezier(0.0, 0, 0.2, 1) 0ms,background-color 100ms cubic-bezier(0.0, 0, 0.2, 1) 0ms;
+  transition: border-color 100ms cubic-bezier(0.0, 0, 0.2, 1) 0ms,background-color 100ms cubic-bezier(0.0, 0, 0.2, 1) 0ms;
+  border-radius: 4px;
+  border: 1px solid;
+  border-color: #0081c5;
+  background-color: #0081c5;
+  cursor: pointer;
+  color: #f6f6f6;
+  -webkit-text-decoration: none;
+  text-decoration: none;
+}
+
+.panther-7:hover {
+  background-color: #0a8bcf;
+  border-color: #0a8bcf;
+}
+
+.panther-7:focus {
+  background-color: #0a8bcf;
+  border-color: #55d6ff;
+}
+
+.panther-7:active,
+.panther-7[data-active=true] {
+  background-color: #0077bb;
+  border-color: #0077bb;
+}
+
+<div>
+  <header
+    id="main-header"
+  />
+  <article
+    class="panther-12"
+  >
+    <ul
+      class="panther-3"
+    >
+      <li
+        class="panther-2"
+      >
+        <div
+          class="panther-0"
+        >
+          1
+        </div>
+        <p
+          class="panther-1"
+        >
+          Step Nickname
+        </p>
+      </li>
+    </ul>
+    <div
+      class="panther-11"
+    >
+      <section
+        class="panther-10"
+      >
+        <div
+          class="panther-9"
+        >
+          <header
+            class="panther-6"
+          >
+            <h1
+              class="panther-4"
+            >
+              Title
+            </h1>
+            <p
+              class="panther-5"
+            >
+              Subtitle
+            </p>
+          </header>
+          Content
+          <div
+            class="panther-8"
+          >
+            <button
+              class="panther-7"
+              type="button"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </article>
+  <footer
+    id="footer"
+  />
+</div>
+`;

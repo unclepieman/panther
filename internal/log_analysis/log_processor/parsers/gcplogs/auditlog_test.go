@@ -23,7 +23,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	jsoniter "github.com/json-iterator/go"
+	"github.com/stretchr/testify/require"
+	"gopkg.in/go-playground/validator.v9"
 
 	"github.com/panther-labs/panther/internal/log_analysis/log_processor/parsers/testutil"
 	"github.com/panther-labs/panther/internal/log_analysis/log_processor/parsers/timestamp"
@@ -96,7 +97,7 @@ func TestAuditLogParserActivity(t *testing.T) {
 				"authorization.k8s.io/decision": "allow",
 			},
 			InsertID: aws.String("dc7605e6-1e19-4571-8a7a-d23682efcea1"),
-			Resource: MonitoredResource{
+			Resource: &MonitoredResource{
 				Type: aws.String("k8s_cluster"),
 				Labels: Labels{
 					"project_id":   "some-project-id",
@@ -137,6 +138,97 @@ func TestAuditLogParserActivity(t *testing.T) {
 
 	entry.SetCoreFields(TypeAuditLog, entry.Timestamp, entry)
 	entry.AppendAnyIPAddress("35.238.150.117")
+	testutil.CheckPantherParser(t, log, NewAuditLogParser(), &entry.PantherLog)
+}
+
+func TestAuditLogParserDataAccess(t *testing.T) {
+	log := `{
+		"insertId":"ptjpqedufb0",
+		"logName":"projects/myproject/logs/cloudaudit.googleapis.com%2Fdata_access",
+		"severity":"INFO",
+		"timestamp":"2021-02-03T09:43:54.522742715Z",
+		"receiveTimestamp":"2021-02-03T09:43:55.952765323Z",
+		"resource":{
+			"labels":{
+				"email_id":"test@runpanther.io",
+				"project_id":"production",
+				"unique_id":"999999"
+			},
+			"type":"service_account"
+		},
+
+		"operation":{
+			"first":true,
+			"id":"999999",
+			"last":true,
+			"producer":"iamcredentials.googleapis.com"
+		},
+		"protoPayload":{
+			"@type":"type.googleapis.com/google.cloud.audit.AuditLog",
+			"authenticationInfo":{
+				"principalSubject":"serviceAccount:production.svc.id.goog[webservice]",
+				"serviceAccountDelegationInfo":[{}]},
+			"authorizationInfo":[
+				{"granted":true,"permission":"iam.serviceAccounts.getAccessToken","resourceAttributes":{}}
+			],
+			"methodName":"GenerateAccessToken",
+			"resourceName":"projects/-/serviceAccounts/1",
+			"serviceName":"iamcredentials.googleapis.com","status":{}
+		}
+}`
+
+	ts, err := time.Parse(time.RFC3339Nano, "2021-02-03T09:43:54.522742715Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsReceive, err := time.Parse(time.RFC3339Nano, "2021-02-03T09:43:55.952765323Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entry := &LogEntryAuditLog{
+		LogEntry: LogEntry{
+			LogName:          aws.String("projects/myproject/logs/cloudaudit.googleapis.com%2Fdata_access"),
+			Severity:         aws.String("INFO"),
+			Timestamp:        (*timestamp.RFC3339)(&ts),
+			ReceiveTimestamp: (*timestamp.RFC3339)(&tsReceive),
+			Operation: &LogEntryOperation{
+				ID:       aws.String("999999"),
+				Producer: aws.String("iamcredentials.googleapis.com"),
+				First:    aws.Bool(true),
+				Last:     aws.Bool(true),
+			},
+			InsertID: aws.String("ptjpqedufb0"),
+			Resource: &MonitoredResource{
+				Type: aws.String("service_account"),
+				Labels: map[string]string{
+					"email_id":   "test@runpanther.io",
+					"project_id": "production",
+					"unique_id":  "999999",
+				},
+			},
+		},
+		Payload: AuditLog{
+			PayloadType: aws.String("type.googleapis.com/google.cloud.audit.AuditLog"),
+			AuthenticationInfo: &AuthenticationInfo{
+				PrincipalSubject:             aws.String("serviceAccount:production.svc.id.goog[webservice]"),
+				ServiceAccountDelegationInfo: []ServiceAccountDelegationInfo{{}},
+			},
+			AuthorizationInfo: []AuthorizationInfo{
+				{
+					Granted:            aws.Bool(true),
+					Permission:         aws.String("iam.serviceAccounts.getAccessToken"),
+					ResourceAttributes: &ResourceAttributes{},
+				},
+			},
+			Status:       &Status{},
+			MethodName:   aws.String("GenerateAccessToken"),
+			ResourceName: aws.String("projects/-/serviceAccounts/1"),
+			ServiceName:  aws.String("iamcredentials.googleapis.com"),
+		},
+	}
+
+	entry.SetCoreFields(TypeAuditLog, entry.Timestamp, entry)
 	testutil.CheckPantherParser(t, log, NewAuditLogParser(), &entry.PantherLog)
 }
 
@@ -195,7 +287,7 @@ func TestAuditLogParserSystemEvent(t *testing.T) {
 			Timestamp:        (*timestamp.RFC3339)(&ts),
 			ReceiveTimestamp: (*timestamp.RFC3339)(&tsReceive),
 			InsertID:         aws.String("nbhw56e2lqay"),
-			Resource: MonitoredResource{
+			Resource: &MonitoredResource{
 				Type: aws.String("gce_instance"),
 				Labels: Labels{
 					"instance_id": "2587554859816992587",
@@ -218,16 +310,158 @@ func TestAuditLogParserSystemEvent(t *testing.T) {
 			},
 			MethodName: aws.String("compute.instances.migrateOnHostMaintenance"),
 			RequestMetadata: &RequestMetadata{
-				RequestAttributes:     jsoniter.RawMessage(`{}`),
-				DestinationAttributes: jsoniter.RawMessage(`{}`),
+				RequestAttributes:     testutil.NewRawMessage(`{}`),
+				DestinationAttributes: testutil.NewRawMessage(`{}`),
 			},
+			Status:       &Status{},
 			ResourceName: aws.String("projects/project-id/zones/us-central1-f/instances/gke-cluster-default-pool-7dff1419-8v1j"),
 			ServiceName:  aws.String("compute.googleapis.com"),
-			Status:       &Status{},
-			Request:      jsoniter.RawMessage(`{"@type": "type.googleapis.com/compute.instances.migrateOnHostMaintenance"}`),
+			Request:      testutil.NewRawMessage(`{"@type": "type.googleapis.com/compute.instances.migrateOnHostMaintenance"}`),
 		},
 	}
 
 	entry.SetCoreFields(TypeAuditLog, entry.Timestamp, entry)
+	testutil.CheckPantherParser(t, log, NewAuditLogParser(), &entry.PantherLog)
+}
+
+func TestAuditLogParserUnmarshalJSON(t *testing.T) {
+	samples := testutil.MustReadFileJSONLines("testdata/auditlog_samples.jsonl")
+	parser := NewAuditLogParser()
+	valid := validator.New()
+
+	for _, sample := range samples {
+		results, err := parser.Parse(sample)
+		require.NoError(t, err)
+		require.NotEmpty(t, results)
+		for _, result := range results {
+			require.NoError(t, valid.Struct(result.Event()))
+		}
+	}
+}
+
+func TestAuditLogParserActivityBug(t *testing.T) {
+	log := testutil.MustReadFileString("testdata/auditlog_activity.json")
+
+	ts, err := time.Parse(time.RFC3339Nano, "2020-05-06T03:55:36.131777024Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tsReceive, err := time.Parse(time.RFC3339Nano, "2020-05-06T03:55:36.131777024Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entry := &LogEntryAuditLog{
+		LogEntry: LogEntry{
+			LogName:          aws.String("projects/some-project-id/logs/cloudaudit.googleapis.com%2Factivity"),
+			Timestamp:        (*timestamp.RFC3339)(&ts),
+			ReceiveTimestamp: (*timestamp.RFC3339)(&tsReceive),
+			InsertID:         aws.String("-eyvi2zd601a"),
+			Resource: &MonitoredResource{
+				Type: aws.String("audited_resource"),
+				Labels: Labels{
+					"project_id": "some-project-id",
+					"service":    "servicemanagement.googleapis.com",
+					"method":     "google.api.servicemanagement.v1.ServiceManager.ActivateServices",
+				},
+			},
+			Operation: &LogEntryOperation{
+				ID:       aws.String("operations/acf.73aabd99-b28a-4989-8bda-1b4ca5b90cef"),
+				Producer: aws.String("servicemanagement.googleapis.com"),
+				Last:     aws.Bool(true),
+			},
+			Severity: aws.String("NOTICE"),
+		},
+		Payload: AuditLog{
+			MethodName:  aws.String("google.api.servicemanagement.v1.ServiceManager.ActivateServices"),
+			PayloadType: aws.String("type.googleapis.com/google.cloud.audit.AuditLog"),
+			AuthenticationInfo: &AuthenticationInfo{
+				PrincipalEmail: aws.String("test@runpanther.io"),
+			},
+			AuthorizationInfo: []AuthorizationInfo{
+				{
+					Granted:    aws.Bool(true),
+					Permission: aws.String("servicemanagement.services.bind"),
+					Resource:   aws.String("services/bigtableadmin.googleapis.com"),
+				},
+				{
+					Granted:    aws.Bool(true),
+					Permission: aws.String("serviceusage.services.enable"),
+					Resource:   aws.String("projectnumbers/951849100836/services/-"),
+				},
+				{
+					Granted:    aws.Bool(true),
+					Permission: aws.String("serviceusage.services.enable"),
+					Resource:   aws.String("projectnumbers/951849100836/services/-"),
+				},
+				{
+					Permission: aws.String("servicemanagement.services.bindAll"),
+					Resource:   aws.String("services/bigtableadmin.googleapis.com"),
+				},
+				{
+					Permission: aws.String("serviceconsumermanagement.consumers.enable"),
+					Resource:   aws.String("services/bigtableadmin.googleapis.com/consumers/951849100836"),
+				},
+				{
+					Granted:    aws.Bool(true),
+					Permission: aws.String("servicemanagement.services.bind"),
+					Resource:   aws.String("services/bigtable.googleapis.com"),
+				},
+				{
+					Granted:    aws.Bool(true),
+					Permission: aws.String("serviceusage.services.enable"),
+					Resource:   aws.String("projectnumbers/951849100836/services/-"),
+				},
+				{
+					Granted:    aws.Bool(true),
+					Permission: aws.String("serviceusage.services.enable"),
+					Resource:   aws.String("projectnumbers/951849100836/services/-"),
+				},
+				{
+					Permission: aws.String("servicemanagement.services.bindAll"),
+					Resource:   aws.String("services/bigtable.googleapis.com"),
+				},
+				{
+					Permission: aws.String("serviceconsumermanagement.consumers.enable"),
+					Resource:   aws.String("services/bigtable.googleapis.com/consumers/951849100836"),
+				},
+			},
+			Response: testutil.NewRawMessage(`{
+				"@type": "type.googleapis.com/google.api.servicemanagement.v1.ActivateServicesResponse",
+				"settings": [
+					{
+						"serviceName": "bigtableadmin.googleapis.com",
+						"usageSettings": {
+							"consumerEnableStatus": "ENABLED"
+						}
+					},
+					{
+						"serviceName": "bigtable.googleapis.com",
+						"usageSettings": {
+							"consumerEnableStatus": "ENABLED"
+						}
+					}
+				]
+			}`),
+			Request: testutil.NewRawMessage(`{
+				"@type": "type.googleapis.com/google.api.servicemanagement.v1.ActivateServicesRequest",
+				"consumerProjectId": "951849100836",
+				"serviceNames": [
+					"bigtableadmin.googleapis.com",
+					"bigtable.googleapis.com"
+				]
+			}`),
+			RequestMetadata: &RequestMetadata{
+				CallerIP:                aws.String("0:0:0:0:0:0:0:1"),
+				CallerSuppliedUserAgent: aws.String("unknown"),
+			},
+			ResourceName: aws.String("projects/951849100836/services/[bigtableadmin.googleapis.com, bigtable.googleapis.com]"),
+			ServiceName:  aws.String("servicemanagement.googleapis.com"),
+			Status:       &Status{},
+		},
+	}
+
+	entry.SetCoreFields(TypeAuditLog, entry.Timestamp, entry)
+	entry.AppendAnyIPAddress("0:0:0:0:0:0:0:1")
 	testutil.CheckPantherParser(t, log, NewAuditLogParser(), &entry.PantherLog)
 }

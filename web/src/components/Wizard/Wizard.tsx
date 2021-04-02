@@ -16,76 +16,150 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import React from 'react';
-import { Box, Flex, IconProps, Icon, Label, ProgressBar, Theme, SimpleGrid } from 'pouncejs';
+import React, { ReactElement, ReactNode } from 'react';
+import { Box, Flex, Icon, Text, Divider, Card, BoxProps, IconProps } from 'pouncejs';
 import { WizardContext } from './WizardContext';
 
-export interface WizardStepProps {
-  title?: string;
-  icon: IconProps['type'];
+interface WizardProps<Data> {
+  children?: ReactNode;
+  header?: boolean;
+  initialData?: Data;
 }
 
-interface WizardComposition {
-  Step: React.FC<WizardStepProps>;
-}
+export type StepStatus = 'PASSING' | 'FAILING' | 'PENDING';
 
-const Wizard: React.FC & WizardComposition = ({ children }) => {
+function Wizard<WizardData = any>({
+  children,
+  header = true,
+  initialData = undefined,
+}: WizardProps<WizardData>): ReactElement {
   const [currentStepIndex, setCurrentStepIndex] = React.useState(0);
+  const [currentStepStatus, setCurrentStepStatus] = React.useState<StepStatus>('PENDING');
+  const [wizardData, setWizardData] = React.useState<WizardData>(initialData);
+  const prevStepIndex = React.useRef<number>(null);
 
   const steps = React.useMemo(() => React.Children.toArray(children) as React.ReactElement[], [
     children,
   ]);
 
   /**
+   * Reset the step status everytime the step changes
+   */
+  React.useEffect(() => {
+    setCurrentStepStatus('PENDING');
+  }, [currentStepIndex, setCurrentStepStatus]);
+
+  /**
+   * Goes to the the chosen wizard step
+   */
+  const goToStep = React.useCallback(
+    (stepIndex: number) => {
+      prevStepIndex.current = stepIndex > currentStepIndex ? currentStepIndex : stepIndex - 1;
+      setCurrentStepIndex(stepIndex);
+    },
+    [currentStepIndex]
+  );
+
+  /*
+   * Resets the data to  the original value
+   */
+  const resetWizardData = React.useCallback(() => {
+    setWizardData(initialData);
+  }, [initialData, setWizardData]);
+
+  /*
+   *  Merges new data with the existing wizard data
+   */
+  const updateWizardData = React.useCallback(
+    (data: WizardData) => {
+      setWizardData({ ...wizardData, ...data });
+    },
+    [wizardData, setWizardData]
+  );
+
+  /**
    * Goes to the previous wizard step
    */
   const goToPrevStep = React.useCallback(() => {
-    if (currentStepIndex > 0) {
-      setCurrentStepIndex(currentStepIndex - 1);
+    if (prevStepIndex.current >= 0) {
+      goToStep(prevStepIndex.current);
     }
-  }, [currentStepIndex]);
+  }, [goToStep, prevStepIndex]);
 
   /**
    * Goes to the next wizard step
    */
   const goToNextStep = React.useCallback(() => {
     if (currentStepIndex < steps.length - 1) {
-      setCurrentStepIndex(currentStepIndex + 1);
+      goToStep(currentStepIndex + 1);
     }
-  }, [currentStepIndex]);
+  }, [goToStep, currentStepIndex]);
+
+  /**
+   * Fully resets the wizard,  including data and current step
+   */
+  const resetWizard = React.useCallback(() => {
+    resetWizardData();
+    setCurrentStepIndex(0);
+    setCurrentStepStatus('PENDING');
+  }, [resetWizardData, setCurrentStepIndex, setCurrentStepStatus]);
 
   /*
    * Exposes handlers to any components below
    */
   const contextValue = React.useMemo(
     () => ({
+      goToStep,
       goToPrevStep,
       goToNextStep,
+      resetData: resetWizardData,
+      setData: setWizardData,
+      updateData: updateWizardData,
+      reset: resetWizard,
+      data: wizardData,
+      currentStepStatus,
+      setCurrentStepStatus,
     }),
-    [goToPrevStep, goToNextStep]
+    [
+      goToStep,
+      goToPrevStep,
+      goToNextStep,
+      wizardData,
+      currentStepStatus,
+      resetWizardData,
+      setWizardData,
+      updateWizardData,
+      setCurrentStepStatus,
+    ]
   );
 
   return (
-    <Box as="article" width={1}>
-      <Box position="relative" mb={6}>
-        <Box
-          position="absolute"
-          bottom={20}
-          width={(steps.length - 1) / steps.length}
-          ml={`${100 / (steps.length * 2)}%`}
-        >
-          <ProgressBar progressColor="green200" progress={currentStepIndex / (steps.length - 1)} />
-        </Box>
-        <SimpleGrid as="ul" columns={steps.length} width={1} zIndex={2}>
+    <Card p={6} mb={6} as="article" width={1} position="relative">
+      {header && (
+        <Flex as="ul" justify="center" pt="10px" mb={60} zIndex={2}>
           {steps.map((step, index) => {
-            const isComplete = currentStepIndex > index || currentStepIndex === steps.length - 1;
+            const isLast = index === steps.length - 1;
+            const isComplete = currentStepIndex > index;
+            const isCurrent = currentStepIndex === index;
+            const isPassing = currentStepStatus === 'PASSING';
+            const isFailing = currentStepStatus === 'FAILING';
 
-            let labelColor: keyof Theme['colors'] = 'grey100';
-            if (currentStepIndex === index) {
-              labelColor = 'grey400';
-            }
-            if (isComplete) {
-              labelColor = 'green300';
+            let backgroundColor: BoxProps['backgroundColor'];
+            let borderColor: BoxProps['borderColor'];
+            let svgIcon: IconProps['type'];
+
+            if (isComplete || isPassing) {
+              backgroundColor = 'blue-400';
+              borderColor = 'blue-400';
+              svgIcon = 'check';
+            } else if (isFailing) {
+              backgroundColor = 'pink-600';
+              borderColor = 'pink-600';
+              svgIcon = 'alert-circle';
+            } else {
+              backgroundColor = 'transparent';
+              borderColor = 'gray-300';
+              svgIcon = null;
             }
 
             return (
@@ -93,44 +167,47 @@ const Wizard: React.FC & WizardComposition = ({ children }) => {
                 as="li"
                 justify="center"
                 align="center"
-                direction="column"
                 key={step.props.title}
                 zIndex={2}
+                opacity={isComplete || isCurrent ? 1 : 0.3}
               >
-                <Label as="h3" size="large" color={labelColor} mb={2}>
-                  {index + 1}. {step.props.title}
-                </Label>
                 <Flex
-                  borderRadius="circle"
                   justify="center"
                   align="center"
-                  width={40}
-                  height={40}
-                  backgroundColor={isComplete ? 'green200' : 'grey50'}
+                  width={25}
+                  height={25}
+                  fontSize="small"
+                  fontWeight="bold"
+                  borderRadius="circle"
+                  border="1px solid"
+                  borderColor={borderColor}
+                  backgroundColor={backgroundColor}
                 >
-                  <Icon
-                    type={isComplete ? 'check' : step.props.icon}
-                    size="small"
-                    color={isComplete ? 'white' : 'grey200'}
-                  />
+                  {svgIcon ? <Icon type={svgIcon} size="x-small" /> : index + 1}
                 </Flex>
+                <Text fontSize="medium" ml={2}>
+                  {step.props.title}
+                </Text>
+                {!isLast && <Divider width={64} mx={4} />}
               </Flex>
             );
           })}
-        </SimpleGrid>
-      </Box>
-      <Box>
+        </Flex>
+      )}
+      <Box pt={3}>
         <WizardContext.Provider value={contextValue}>
           {steps[currentStepIndex]}
         </WizardContext.Provider>
       </Box>
-    </Box>
+    </Card>
   );
-};
+}
 
-export const WizardStep: React.FC<WizardStepProps> = ({ children }) =>
-  children as React.ReactElement;
+interface WizardStepProps {
+  title?: string;
+}
 
-Wizard.Step = React.memo(WizardStep);
+const WizardStep: React.FC<WizardStepProps> = ({ children }) => children as React.ReactElement;
+Wizard.Step = React.memo(WizardStep) as React.FC<WizardStepProps>;
 
 export default Wizard;

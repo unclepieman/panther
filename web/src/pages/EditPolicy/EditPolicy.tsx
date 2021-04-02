@@ -17,30 +17,27 @@
  */
 
 import React from 'react';
-import Panel from 'Components/Panel';
-import { Alert, Button, Card, Box, useSnackbar } from 'pouncejs';
-import PolicyForm, { policyEditableFields } from 'Components/forms/PolicyForm';
-import { PolicyDetails } from 'Generated/schema';
-import { initialValues as createPolicyInitialValues } from 'Pages/CreatePolicy';
-import useModal from 'Hooks/useModal';
+import { Alert, Box, useSnackbar } from 'pouncejs';
+import PolicyForm from 'Components/forms/PolicyForm';
 import useRouter from 'Hooks/useRouter';
-import TablePlaceholder from 'Components/TablePlaceholder';
-import { MODALS } from 'Components/utils/Modal';
-import pick from 'lodash-es/pick';
+import withSEO from 'Hoc/withSEO';
 import { extractErrorMessage, formatJSON } from 'Helpers/utils';
-import { usePolicyDetails } from './graphql/policyDetails.generated';
+import { useGetPolicyDetails } from './graphql/getPolicyDetails.generated';
 import { useUpdatePolicy } from './graphql/updatePolicy.generated';
+import Skeleton from './Skeleton';
 
 const EditPolicyPage: React.FC = () => {
   const { match } = useRouter<{ id: string }>();
-  const { showModal } = useModal();
   const { pushSnackbar } = useSnackbar();
 
-  const { error: fetchPolicyError, data: queryData, loading: isFetchingPolicy } = usePolicyDetails({
-    fetchPolicy: 'cache-and-network',
+  const {
+    error: fetchPolicyError,
+    data: queryData,
+    loading: isFetchingPolicy,
+  } = useGetPolicyDetails({
     variables: {
       input: {
-        policyId: match.params.id,
+        id: match.params.id,
       },
     },
   });
@@ -58,89 +55,69 @@ const EditPolicyPage: React.FC = () => {
     []
   );
 
-  const initialValues = React.useMemo(() => {
-    if (queryData) {
-      const { tests, autoRemediationParameters, ...otherInitialValues } = pick(
-        queryData.policy,
-        policyEditableFields
-      ) as PolicyDetails;
-
-      // format any JSON returned from the server simply because we are going to display it
-      // within an online web editor. To do that we parse the JSON and re-stringify it using proper
-      // spacings that make it pretty (The server of course doesn't store these spacings when
-      // it stores JSON, that's why we are making those here in the front-end)
-      return {
-        ...otherInitialValues,
-        autoRemediationParameters: formatJSON(JSON.parse(autoRemediationParameters)),
-        tests: tests.map(({ resource, ...restTestData }) => ({
-          ...restTestData,
-          resource: formatJSON(JSON.parse(resource)),
-        })),
-      };
-    }
-
-    return createPolicyInitialValues;
-  }, [queryData]);
-
   if (isFetchingPolicy) {
-    return (
-      <Card p={9}>
-        <TablePlaceholder rowCount={5} rowHeight={15} />
-        <TablePlaceholder rowCount={1} rowHeight={100} />
-      </Card>
-    );
+    return <Skeleton />;
   }
 
   if (fetchPolicyError) {
     return (
-      <Alert
-        mb={6}
-        variant="error"
-        title="Couldn't load the policy details"
-        description={
-          extractErrorMessage(fetchPolicyError) ||
-          'There was an error when performing your request, please contact support@runpanther.io'
-        }
-      />
+      <Box mb={6}>
+        <Alert
+          variant="error"
+          title="Couldn't load the policy details"
+          discardable
+          description={
+            extractErrorMessage(fetchPolicyError) ||
+            'There was an error when performing your request, please contact support@runpanther.io'
+          }
+        />
+      </Box>
     );
   }
 
+  // format any JSON returned from the server simply because we are going to display it
+  // within an online web editor. To do that we parse the JSON and re-stringify it using proper
+  // spacings that make it pretty (The server of course doesn't store these spacings when
+  // it stores JSON, that's why we are making those here in the front-end)
+  const { policy } = queryData;
+  const initialValues = {
+    autoRemediationId: policy.autoRemediationId,
+    autoRemediationParameters: formatJSON(JSON.parse(policy.autoRemediationParameters)),
+    body: policy.body,
+    description: policy.description,
+    displayName: policy.displayName,
+    enabled: policy.enabled,
+    id: policy.id,
+    outputIds: policy.outputIds,
+    reference: policy.reference,
+    resourceTypes: policy.resourceTypes,
+    runbook: policy.runbook,
+    severity: policy.severity,
+    suppressions: policy.suppressions,
+    tags: policy.tags,
+    tests: queryData.policy.tests.map(({ resource, ...restTestData }) => ({
+      ...restTestData,
+      resource: formatJSON(JSON.parse(resource)),
+    })),
+  };
+
   return (
     <Box mb={6}>
-      <Panel
-        size="large"
-        title="Policy Settings"
-        actions={
-          <Button
-            variant="default"
-            size="large"
-            color="red300"
-            onClick={() =>
-              showModal({
-                modal: MODALS.DELETE_POLICY,
-                props: { policy: queryData.policy },
-              })
-            }
-          >
-            Delete
-          </Button>
-        }
-      >
-        <PolicyForm initialValues={initialValues} onSubmit={handleSubmit} />
-      </Panel>
+      <PolicyForm initialValues={initialValues} onSubmit={handleSubmit} />
       {updateError && (
-        <Alert
-          mt={2}
-          mb={6}
-          variant="error"
-          title={
-            extractErrorMessage(updateError) ||
-            'Unknown error occured during update. Please contact support@runpanther.io'
-          }
-        />
+        <Box mt={2} mb={6}>
+          <Alert
+            variant="error"
+            title="Couldn't update your policy"
+            description={
+              extractErrorMessage(updateError) ||
+              'Unknown error occured during update. Please contact support@runpanther.io'
+            }
+          />
+        </Box>
       )}
     </Box>
   );
 };
 
-export default EditPolicyPage;
+export default withSEO({ title: ({ match }) => `Edit ${match.params.id}` })(EditPolicyPage);

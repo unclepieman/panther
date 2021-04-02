@@ -20,12 +20,25 @@ variable "aws_partition" {
   default     = "aws"
 }
 
+variable "panther_region" {
+  type        = string
+  description = "The AWS region where you have deployed Panther"
+}
+
+variable "satellite_account_region" {
+  type        = string
+  description = "Account which Panther is pulling or receiving log data from"
+}
+
 variable "master_account_id" {
   type        = string
   description = "AWS account ID of the account running the Panther backend"
 }
 
-variable "queue_arn" {
+# topic name is hardcoded in Panther infra; see master account panther-aws-event-processor
+# SQS queue access policy
+variable "sns_topic_name" {
   type        = string
-  description = "The Panther SQS Queue Arn to forward CloudWatch Events to via SNS."
+  description = "The name of the SNS topic"
+  default     = "-PantherEventsTopic-"
 }

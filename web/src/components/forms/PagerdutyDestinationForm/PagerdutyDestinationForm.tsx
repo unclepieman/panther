@@ -20,11 +20,13 @@ import React from 'react';
 import { Field } from 'formik';
 import * as Yup from 'yup';
 import FormikTextInput from 'Components/fields/TextInput';
+import SensitiveTextInput from 'Components/fields/SensitiveTextInput';
 import { DestinationConfigInput } from 'Generated/schema';
 import BaseDestinationForm, {
   BaseDestinationFormValues,
   defaultValidationSchema,
 } from 'Components/forms/BaseDestinationForm';
+import { SimpleGrid } from 'pouncejs';
 
 type PagerDutyFieldValues = Pick<DestinationConfigInput, 'pagerDuty'>;
 
@@ -33,41 +35,46 @@ interface PagerDutyDestinationFormProps {
   onSubmit: (values: BaseDestinationFormValues<PagerDutyFieldValues>) => void;
 }
 
-const pagerDutyFieldsValidationSchema = Yup.object().shape({
-  outputConfig: Yup.object().shape({
-    pagerDuty: Yup.object().shape({
-      integrationKey: Yup.string()
-        .length(32, 'Must be exactly 32 characters')
-        .required(),
-    }),
-  }),
-});
-
-// @ts-ignore
-// We merge the two schemas together: the one deriving from the common fields, plus the custom
-// ones that change for each destination.
-// https://github.com/jquense/yup/issues/522
-const mergedValidationSchema = defaultValidationSchema.concat(pagerDutyFieldsValidationSchema);
-
 const PagerDutyDestinationForm: React.FC<PagerDutyDestinationFormProps> = ({
   onSubmit,
   initialValues,
 }) => {
+  const existing = initialValues.outputId;
+  const pagerDutyKey = Yup.string().length(32, 'Must be exactly 32 characters');
+  const pagerDutyFieldsValidationSchema = Yup.object().shape({
+    outputConfig: Yup.object().shape({
+      pagerDuty: Yup.object().shape({
+        integrationKey: existing ? pagerDutyKey : pagerDutyKey.required(),
+      }),
+    }),
+  });
+
+  const mergedValidationSchema = defaultValidationSchema.concat(pagerDutyFieldsValidationSchema);
+
   return (
     <BaseDestinationForm<PagerDutyFieldValues>
       initialValues={initialValues}
       validationSchema={mergedValidationSchema}
       onSubmit={onSubmit}
     >
-      <Field
-        as={FormikTextInput}
-        name="outputConfig.pagerDuty.integrationKey"
-        label="Integration Key"
-        placeholder="What's your PagerDuty Integration Key?"
-        mb={6}
-        aria-required
-        autoComplete="new-password"
-      />
+      <SimpleGrid gap={5} columns={2}>
+        <Field
+          name="displayName"
+          as={FormikTextInput}
+          label="* Display Name"
+          placeholder="How should we name this?"
+          required
+        />
+        <Field
+          as={SensitiveTextInput}
+          shouldMask={!!existing}
+          name="outputConfig.pagerDuty.integrationKey"
+          label="Integration Key"
+          placeholder="What's your PagerDuty Integration Key?"
+          required={!existing}
+          autoComplete="new-password"
+        />
+      </SimpleGrid>
     </BaseDestinationForm>
   );
 };

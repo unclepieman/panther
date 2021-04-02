@@ -19,17 +19,17 @@ package outputs
  */
 
 import (
+	"context"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	alertModel "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	alertModel "github.com/panther-labs/panther/api/lambda/delivery/models"
 )
 
 func init() {
-	policyURLPrefix = "https://panther.io/policies/"
 	alertURLPrefix = "https://panther.io/alerts/"
 }
 
@@ -38,14 +38,15 @@ type mockHTTPWrapper struct {
 	mock.Mock
 }
 
-func (m *mockHTTPWrapper) post(postInput *PostInput) *AlertDeliveryError {
-	args := m.Called(postInput)
-	return args.Get(0).(*AlertDeliveryError)
+func (m *mockHTTPWrapper) post(cxt context.Context, postInput *PostInput) *AlertDeliveryResponse {
+	args := m.Called(cxt, postInput)
+	return args.Get(0).(*AlertDeliveryResponse)
 }
 
 func TestGenerateAlertTitleReturnGivenTitle(t *testing.T) {
 	alert := &alertModel.Alert{
-		Title: aws.String("my title"),
+		Title: "my title",
+		Type:  alertModel.RuleType,
 	}
 
 	assert.Equal(t, "New Alert: my title", generateAlertTitle(alert))
@@ -53,32 +54,32 @@ func TestGenerateAlertTitleReturnGivenTitle(t *testing.T) {
 
 func TestGenerateAlertTitleRulePolicyName(t *testing.T) {
 	alert := &alertModel.Alert{
-		Type:       aws.String(alertModel.RuleType),
-		PolicyName: aws.String("rule name"),
+		Type:         alertModel.RuleType,
+		AnalysisName: aws.String("rule name"),
 	}
 	assert.Equal(t, "New Alert: rule name", generateAlertTitle(alert))
 }
 
 func TestGenerateAlertTitleRulePolicyId(t *testing.T) {
 	alert := &alertModel.Alert{
-		Type:       aws.String(alertModel.RuleType),
-		PolicyName: aws.String("rule.id"),
+		Type:         alertModel.RuleType,
+		AnalysisName: aws.String("rule.id"),
 	}
 	assert.Equal(t, "New Alert: rule.id", generateAlertTitle(alert))
 }
 
 func TestGenerateAlertTitlePolicyName(t *testing.T) {
 	alert := &alertModel.Alert{
-		Type:       aws.String(alertModel.PolicyType),
-		PolicyName: aws.String("policy name"),
+		Type:         alertModel.PolicyType,
+		AnalysisName: aws.String("policy name"),
 	}
 	assert.Equal(t, "Policy Failure: policy name", generateAlertTitle(alert))
 }
 
 func TestGenerateAlertTitlePolicyId(t *testing.T) {
 	alert := &alertModel.Alert{
-		Type:       aws.String(alertModel.PolicyType),
-		PolicyName: aws.String("policy.id"),
+		Type:         alertModel.PolicyType,
+		AnalysisName: aws.String("policy.id"),
 	}
 	assert.Equal(t, "Policy Failure: policy.id", generateAlertTitle(alert))
 }

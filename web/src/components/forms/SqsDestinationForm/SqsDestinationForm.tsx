@@ -20,13 +20,14 @@ import React from 'react';
 import { Field } from 'formik';
 import * as Yup from 'yup';
 import FormikTextInput from 'Components/fields/TextInput';
-import { Box, Text } from 'pouncejs';
+import { AbstractButton, Box, Collapse, FormHelperText, SimpleGrid } from 'pouncejs';
 import { DestinationConfigInput } from 'Generated/schema';
 import BaseDestinationForm, {
   BaseDestinationFormValues,
   defaultValidationSchema,
 } from 'Components/forms/BaseDestinationForm';
 import JsonViewer from 'Components/JsonViewer';
+import { pantherConfig } from 'Source/config';
 
 type SQSFieldValues = Pick<DestinationConfigInput, 'sqs'>;
 
@@ -38,9 +39,7 @@ interface SQSDestinationFormProps {
 const sqsFieldsValidationSchema = Yup.object().shape({
   outputConfig: Yup.object().shape({
     sqs: Yup.object().shape({
-      queueUrl: Yup.string()
-        .url('Queue URL must be a valid url')
-        .required('Queue URL is required'),
+      queueUrl: Yup.string().url('Queue URL must be a valid url').required('Queue URL is required'),
     }),
   }),
 });
@@ -53,41 +52,60 @@ const SQS_QUEUE_POLICY = {
       Effect: 'Allow',
       Action: 'sqs:SendMessage',
       Principal: {
-        AWS: `arn:aws:iam::${process.env.AWS_ACCOUNT_ID}:root`,
+        AWS: `arn:aws:iam::${pantherConfig.AWS_ACCOUNT_ID}:root`,
       },
       Resource: '<Destination-SQS-Queue-ARN>',
     },
   ],
 };
 
-// @ts-ignore
 // We merge the two schemas together: the one deriving from the common fields, plus the custom
 // ones that change for each destination.
 // https://github.com/jquense/yup/issues/522
 const mergedValidationSchema = defaultValidationSchema.concat(sqsFieldsValidationSchema);
 
 const SqsDestinationForm: React.FC<SQSDestinationFormProps> = ({ onSubmit, initialValues }) => {
+  const [showPolicy, setShowPolicy] = React.useState(false);
+
   return (
     <BaseDestinationForm<SQSFieldValues>
       initialValues={initialValues}
       validationSchema={mergedValidationSchema}
       onSubmit={onSubmit}
     >
-      <Field
-        as={FormikTextInput}
-        name="outputConfig.sqs.queueUrl"
-        label="Queue URL"
-        placeholder="Where should we send the queue data to?"
-        mb={2}
-        aria-required
-      />
-      <Box mb={6}>
-        <Text size="small" color="grey400" mb={2}>
-          <b>Note</b>: You would need to allow Panther <b>sqs:SendMessage</b> access to send alert
-          messages to your SQS queue
-        </Text>
-        <JsonViewer data={SQS_QUEUE_POLICY} collapsed={false} />
-      </Box>
+      <SimpleGrid gap={5} columns={2}>
+        <Field
+          name="displayName"
+          as={FormikTextInput}
+          label="* Display Name"
+          placeholder="How should we name this?"
+          required
+        />
+        <Box as="fieldset">
+          <Field
+            as={FormikTextInput}
+            name="outputConfig.sqs.queueUrl"
+            label="Queue URL"
+            placeholder="Where should we send the queue data to?"
+            required
+            aria-describedby="queueUrl-label queueUrl-policy"
+          />
+          <FormHelperText id="queueUrl-label" mt={2}>
+            <b>Note</b>: You would need to allow Panther <b>sqs:SendMessage</b> access to send alert
+            messages to your queue.{' '}
+            {!showPolicy && (
+              <AbstractButton color="blue-400" onClick={() => setShowPolicy(true)}>
+                Show Policy
+              </AbstractButton>
+            )}
+          </FormHelperText>
+          <Collapse open={showPolicy}>
+            <Box my={4} id="queueUrl-policy">
+              <JsonViewer data={SQS_QUEUE_POLICY} collapsed={false} />
+            </Box>
+          </Collapse>
+        </Box>
+      </SimpleGrid>
     </BaseDestinationForm>
   );
 };

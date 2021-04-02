@@ -23,6 +23,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/sqs"
 	jsoniter "github.com/json-iterator/go"
 	"go.uber.org/zap"
+
+	"github.com/panther-labs/panther/api/lambda/analysis/models"
 )
 
 // Queue a policy for re-analysis (evaluate against all applicable resources).
@@ -36,17 +38,21 @@ func queuePolicy(policy *tableItem) error {
 	}
 
 	zap.L().Info("queueing policy for analysis",
-		zap.String("policyId", string(policy.ID)),
+		zap.String("policyId", policy.ID),
 		zap.String("resourceQueueURL", env.ResourceQueueURL))
 	_, err = sqsClient.SendMessage(
 		&sqs.SendMessageInput{MessageBody: &body, QueueUrl: &env.ResourceQueueURL})
 	return err
 }
 
-// updateLayer sends a message to the layer manager lambda indicating a layer of a certain type needs to be re-built
-func updateLayer(analysisType string) error {
+// updateLayer sends a message to the layer manager lambda indicating a layer of a certain type
+// needs to be re-built
+//
+// Currently only the global type is supported, but in the future we may support other types as
+// well.
+func updateLayer() error {
 	_, err := sqsClient.SendMessage(&sqs.SendMessageInput{
-		MessageBody: aws.String(analysisType),
+		MessageBody: aws.String(string(models.TypeGlobal)),
 		QueueUrl:    aws.String(env.LayerManagerQueueURL),
 	})
 	return err

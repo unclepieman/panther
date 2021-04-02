@@ -22,11 +22,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"path"
 	"runtime"
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager/s3manageriface"
 	"github.com/aws/aws-sdk-go/service/sns"
@@ -36,39 +36,35 @@ import (
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
-	"github.com/panther-labs/panther/api/lambda/core/log_analysis/log_processor/models"
+	"github.com/panther-labs/panther/internal/log_analysis/awsglue"
 	"github.com/panther-labs/panther/internal/log_analysis/log_processor/common"
+	logmetrics "github.com/panther-labs/panther/internal/log_analysis/log_processor/metrics"
 	"github.com/panther-labs/panther/internal/log_analysis/log_processor/parsers"
-	"github.com/panther-labs/panther/internal/log_analysis/log_processor/registry"
+	"github.com/panther-labs/panther/internal/log_analysis/log_processor/sources"
+	"github.com/panther-labs/panther/internal/log_analysis/notify"
+	"github.com/panther-labs/panther/internal/log_analysis/pantherdb"
+	"github.com/panther-labs/panther/pkg/metrics"
+	pq "github.com/panther-labs/panther/pkg/priorityq"
 )
 
 const (
-	// s3ObjectKeyFormat represents the format of the S3 object key
-	// It has 3 parts:
-	// 1. The key prefix 2. Timestamp in format `s3ObjectTimestampFormat` 3. UUID4
-	s3ObjectKeyFormat = "%s%s-%s.json.gz"
+	uploaderBufferMaxSizeBytes = 50 * 1024 * 1024
+	uploaderPartSize           = 5 * 1024 * 1024
 
-	// The timestamp format in the S3 objects with second precision: yyyyMMddTHHmmssZ
-	S3ObjectTimestampFormat = "20060102T150405Z"
+	numberConcurrentUploads = 8 // how many uploaders are run concurrently
 
-	logDataTypeAttributeName = "type"
-	logTypeAttributeName     = "id"
+	// The timestamp layout used in the S3 object key filename part with second precision: yyyyMMddTHHmmssZ
+	S3ObjectTimestampLayout = "20060102T150405Z"
 
-	messageAttributeDataType = "String"
+	//  maximum time to hold an s3 buffer in memory (controls latency of rules engine which processes this output)
+	maxDuration = 1 * time.Minute
 
-	//  maximum time to hold an s3 buffer in memory (controls latency of rules engine which processes this output
-	maxDuration = 2 * time.Minute
-
-	bytesPerMB                  = 1024 * 1024
-	defaultMaxS3BufferSizeBytes = 50 * bytesPerMB
+	// maximum number of buffers in memory (if exceeded buffers are flushed)
+	maxBuffers = 256
 )
 
 var (
-	maxS3BufferSizeBytes = defaultMaxS3BufferSizeBytes // the largest we let any single buffer get (var so we can set in tests)
-
 	newLineDelimiter = []byte("\n")
-
-	parserRegistry registry.Interface = registry.AvailableParsers() // initialize
 
 	memUsedAtStartupMB int // set in init(), used to size memory buffers for S3 write
 )
@@ -76,44 +72,43 @@ var (
 func init() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
-	memUsedAtStartupMB = (int)(memStats.Sys/(bytesPerMB)) + 1
+	memUsedAtStartupMB = (int)(memStats.Sys/(1024*1024)) + 1
 }
 
-func CreateS3Destination() Destination {
+func CreateS3Destination(jsonAPI jsoniter.API) Destination {
+	if jsonAPI == nil {
+		jsonAPI = jsoniter.ConfigDefault
+	}
 	return &S3Destination{
-		s3Uploader:          common.S3Uploader,
+		s3Uploader:          s3manager.NewUploaderWithClient(common.S3Client),
 		snsClient:           common.SnsClient,
 		s3Bucket:            common.Config.ProcessedDataBucket,
 		snsTopicArn:         common.Config.SnsTopicARN,
+		latencyCounter:      logmetrics.EventLatencySeconds,
+		outputFiles:         logmetrics.OutputFiles,
+		outputBytes:         logmetrics.OutputBytes,
 		maxBufferedMemBytes: maxS3BufferMemUsageBytes(common.Config.AwsLambdaFunctionMemorySize),
+		maxBufferSize:       uploaderBufferMaxSizeBytes,
 		maxDuration:         maxDuration,
+		maxBuffers:          maxBuffers,
+		jsonAPI:             jsonAPI,
 	}
 }
 
 // the largest we let total size of compressed output buffers get before calling sendData() to write to S3 in bytes
-// NOTE: this presumes processing 1 file at a time
 func maxS3BufferMemUsageBytes(lambdaSizeMB int) uint64 {
 	const (
-		/*
-					NOTE:
-					  "More specifically CloudTrail will collect logs for 5 mins or until the max file size of 45MB has been reached.
-					  An important thing worth noting is that these logs get compressed before being sent to S3, once the file size
-					  limit is met or the time limit has been exceeded"
-				    Because CT files are "document" JSON and all on 1 line we currently need to read ALL the uncompressed data into memory.
-			        FIXME: we should switch to streaming JSON reader
-					Below we set the lower bound on memory to be 45MB * 4 (because we convert all the records and parse) plus some for overhead
-		*/
-		largestAllInMemFileMB     = 45
-		processingExpansionFactor = 4
-		memoryFootprint           = largestAllInMemFileMB * processingExpansionFactor
-		minimumScratchMemMB       = 5 // how much overhead is needed to process a file
+		memoryFootprint      = (numberConcurrentUploads * uploaderBufferMaxSizeBytes) / (1024 * 1024)
+		downloadBufferSizeMB = (sources.DownloadMaxPartSize * 3) / (1024 * 1024) // 3X due to double buffer in downloader + 1 for reader
+		// FIXME: the below number is picked to allow reading in a full 50MB CloudTrail file into ram, when we fix this the number can be lower
+		minimumScratchMemMB = 50 // how much overhead is needed to process
 	)
-	maxBufferUsageMB := lambdaSizeMB - memUsedAtStartupMB - memoryFootprint - minimumScratchMemMB
+	maxBufferUsageMB := lambdaSizeMB - memUsedAtStartupMB - memoryFootprint - downloadBufferSizeMB - minimumScratchMemMB
 	if maxBufferUsageMB < 5 {
 		panic(fmt.Sprintf("available memory too small for log processing, increase lambda size from %dMB", lambdaSizeMB))
 	}
 
-	return (uint64)(maxBufferUsageMB) * bytesPerMB // to bytes
+	return (uint64)(maxBufferUsageMB) * 1024 * 1024 // to bytes
 }
 
 // S3Destination sends normalized events to S3
@@ -127,129 +122,122 @@ type S3Destination struct {
 	snsTopicArn string
 	// thresholds for ejection
 	maxBufferedMemBytes uint64 // max will hold in buffers before ejection
+	maxBufferSize       int
 	maxDuration         time.Duration
+	maxBuffers          int
+	jsonAPI             jsoniter.API
+	latencyCounter      metrics.Counter
+	outputFiles         metrics.Counter
+	outputBytes         metrics.Counter
 }
 
 // SendEvents stores events in S3.
-// It continuously reads events from outputChannel, groups them in batches per log type
+// It continuously reads events from parsedEventChannel, groups them in batches per log type
 // and stores them in the appropriate S3 path. If the method encounters an error
 // it writes an error to the errorChannel and continues until channel is closed (skipping events).
 // The sendData() method is called as go routine to allow processing to continue and hide network latency.
-func (destination *S3Destination) SendEvents(parsedEventChannel chan *parsers.PantherLog, errChan chan error) {
+func (d *S3Destination) SendEvents(parsedEventChannel chan *parsers.Result, errChan chan error) {
 	// used to flush expired buffers
-	flushExpired := time.NewTicker(destination.maxDuration)
+	flushExpired := time.NewTicker(d.maxDuration)
 	defer flushExpired.Stop()
 
-	// use a single go routine for safety/back pressure when writing to s3 concurrently with buffer accumulation
+	// use a configurable number of go routines for safety/back pressure when writing to s3 concurrently with buffer accumulation
 	var sendWaitGroup sync.WaitGroup
-	sendChan := make(chan *s3EventBuffer) // unbuffered for back pressure (we want only 1 sendData() in flight)
-	sendWaitGroup.Add(1)
-	go func() {
-		for buffer := range sendChan {
-			destination.sendData(buffer, errChan)
-		}
-		sendWaitGroup.Done()
-	}()
+	// FIXME: We risk a panic causing a memory leak by never exiting the write goroutine (see below).
+	sendChan := make(chan *s3EventBuffer) // unbuffered for back pressure
+
+	for i := 0; i < numberConcurrentUploads; i++ {
+		sendWaitGroup.Add(1)
+		go func() {
+			// Make sure a panic does not prevent SendEvents from exiting
+			defer sendWaitGroup.Done()
+			for buffer := range sendChan {
+				d.sendData(buffer, errChan)
+			}
+		}()
+	}
 
 	// accumulate results gzip'd in a buffer
 	failed := false // set to true on error and loop will drain channel
-	bufferSet := newS3EventBufferSet()
-	eventsProcessed := 0
+	bufferSet := d.newS3EventBufferSet()
 	zap.L().Debug("starting to read events from channel")
-	for event := range parsedEventChannel {
-		if failed { // drain channel
-			continue
-		}
-
-		// Check if any buffer has data for longer than maxDuration
+	run := true
+	for run {
 		select {
 		case <-flushExpired.C:
-			now := time.Now()                                  // NOTE: not the same as the tick time which can be older
-			_ = bufferSet.apply(func(b *s3EventBuffer) error { // does not return an error
-				if now.Sub(b.createTime) >= destination.maxDuration {
-					bufferSet.removeBuffer(b) // bufferSet is not thread safe, do this here
-					sendChan <- b
+			now := time.Now() // NOTE: not the same as the tick time which can be older
+			for {
+				tooOldBuffer := bufferSet.removeTooOldBuffer(now, d.maxDuration)
+				if tooOldBuffer == nil { // nothing to do, no more buffers too old
+					break
 				}
-				return nil
-			})
-		default: // makes select non-blocking
-		}
+				sendChan <- tooOldBuffer
+			}
+		case event, ok := <-parsedEventChannel:
+			if !ok {
+				// If channel has been closed,
+				// stop the loop
+				run = false
+				break
+			}
 
-		data, err := jsoniter.Marshal(event.Event())
-		if err != nil {
-			failed = true
-			errChan <- errors.Wrap(err, "failed to marshall log parser event for S3")
-			continue
-		}
+			if failed {
+				// If we have encountered already a failure just ignore the messages
+				// Note that we don't stop when we encounter a failure but use this control variable
+				// since we want to make sure we drain the `parsedEventChannel`
+				break
+			}
 
-		buffer := bufferSet.getBuffer(event)
-
-		err = bufferSet.addEvent(buffer, data)
-		if err != nil {
-			failed = true
-			errChan <- err
-			continue
-		}
-
-		// Check if buffer is bigger than threshold for a single buffer
-		if buffer.bytes >= maxS3BufferSizeBytes {
-			bufferSet.removeBuffer(buffer) // bufferSet is not thread safe, do this here
-			sendChan <- buffer
-		}
-
-		// Check if bufferSet is bigger than threshold for total memory usage
-		if bufferSet.totalBufferedMemBytes >= destination.maxBufferedMemBytes {
-			largestBuffer := bufferSet.largestBuffer()
-			if largestBuffer == nil { // this should NEVER happen since we exceeded threshold
-				zap.L().Error("bufferSet error",
-					zap.Error(errors.New("non-empty bufferSet does not have buffer")))
-			} else {
-				bufferSet.removeBuffer(largestBuffer) // bufferSet is not thread safe, do this here
-				sendChan <- buffer
+			sendBuffers, err := bufferSet.writeEvent(event)
+			if err != nil {
+				failed = true
+				zap.L().Debug(`aborting log processing: failed to write event`, zap.Error(err), zap.String(`logType`, event.PantherLogType))
+				errChan <- errors.Wrapf(err, "failed to write event %s", event.PantherLogType)
+				continue
+			}
+			// buffers needs flushing
+			for _, buf := range sendBuffers {
+				sendChan <- buf
 			}
 		}
-
-		eventsProcessed++
 	}
 
-	if failed {
-		zap.L().Debug("failed, returning after draining parsedEventsChannel")
+	if !failed {
+		zap.L().Debug("output channel closed, sending last events")
+		// If the channel has been closed send the buffered messages before terminating
+		_ = bufferSet.apply(func(buffer *s3EventBuffer) (bool, error) {
+			bufferSet.removeBuffer(buffer) // bufferSet is not thread safe, do this here
+			sendChan <- buffer
+			return false, nil
+		})
 	}
 
-	zap.L().Debug("output channel closed, sending last events")
-	// If the channel has been closed send the buffered messages before terminating
-	_ = bufferSet.apply(func(buffer *s3EventBuffer) error {
-		bufferSet.removeBuffer(buffer) // bufferSet is not thread safe, do this here
-		sendChan <- buffer
-		return nil
-	})
-
+	// FIXME: closing the channel here is appropriate but we risk a panic leaving the write goroutine open forever.
+	// causing a memory leak. To fix this we need to have the reading of results in a goroutine and keep the writing here.
+	// We need to wrap the read loop in a separate function and synchronize with defer close(sendChan).
+	// Write failures should also abort the whole log processing so this is more complex than it looks.
 	close(sendChan)
 	sendWaitGroup.Wait() // wait until all writes to s3 are done
 
-	zap.L().Debug("finished sending s3 files", zap.Int("events", eventsProcessed))
+	zap.L().Debug("finished sending s3 files")
 }
 
 // sendData puts data in S3 and sends notification to SNS
-func (destination *S3Destination) sendData(buffer *s3EventBuffer, errChan chan error) {
+func (d *S3Destination) sendData(buffer *s3EventBuffer, errChan chan error) {
 	if buffer.events == 0 { // skip empty buffers
 		return
 	}
 
-	var err error
-	var contentLength int64 = 0
+	var (
+		err error
+		key string
+	)
 
-	key := getS3ObjectKey(buffer.logType, buffer.hour)
-
-	operation := common.OpLogManager.Start("sendData", common.OpLogS3ServiceDim)
-	defer func() {
-		operation.Stop()
-		operation.Log(err,
-			// s3 dim info
-			zap.Int64("contentLength", contentLength),
-			zap.String("bucket", destination.s3Bucket),
-			zap.String("key", key))
-	}()
+	key = getS3ObjectKey(buffer)
+	if err != nil {
+		errChan <- err
+		return
+	}
 
 	payload, err := buffer.read()
 	if err != nil {
@@ -257,55 +245,41 @@ func (destination *S3Destination) sendData(buffer *s3EventBuffer, errChan chan e
 		return
 	}
 
-	contentLength = int64(len(payload)) // for logging above
-
-	if _, err := destination.s3Uploader.Upload(&s3manager.UploadInput{
-		Bucket: aws.String(destination.s3Bucket),
-		Key:    aws.String(key),
+	if _, err := d.s3Uploader.Upload(&s3manager.UploadInput{
+		Bucket: &d.s3Bucket,
+		Key:    &key,
 		Body:   bytes.NewReader(payload),
+	}, func(u *s3manager.Uploader) { // calc the concurrency based on payload
+		u.Concurrency = (len(payload) / uploaderPartSize) + 1 // if it evenly divides an extra won't matter
+		u.PartSize = uploaderPartSize
 	}); err != nil {
 		errChan <- errors.Wrap(err, "S3Upload")
 		return
 	}
 
-	err = destination.sendSNSNotification(key, buffer) // if send fails we fail whole operation
+	err = d.sendSNSNotification(key, buffer) // if send fails we fail whole operation
 	if err != nil {
 		errChan <- err
 	}
+	d.outputBytes.Add(float64(len(payload)))
+	d.outputFiles.Add(1)
 }
 
-func (destination *S3Destination) sendSNSNotification(key string, buffer *s3EventBuffer) error {
-	var err error
-	operation := common.OpLogManager.Start("sendSNSNotification", common.OpLogSNSServiceDim)
-	defer func() {
-		operation.Stop()
-		operation.Log(err,
-			zap.String("topicArn", destination.snsTopicArn))
-	}()
-
-	s3Notification := models.NewS3ObjectPutNotification(destination.s3Bucket, key, buffer.bytes)
-
+func (d *S3Destination) sendSNSNotification(key string, buffer *s3EventBuffer) error {
+	s3Notification := notify.NewS3ObjectPutNotification(d.s3Bucket, key, buffer.bytes)
 	marshalledNotification, err := jsoniter.MarshalToString(s3Notification)
 	if err != nil {
 		err = errors.Wrap(err, "failed to marshal notification")
 		return err
 	}
 
+	dataType := pantherdb.GetDataType(buffer.logType)
 	input := &sns.PublishInput{
-		TopicArn: aws.String(destination.snsTopicArn),
-		Message:  aws.String(marshalledNotification),
-		MessageAttributes: map[string]*sns.MessageAttributeValue{
-			logDataTypeAttributeName: {
-				StringValue: aws.String(models.LogData.String()),
-				DataType:    aws.String(messageAttributeDataType),
-			},
-			logTypeAttributeName: {
-				StringValue: aws.String(buffer.logType),
-				DataType:    aws.String(messageAttributeDataType),
-			},
-		},
+		TopicArn:          &d.snsTopicArn,
+		Message:           &marshalledNotification,
+		MessageAttributes: notify.NewLogAnalysisSNSMessageAttributes(dataType, buffer.logType),
 	}
-	if _, err = destination.snsClient.Publish(input); err != nil {
+	if _, err = d.snsClient.Publish(input); err != nil {
 		err = errors.Wrap(err, "failed to send notification to topic")
 		return err
 	}
@@ -313,28 +287,122 @@ func (destination *S3Destination) sendSNSNotification(key string, buffer *s3Even
 	return err
 }
 
-func getS3ObjectKey(logType string, timestamp time.Time) string {
-	return fmt.Sprintf(s3ObjectKeyFormat,
-		parserRegistry.LookupParser(logType).GlueTableMetadata.GetPartitionPrefix(timestamp.UTC()), // get the path to store the data in S3
-		timestamp.Format(S3ObjectTimestampFormat),
-		uuid.New().String())
+// getS3ObjectKey builds the S3 object key for storing a partition file of processed logs.
+func getS3ObjectKey(buf *s3EventBuffer) string {
+	typ := pantherdb.GetDataType(buf.logType)
+	db := pantherdb.DatabaseName(typ)
+	table := pantherdb.TableName(buf.logType)
+	partitionPrefix := awsglue.PartitionPrefix(db, table, awsglue.GlueTableHourly, buf.hour)
+	filename := fmt.Sprintf("%s-%s.json.gz",
+		buf.hour.Format(S3ObjectTimestampLayout),
+		uuid.New(),
+	)
+	return path.Join(partitionPrefix, filename)
 }
 
 // s3BufferSet is a group of buffers associated with hour time bins, pointing to maps logtype->s3EventBuffer
 type s3EventBufferSet struct {
-	totalBufferedMemBytes uint64 // managed by addEvent() and removeBuffer()
-	set                   map[time.Time]map[string]*s3EventBuffer
+	totalBufferedMemBytes   uint64 // managed by addEvent() and removeBuffer()
+	set                     map[time.Time]map[string]*s3EventBuffer
+	numBuffers              int
+	sizePriorityQueue       pq.PriorityQueue // used to make removeLargestBuffer fast
+	createTimePriorityQueue pq.PriorityQueue // used to make removeTooOldBuffer fast
+	stream                  *jsoniter.Stream
+	maxBuffers              int
+	maxBufferSize           int
+	maxTotalSize            uint64
+	latencyCounter          metrics.Counter
 }
 
-func newS3EventBufferSet() *s3EventBufferSet {
+func (d *S3Destination) newS3EventBufferSet() *s3EventBufferSet {
+	const initialBufferSize = 8192
+	// Stream will be a buffered stream
+	stream := jsoniter.NewStream(d.jsonAPI, nil, initialBufferSize)
 	return &s3EventBufferSet{
-		set: make(map[time.Time]map[string]*s3EventBuffer),
+		stream:         stream,
+		set:            make(map[time.Time]map[string]*s3EventBuffer),
+		maxBuffers:     d.maxBuffers,
+		maxBufferSize:  d.maxBufferSize,
+		maxTotalSize:   d.maxBufferedMemBytes,
+		latencyCounter: d.latencyCounter,
 	}
 }
 
-func (bs *s3EventBufferSet) getBuffer(event *parsers.PantherLog) *s3EventBuffer {
+// writeEvent adds event to the bufferSet, if it returns a non nil buffer slice then these  buffers need to be written to s3
+func (bs *s3EventBufferSet) writeEvent(event *parsers.Result) (sendBuffers []*s3EventBuffer, err error) {
+	// HERE BE DRAGONS
+	// We need to first serialize the event to JSON for events that only set the event time via `event_time:"true"` tag.
+	// This includes custom logs and other simple struct-based events.
+	stream := bs.stream
+	stream.Reset(nil)
+	stream.WriteVal(event)
+	// By now if the event has event time defined then event.PantherEventTime will be a non-zero value
+	err, stream.Error = stream.Error, nil
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to serialize event to JSON")
+	}
+	// Just in case something was amiss elsewhere `getBuffer` checks again and uses PantherParseTime and Time.Now() as fallbacks.
+	buf := bs.getBuffer(event)
+	if buf == nil {
+		return nil, errors.New(`could not resolve a buffer for the event`)
+	}
+	// We need to increment the counter here since the event.PantherParseTime and event.PantherEventTime are populated only
+	// after the event has been serialized
+	buf.latencyCounter.Add(event.PantherParseTime.Sub(event.PantherEventTime).Seconds())
+	n, err := buf.addEvent(stream.Buffer())
+	if err != nil {
+		return nil, err
+	}
+	bs.totalBufferedMemBytes += uint64(n)
+
+	// update the rank so we can find largest quickly
+	bs.sizePriorityQueue.UpdatePriority(buf, float64(buf.bytes/uploaderPartSize)) // in # parts to reduce cost of update
+
+	// Check if buffer is bigger than threshold for a single buffer
+	if buf.bytes >= bs.maxBufferSize {
+		bs.removeBuffer(buf) // bufferSet is not thread safe, do this here
+		sendBuffers = append(sendBuffers, buf)
+	}
+
+	// Check if bufferSet has too many entries
+	if bs.numBuffers > bs.maxBuffers {
+		// The hope is most of the flushed buffers were done updating (as events often come roughly in time order)
+		// Adding the +1 to make sure it works in case the maxbuffer is 1
+		bufferReduction := (bs.maxBuffers + 1) / 2
+		for i := 0; i < bufferReduction; i++ {
+			// FIXME: a better implementation would be to sort the current buffers by size and remove top N
+			if largestBuffer := bs.removeLargestBuffer(); largestBuffer != nil {
+				sendBuffers = append(sendBuffers, largestBuffer)
+			} else {
+				break // no more
+			}
+		}
+	}
+
+	// Check if bufferSet is bigger than threshold for total memory usage
+	if bs.totalBufferedMemBytes >= bs.maxTotalSize {
+		if largestBuffer := bs.removeLargestBuffer(); largestBuffer != nil {
+			sendBuffers = append(sendBuffers, largestBuffer)
+		}
+	}
+
+	return sendBuffers, nil
+}
+
+func (bs *s3EventBufferSet) getBuffer(event *parsers.Result) *s3EventBuffer {
+	// Make sure we have a valid time to set the event partition
+	// If the event had no event time we use PantherParseTime and time.Now as fallbacks
+	eventTime := event.PantherEventTime
+	if eventTime.IsZero() {
+		eventTime = event.PantherParseTime
+		if eventTime.IsZero() {
+			return nil
+		}
+	}
 	// bin by hour (this is our partition size)
-	hour := (time.Time)(*event.PantherEventTime).Truncate(time.Hour)
+	// We convert to UTC here so truncation does not affect the partition in the weird half-hour timezones if for
+	// some reason (bug) a non-UTC timestamp got through.
+	hour := eventTime.UTC().Truncate(time.Hour)
 
 	logTypeToBuffer, ok := bs.set[hour]
 	if !ok {
@@ -342,20 +410,20 @@ func (bs *s3EventBufferSet) getBuffer(event *parsers.PantherLog) *s3EventBuffer 
 		bs.set[hour] = logTypeToBuffer
 	}
 
-	logType := *event.PantherLogType
+	logType := event.PantherLogType
 	buffer, ok := logTypeToBuffer[logType]
 	if !ok {
-		buffer = newS3EventBuffer(logType, hour)
+		buffer = newS3EventBuffer(bs.latencyCounter, logType, hour)
 		logTypeToBuffer[logType] = buffer
+		bs.numBuffers++
+		bs.sizePriorityQueue.Insert(buffer, 0.0)
+
+		// Use nanoseconds so we have a better ordering
+		since := time.Duration(buffer.createTime.UnixNano()).Seconds()
+		bs.createTimePriorityQueue.Insert(buffer, -since) // negative so oldest is on top!
 	}
 
 	return buffer
-}
-
-func (bs *s3EventBufferSet) addEvent(buffer *s3EventBuffer, event []byte) error {
-	eventBytes, err := buffer.addEvent(event)
-	bs.totalBufferedMemBytes += (uint64)(eventBytes)
-	return err
 }
 
 func (bs *s3EventBufferSet) removeBuffer(buffer *s3EventBuffer) {
@@ -363,27 +431,49 @@ func (bs *s3EventBufferSet) removeBuffer(buffer *s3EventBuffer) {
 	if !ok {
 		return
 	}
-	bs.totalBufferedMemBytes -= (uint64)(buffer.bytes)
+	if _, ok := logTypeToBuffer[buffer.logType]; !ok {
+		return
+	}
 	delete(logTypeToBuffer, buffer.logType)
+	bs.totalBufferedMemBytes -= (uint64)(buffer.bytes)
+	bs.numBuffers--
+	bs.sizePriorityQueue.Remove(buffer)
+	bs.createTimePriorityQueue.Remove(buffer)
+	if len(logTypeToBuffer) == 0 {
+		delete(bs.set, buffer.hour)
+	}
 }
 
-func (bs *s3EventBufferSet) largestBuffer() (largestBuffer *s3EventBuffer) {
-	var maxBufferSize int
-	_ = bs.apply(func(buffer *s3EventBuffer) error { // we do not return any errors
-		if buffer.bytes > maxBufferSize {
-			maxBufferSize = buffer.bytes
-			largestBuffer = buffer
-		}
+func (bs *s3EventBufferSet) removeLargestBuffer() (largestBuffer *s3EventBuffer) {
+	largest := bs.sizePriorityQueue.Pop() // this takes buffer out of priority queue
+	if largest == nil {                   // if q is empty
 		return nil
-	})
+	}
+	largestBuffer = largest.(*s3EventBuffer)
+	bs.removeBuffer(largestBuffer)
 	return largestBuffer
 }
 
-func (bs *s3EventBufferSet) apply(f func(buffer *s3EventBuffer) error) error {
+func (bs *s3EventBufferSet) removeTooOldBuffer(now time.Time, maxDuration time.Duration) (oldestBuffer *s3EventBuffer) {
+	oldest, found := bs.createTimePriorityQueue.Peek()
+	if !found { // if q is empty
+		return nil
+	}
+	oldestBuffer = oldest.(*s3EventBuffer)
+	// too old?
+	if now.Sub(oldestBuffer.createTime) >= maxDuration {
+		bs.removeBuffer(oldestBuffer)
+	} else {
+		return nil
+	}
+	return oldestBuffer
+}
+
+func (bs *s3EventBufferSet) apply(f func(buffer *s3EventBuffer) (bool, error)) error {
 	for _, logTypeToBuffer := range bs.set {
 		for _, buffer := range logTypeToBuffer {
-			err := f(buffer)
-			if err != nil {
+			stop, err := f(buffer)
+			if err != nil || stop {
 				return err
 			}
 		}
@@ -394,42 +484,39 @@ func (bs *s3EventBufferSet) apply(f func(buffer *s3EventBuffer) error) error {
 // s3EventBuffer is a group of events of the same type
 // that will be stored in the same S3 object
 type s3EventBuffer struct {
-	logType    string
-	buffer     *bytes.Buffer
-	writer     *gzip.Writer
-	bytes      int
-	events     int
-	hour       time.Time // the event time bin
-	createTime time.Time // used to expire buffer
+	logType        string
+	buffer         *bytes.Buffer
+	writer         *gzip.Writer
+	bytes          int
+	events         int
+	hour           time.Time // the event time bin
+	createTime     time.Time // used to expire buffer
+	latencyCounter metrics.Counter
 }
 
-func newS3EventBuffer(logType string, hour time.Time) *s3EventBuffer {
+func newS3EventBuffer(latencyCounter metrics.Counter, logType string, hour time.Time) *s3EventBuffer {
 	buffer := &bytes.Buffer{}
 	writer := gzip.NewWriter(buffer)
 	return &s3EventBuffer{
-		logType:    logType,
-		buffer:     buffer,
-		writer:     writer,
-		hour:       hour,
-		createTime: time.Now(), // used with time.Tick() to check expiration ... no need for UTC()
+		logType: logType,
+		buffer:  buffer,
+		writer:  writer,
+		hour:    hour,
+		// All events in the buffer have the same log type
+		latencyCounter: latencyCounter.With(metrics.LogTypeDimension, logType),
+		createTime:     time.Now(), // used with time.Tick() to check expiration ... no need for UTC()
 	}
 }
 
 // addEvent adds new data to the s3EventBuffer, return bytes added and error
-func (b *s3EventBuffer) addEvent(event []byte) (int, error) {
+func (b *s3EventBuffer) addEvent(data []byte) (int, error) {
+	// FIXME: To have proper JSONL data in the buffers we need to write "\n" *before* writing the JSON if startBufferSize is zero
 	startBufferSize := b.buffer.Len()
-
-	_, err := b.writer.Write(event)
-	if err != nil {
-		err = errors.Wrap(err, "failed to add data to buffer %s")
+	if _, err := b.writer.Write(data); err != nil {
 		return 0, err
 	}
-
-	// Adding new line delimiter
-	_, err = b.writer.Write(newLineDelimiter)
-	if err != nil {
-		err = errors.Wrap(err, "failed to add data to buffer")
-		return 0, err
+	if _, err := b.writer.Write(newLineDelimiter); err != nil {
+		return 0, errors.Wrap(err, "failed to add data to buffer %s")
 	}
 
 	b.bytes = b.buffer.Len() // size of compressed data minus gzip buffer (that's ok we just use this for memory pressure)

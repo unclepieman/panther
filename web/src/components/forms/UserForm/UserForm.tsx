@@ -17,9 +17,9 @@
  */
 
 import React from 'react';
-import { Field, Formik } from 'formik';
+import { Field, Form, Formik } from 'formik';
 import SubmitButton from 'Components/buttons/SubmitButton';
-import { Flex } from 'pouncejs';
+import { Flex, SimpleGrid } from 'pouncejs';
 import FormikTextInput from 'Components/fields/TextInput';
 import * as Yup from 'yup';
 import { useListUsers } from 'Pages/Users';
@@ -66,45 +66,34 @@ const UserForm: React.FC<UserFormProps> = ({ initialValues, onSubmit }) => {
       enableReinitialize
       validationSchema={validationSchema}
     >
-      {({ handleSubmit, isSubmitting, isValid, dirty }) => {
-        return (
-          <form onSubmit={handleSubmit}>
+      <Form>
+        <Flex direction="column" spacing={4}>
+          <Field
+            as={FormikTextInput}
+            label="Email address"
+            placeholder="john@doe.com"
+            name="email"
+            required
+          />
+          <SimpleGrid columns={2} spacing={4}>
             <Field
               as={FormikTextInput}
-              label="Email address"
-              placeholder="john@doe.com"
-              name="email"
-              aria-required
-              mb={3}
+              label="First Name"
+              placeholder="John"
+              name="givenName"
+              required
             />
-            <Flex mb={6} justify="space-between">
-              <Field
-                as={FormikTextInput}
-                label="First Name"
-                placeholder="John"
-                name="givenName"
-                aria-required
-              />
-              <Field
-                as={FormikTextInput}
-                label="Last Name"
-                placeholder="Doe"
-                name="familyName"
-                aria-required
-              />
-            </Flex>
-            <Flex borderTop="1px solid" borderColor="grey100" pt={6} mt={10} justify="flex-end">
-              <SubmitButton
-                submitting={isSubmitting}
-                disabled={!dirty || !isValid || isSubmitting}
-                width={1}
-              >
-                {initialValues.id ? 'Update' : 'Invite'}
-              </SubmitButton>
-            </Flex>
-          </form>
-        );
-      }}
+            <Field
+              as={FormikTextInput}
+              label="Last Name"
+              placeholder="Doe"
+              name="familyName"
+              required
+            />
+          </SimpleGrid>
+          <SubmitButton fullWidth>{initialValues.id ? 'Update' : 'Invite'}</SubmitButton>
+        </Flex>
+      </Form>
     </Formik>
   );
 };

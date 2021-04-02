@@ -17,11 +17,9 @@
  */
 
 import React from 'react';
-import { Card } from 'pouncejs';
-import urls from 'Source/urls';
-import useRouter from 'Hooks/useRouter';
-import { extractErrorMessage } from 'Helpers/utils';
+import withSEO from 'Hoc/withSEO';
 import ComplianceSourceWizard from 'Components/wizards/ComplianceSourceWizard';
+import { EventEnum, SrcEnum, trackError, TrackErrorEnum, trackEvent } from 'Helpers/analytics';
 import { useAddComplianceSource } from './graphql/addComplianceSource.generated';
 
 const initialValues = {
@@ -29,11 +27,12 @@ const initialValues = {
   integrationLabel: '',
   cweEnabled: true,
   remediationEnabled: true,
+  regionIgnoreList: [],
+  resourceTypeIgnoreList: [],
 };
 
 const CreateComplianceSource: React.FC = () => {
-  const { history } = useRouter();
-  const [addComplianceSource, { error }] = useAddComplianceSource({
+  const [addComplianceSource] = useAddComplianceSource({
     update: (cache, { data: { addComplianceIntegration } }) => {
       cache.modify('ROOT_QUERY', {
         listComplianceIntegrations: (queryData, { toReference }) => {
@@ -42,29 +41,39 @@ const CreateComplianceSource: React.FC = () => {
         },
       });
     },
-    onCompleted: () => history.push(urls.compliance.sources.list()),
+    onCompleted: () =>
+      trackEvent({ event: EventEnum.AddedComplianceSource, src: SrcEnum.ComplianceSources }),
+    onError: err => {
+      trackError({
+        event: TrackErrorEnum.FailedToAddComplianceSource,
+        src: SrcEnum.ComplianceSources,
+      });
+
+      // Defining an `onError` catches the API exception. We need to re-throw it so that it
+      // can be caught by `ValidationPanel` which checks for API errors
+      throw err;
+    },
   });
 
   return (
-    <Card p={9} mb={6}>
-      <ComplianceSourceWizard
-        initialValues={initialValues}
-        externalErrorMessage={error && extractErrorMessage(error)}
-        onSubmit={values =>
-          addComplianceSource({
-            variables: {
-              input: {
-                integrationLabel: values.integrationLabel,
-                awsAccountId: values.awsAccountId,
-                cweEnabled: values.cweEnabled,
-                remediationEnabled: values.remediationEnabled,
-              },
+    <ComplianceSourceWizard
+      initialValues={initialValues}
+      onSubmit={values =>
+        addComplianceSource({
+          variables: {
+            input: {
+              integrationLabel: values.integrationLabel,
+              awsAccountId: values.awsAccountId,
+              cweEnabled: values.cweEnabled,
+              remediationEnabled: values.remediationEnabled,
+              regionIgnoreList: values.regionIgnoreList,
+              resourceTypeIgnoreList: values.resourceTypeIgnoreList,
             },
-          })
-        }
-      />
-    </Card>
+          },
+        })
+      }
+    />
   );
 };
 
-export default CreateComplianceSource;
+export default withSEO({ title: 'New Cloud Security Source' })(CreateComplianceSource);

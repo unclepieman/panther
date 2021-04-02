@@ -20,37 +20,14 @@
 import React from 'react';
 import useSidesheet from 'Hooks/useSidesheet';
 import { SIDESHEETS } from 'Components/utils/Sidesheet';
-import PolicyBulkUploadSidesheet from 'Components/sidesheets/PolicyBulkUploadSidesheet';
-import SelectDestinationSidesheet from 'Components/sidesheets/SelectDestinationSidesheet';
-import AddDestinationSidesheet from 'Components/sidesheets/AddDestinationSidesheet';
-import UpdateDestinationSidesheet from 'Components/sidesheets/UpdateDestinationSidesheet';
-import EditAccountSidesheet from 'Components/sidesheets/EditAccountSidesheet';
 import EditUserSidesheet from 'Components/sidesheets/EditUserSidesheet';
 import UserInvitationSidesheet from 'Components/sidesheets/UserInvitationSidesheet';
 
 const SidesheetManager: React.FC = () => {
-  const { state: sidesheetState } = useSidesheet();
-  if (!sidesheetState.sidesheet) {
-    return null;
-  }
+  const { state: sidesheetState, hideSidesheet } = useSidesheet();
 
   let Component;
   switch (sidesheetState.sidesheet) {
-    case SIDESHEETS.ADD_DESTINATION:
-      Component = AddDestinationSidesheet;
-      break;
-    case SIDESHEETS.UPDATE_DESTINATION:
-      Component = UpdateDestinationSidesheet;
-      break;
-    case SIDESHEETS.SELECT_DESTINATION:
-      Component = SelectDestinationSidesheet;
-      break;
-    case SIDESHEETS.POLICY_BULK_UPLOAD:
-      Component = PolicyBulkUploadSidesheet;
-      break;
-    case SIDESHEETS.EDIT_ACCOUNT:
-      Component = EditAccountSidesheet;
-      break;
     case SIDESHEETS.EDIT_USER:
       Component = EditUserSidesheet;
       break;
@@ -58,10 +35,16 @@ const SidesheetManager: React.FC = () => {
       Component = UserInvitationSidesheet;
       break;
     default:
-      break;
+      Component = null;
   }
 
-  return <Component {...sidesheetState.props} />;
+  if (!Component) {
+    return null;
+  }
+
+  return (
+    <Component {...sidesheetState.props} open={sidesheetState.isVisible} onClose={hideSidesheet} />
+  );
 };
 
 export default SidesheetManager;

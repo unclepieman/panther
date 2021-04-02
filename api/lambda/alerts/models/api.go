@@ -22,8 +22,10 @@ import "time"
 
 // LambdaInput is the request structure for the alerts-api Lambda function.
 type LambdaInput struct {
-	GetAlert   *GetAlertInput   `json:"getAlert"`
-	ListAlerts *ListAlertsInput `json:"listAlerts"`
+	GetAlert            *GetAlertInput            `json:"getAlert"`
+	ListAlerts          *ListAlertsInput          `json:"listAlerts"`
+	UpdateAlertStatus   *UpdateAlertStatusInput   `json:"updateAlertStatus"`
+	UpdateAlertDelivery *UpdateAlertDeliveryInput `json:"updateAlertDelivery"`
 }
 
 // GetAlertInput retrieves details for a single alert.
@@ -33,12 +35,12 @@ type LambdaInput struct {
 // Example:
 // {
 //     "getAlert": {
-// 	    "alertId": "ruleId-2",
+//         "alertId": "ruleId-2",
 //         "eventsPageSize": 20
 //     }
 // }
 type GetAlertInput struct {
-	AlertID                 *string `json:"alertId" validate:"required,hexadecimal,len=32"` // AlertID is an MD5 hash
+	AlertID                 string  `json:"alertId" validate:"required,hexadecimal,len=32"` // AlertID is an MD5 hash
 	EventsPageSize          *int    `json:"eventsPageSize"  validate:"required,min=1,max=50"`
 	EventsExclusiveStartKey *string `json:"eventsExclusiveStartKey,omitempty"`
 }
@@ -55,14 +57,116 @@ type GetAlertOutput = Alert
 // {
 //     "listAlerts": {
 //         "ruleId": "My.Rule",
-//         "pageSize": 25
+//	    "type" : "RULE_ERROR",
+//         "pageSize": 25,
+//         "exclusiveStartKey": "abcdef",
+//         "severity": ["INFO"],
+//         "status": ["TRIAGED"],
+//         "nameContains": "string in alert title",
+//         "createdAtAfter": "2020-06-17T15:49:40Z",
+//         "createdAtBefore": "2020-06-17T15:49:40Z",
+//         "eventCountMin": "0",
+//         "eventCountMax": "500",
+//         "sortDir": "ascending",
 //     }
 // }
 type ListAlertsInput struct {
-	RuleID            *string `json:"ruleId,omitempty"`
-	PageSize          *int    `json:"pageSize,omitempty"  validate:"omitempty,min=1,max=50"`
-	ExclusiveStartKey *string `json:"exclusiveStartKey,omitempty"`
+	// Used for searching as secondary index
+	RuleID *string `json:"ruleId"`
+
+	// Number of results to return per query
+	PageSize *int `json:"pageSize" validate:"omitempty,min=1,max=50"`
+
+	// Infinite scroll/pagination query key
+	ExclusiveStartKey *string `json:"exclusiveStartKey"`
+
+	// Filtering
+	Types           []string   `json:"types" validate:"omitempty,dive,oneof=RULE RULE_ERROR POLICY"`
+	Severity        []string   `json:"severity" validate:"omitempty,dive,oneof=INFO LOW MEDIUM HIGH CRITICAL"`
+	NameContains    *string    `json:"nameContains"`
+	Status          []string   `json:"status" validate:"omitempty,dive,oneof=OPEN TRIAGED CLOSED RESOLVED"`
+	CreatedAtBefore *time.Time `json:"createdAtBefore"`
+	CreatedAtAfter  *time.Time `json:"createdAtAfter"`
+	EventCountMin   *int       `json:"eventCountMin" validate:"omitempty,min=0"`
+	EventCountMax   *int       `json:"eventCountMax" validate:"omitempty,min=1"`
+	LogTypes        []string   `json:"logTypes" validate:"omitempty,dive,required"`
+	ResourceTypes   []string   `json:"resourceTypes" validate:"omitempty,dive,required"`
+	// Sorting
+	SortDir *string `json:"sortDir" validate:"omitempty,oneof=ascending descending"`
 }
+
+// UpdateAlertStatusInput updates alert statuses by their IDs
+// {
+//     "updateAlertStatus": {
+//         "alertIds": ["84c3e4b27c702a1c31e6eb412fc377f6"],
+//         "status": "CLOSED"
+//         // userId is added by AppSync resolver (UpdateAlertStatusResolver)
+//         "userId": "5f54cf4a-ec56-44c2-83bc-8b742600f307"
+//     }
+// }
+type UpdateAlertStatusInput struct {
+	// ID of the alert to update
+	AlertIDs []string `json:"alertIds" validate:"gt=0,dive,hexadecimal,len=32"` // AlertID is an MD5 hash
+
+	// Variables that we allow updating:
+	Status string `json:"status" validate:"oneof=OPEN TRIAGED CLOSED RESOLVED"`
+
+	// User who made the change
+	UserID string `json:"userId" validate:"uuid4"`
+}
+
+// UpdateAlertDeliveryInput updates an alert by its ID
+// {
+//     "updateAlertDelivery": {
+//         "alertId": "84c3e4b27c702a1c31e6eb412fc377f6",
+//         "deliveryResponses": [
+//           {
+//             "outputId": "1f54cf4a-ec56-44c2-83bc-8b742600f307"
+//             "message": "gateway timeout",
+//             "statusCode": 504,
+//             "success": false,
+//             "dispatchedAt": "2020-06-17T15:49:40Z",
+//           }
+//         ]
+//     }
+// }
+type UpdateAlertDeliveryInput struct {
+	// ID of the alert to update
+	AlertID string `json:"alertId" validate:"hexadecimal,len=32"` // AlertID is an MD5 hash
+
+	// Variables that we allow updating (will be appended)
+	DeliveryResponses []*DeliveryResponse `json:"deliveryResponses"`
+}
+
+// DeliveryResponse holds the delivery response for data stored in DDB
+type DeliveryResponse struct {
+	OutputID     string    `json:"outputId" validate:"required,uuid4"`
+	Message      string    `json:"message"`
+	StatusCode   int       `json:"statusCode"`
+	Success      bool      `json:"success"`
+	DispatchedAt time.Time `json:"dispatchedAt"`
+}
+
+// UpdateAlertStatusOutput is an alias for an alert summary
+type UpdateAlertStatusOutput = []*AlertSummary
+
+// UpdateAlertDeliveryOutput is an alias for an alert summary
+type UpdateAlertDeliveryOutput = AlertSummary
+
+// Constants defined for alert statuses
+const (
+	// Open is strictly used for updating/filtering and is not explicitly set on an alert
+	OpenStatus = "OPEN"
+
+	// Triaged sets the alert to actively investigating
+	TriagedStatus = "TRIAGED"
+
+	// Closed is set for false positive or anything other reason than resolved
+	ClosedStatus = "CLOSED"
+
+	// Resolved is set when the issue was found and remediated
+	ResolvedStatus = "RESOLVED"
+)
 
 // ListAlertsOutput is the returned alert list.
 type ListAlertsOutput struct {
@@ -77,21 +181,37 @@ type ListAlertsOutput struct {
 
 // AlertSummary contains summary information for an alert
 type AlertSummary struct {
-	AlertID         *string    `json:"alertId" validate:"required"`
-	RuleID          *string    `json:"ruleId" validate:"required"`
-	RuleDisplayName *string    `json:"ruleDisplayName,omitempty"`
-	RuleVersion     *string    `json:"ruleVersion" validate:"required"`
-	DedupString     *string    `json:"dedupString,omitempty"`
-	CreationTime    *time.Time `json:"creationTime" validate:"required"`
-	UpdateTime      *time.Time `json:"updateTime" validate:"required"`
-	EventsMatched   *int       `json:"eventsMatched" validate:"required"`
-	Severity        *string    `json:"severity" validate:"required"`
-	Title           *string    `json:"title" validate:"required"`
+	AlertID           string              `json:"alertId"`
+	Type              string              `json:"type"`
+	RuleID            *string             `json:"ruleId"`
+	RuleDisplayName   *string             `json:"ruleDisplayName"`
+	RuleVersion       *string             `json:"ruleVersion"`
+	DedupString       *string             `json:"dedupString"`
+	DeliveryResponses []*DeliveryResponse `json:"deliveryResponses"`
+	LogTypes          []string            `json:"logTypes"`
+	CreationTime      *time.Time          `json:"creationTime"`
+	UpdateTime        *time.Time          `json:"updateTime"`
+	EventsMatched     *int                `json:"eventsMatched"`
+	Severity          *string             `json:"severity"`
+	Status            string              `json:"status,omitempty"`
+	Title             *string             `json:"title"`
+	LastUpdatedBy     string              `json:"lastUpdatedBy"`
+	LastUpdatedByTime time.Time           `json:"lastUpdatedByTime"`
+	PolicyID          string              `json:"policyId"`
+	PolicyDisplayName string              `json:"policyDisplayName"`
+	PolicySourceID    string              `json:"policySourceId"`
+	PolicyVersion     string              `json:"policyVersion"`
+	ResourceTypes     []string            `json:"resourceTypes"`
+	ResourceID        string              `json:"resourceId"`
+	// Generated Fields Support
+	Description string `json:"description"`
+	Reference   string `json:"reference"`
+	Runbook     string `json:"runbook"`
 }
 
 // Alert contains the details of an alert
 type Alert struct {
 	AlertSummary
-	Events                 []*string `json:"events" validate:"required"`
-	EventsLastEvaluatedKey *string   `json:"eventsLastEvaluatedKey,omitempty"`
+	Events                 []string `json:"events" validate:"required"`
+	EventsLastEvaluatedKey *string  `json:"eventsLastEvaluatedKey,omitempty"`
 }

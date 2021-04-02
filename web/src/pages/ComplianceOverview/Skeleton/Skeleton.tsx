@@ -17,43 +17,45 @@
  */
 
 import React from 'react';
-import { Box, Flex, SimpleGrid } from 'pouncejs';
+import { Box, FadeIn, SimpleGrid } from 'pouncejs';
 import Panel from 'Components/Panel';
 import TablePlaceholder from 'Components/TablePlaceholder';
-import CirclePlaceholder from 'Components/CirclePlaceholder';
-import DonutChartWrapper from '../DonutChartWrapper';
-
-const ChartPlaceholder: React.FC = () => (
-  <Flex height="100%" align="center" justify="center">
-    <CirclePlaceholder size={150} />
-  </Flex>
-);
 
 const ComplianceOverviewPageSkeleton: React.FC = () => {
   return (
     <Box as="article" mb={6}>
-      <SimpleGrid columns={4} spacing={3} as="section" mb={3}>
-        <DonutChartWrapper title="Policy Severity" icon="policy">
-          <ChartPlaceholder />
-        </DonutChartWrapper>
-        <DonutChartWrapper title="Policy Failure" icon="policy">
-          <ChartPlaceholder />
-        </DonutChartWrapper>
-        <DonutChartWrapper title="Resource Type" icon="resource">
-          <ChartPlaceholder />
-        </DonutChartWrapper>
-        <DonutChartWrapper title="Resource Health" icon="resource">
-          <ChartPlaceholder />
-        </DonutChartWrapper>
-      </SimpleGrid>
-      <SimpleGrid columns={2} spacingX={3} spacingY={2}>
-        <Panel title="Top Failing Policies" size="small">
-          <TablePlaceholder />
-        </Panel>
-        <Panel title="Top Failing Resources" size="small">
-          <TablePlaceholder />
-        </Panel>
-      </SimpleGrid>
+      <FadeIn duration={400}>
+        <SimpleGrid columns={2} spacing={3} as="section" mb={3}>
+          <Panel title="Policy Health">
+            <Box height={150}>
+              <TablePlaceholder />
+            </Box>
+          </Panel>
+          <Panel title="Failing Policies">
+            <Box height={150}>
+              <TablePlaceholder />
+            </Box>
+          </Panel>
+          <Panel title="Resource Health">
+            <Box height={150}>
+              <TablePlaceholder />
+            </Box>
+          </Panel>
+          <Panel title="Enabled Policies">
+            <Box height={150}>
+              <TablePlaceholder />
+            </Box>
+          </Panel>
+        </SimpleGrid>
+        <SimpleGrid columns={2} spacingX={3} spacingY={2}>
+          <Panel title="Top Failing Policies">
+            <TablePlaceholder />
+          </Panel>
+          <Panel title="Top Failing Resources">
+            <TablePlaceholder />
+          </Panel>
+        </SimpleGrid>
+      </FadeIn>
     </Box>
   );
 };

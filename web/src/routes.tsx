@@ -18,23 +18,22 @@
 
 import React from 'react';
 import { Redirect, Route, Switch } from 'react-router-dom';
-import ListPoliciesPage from 'Pages/ListPolicies';
 import OverviewPage from 'Pages/ComplianceOverview';
 import ListResourcesPage from 'Pages/ListResources';
 import ResourceDetailsPage from 'Pages/ResourceDetails';
 import PolicyDetailsPage from 'Pages/PolicyDetails';
 import GeneralSettingsPage from 'Pages/GeneralSettings';
 import SignInPage from 'Pages/SignIn';
-import DestinationsPage from 'Pages/Destinations';
+import ListDestinationsPage from 'Pages/ListDestinations';
+import CreateDestinationPage from 'Pages/CreateDestination';
+import EditDestinationPage from 'Pages/EditDestination';
 import UsersPage from 'Pages/Users';
 import RuleDetailsPage from 'Pages/RuleDetails';
 import LandingPage from 'Pages/Landing';
-import ListRulesPage from 'Pages/ListRules';
 import EditRulePage from 'Pages/EditRule';
-import CreateRulePage from 'Pages/CreateRule';
+import CreateDetectionPage from 'Pages/CreateDetection';
 import AlertDetailsPage from 'Pages/AlertDetails';
 import EditPolicyPage from 'Pages/EditPolicy';
-import CreatePolicyPage from 'Pages/CreatePolicy';
 import ListAlertsPage from 'Pages/ListAlerts';
 import Layout from 'Components/Layout';
 import CreateComplianceSourcePage from 'Pages/CreateComplianceSource';
@@ -46,12 +45,29 @@ import GuardedRoute from 'Components/GuardedRoute';
 import ForgotPasswordPage from 'Pages/ForgotPassword';
 import ForgotPasswordConfirmPage from 'Pages/ForgotPasswordConfirm';
 import ErrorBoundary from 'Components/ErrorBoundary';
+import SupportPage from 'Pages/Support';
 import Page404 from 'Pages/404';
 import APIErrorFallback from 'Components/utils/ApiErrorFallback';
 import LogAnalysisOverview from 'Pages/LogAnalysisOverview';
 import EditComplianceSourcePage from 'Pages/EditComplianceSource';
-import EditLogSourcePage from 'Pages/EditLogSource';
+import EditS3LogSourcePage from 'Pages/EditS3LogSource';
 import PromptController from 'Components/utils/PromptController';
+import LogSourceOnboarding from 'Pages/LogSourceOnboarding';
+import BulkUploaderPage from 'Pages/BulkUploader';
+import ListGlobalPythonModulesPage from 'Pages/ListGlobalPythonModules';
+import CreateGlobalPythonModulePage from 'Pages/CreateGlobalPythonModule';
+import EditGlobalPythonModulePage from 'Pages/EditGlobalPythonModule';
+import EditSqsLogSource from 'Pages/EditSqsLogSource';
+import CreateCustomLogPage from 'Pages/CreateCustomLog';
+import ListCustomLogsPage from 'Pages/ListCustomLogs';
+import CustomLogDetailsPage from 'Pages/CustomLogDetails';
+import CreateDataModelPage from 'Pages/CreateDataModel';
+import EditDataModelPage from 'Pages/EditDataModel';
+import ListDataModelsPage from 'Pages/ListDataModels';
+import EditCustomLogPage from 'Pages/EditCustomLog';
+import ListDetectionsPage from 'Pages/ListDetections';
+import ListAnalysisPacks from 'Pages/ListAnalysisPacks';
+import AnalysisPackDetails from 'Pages/AnalysisPackDetails';
 
 // Main page container for the web application, Navigation bar and Content body goes here
 const PrimaryPageLayout: React.FunctionComponent = () => {
@@ -81,15 +97,16 @@ const PrimaryPageLayout: React.FunctionComponent = () => {
             <APIErrorFallback>
               <Switch>
                 <Route exact path="/" component={LandingPage} />
-                /******************** COMPLIANCE ******************************/
+                <Route exact path={urls.detections.list()} component={ListDetectionsPage} />
+                {/* ******************* COMPLIANCE ***************************** */}
                 <Redirect exact from={urls.compliance.home()} to={urls.compliance.overview()} />
-                <Route exact path={urls.compliance.overview()} component={OverviewPage} />
-                <Route exact path={urls.compliance.policies.list()} component={ListPoliciesPage} />
-                <Route
+                <Redirect
                   exact
-                  path={urls.compliance.policies.create()}
-                  component={CreatePolicyPage}
+                  from={urls.compliance.policies.list()}
+                  to={`${urls.detections.list()}?analysisTypes[]=POLICY&page=1&sortBy=lastModified&sortDir=descending`}
                 />
+                <Route exact path={urls.compliance.overview()} component={OverviewPage} />
+                <Route exact path={urls.detections.create()} component={CreateDetectionPage} />
                 <Route
                   exact
                   path={urls.compliance.policies.details(':id')}
@@ -110,26 +127,14 @@ const PrimaryPageLayout: React.FunctionComponent = () => {
                   path={urls.compliance.resources.details(':id')}
                   component={ResourceDetailsPage}
                 />
-                <Route
-                  exact
-                  path={urls.compliance.sources.list()}
-                  component={ListComplianceSourcesPage}
-                />
-                <Route
-                  exact
-                  path={urls.compliance.sources.create()}
-                  component={CreateComplianceSourcePage}
-                />
-                <Route
-                  exact
-                  path={urls.compliance.sources.edit(':id')}
-                  component={EditComplianceSourcePage}
-                />
-                /******************** LOG ANALYSIS ******************************/
+                {/* ******************* LOG ANALYSIS ***************************** */}
                 <Redirect exact from={urls.logAnalysis.home()} to={urls.logAnalysis.overview()} />
+                <Redirect
+                  exact
+                  from={urls.logAnalysis.rules.list()}
+                  to={`${urls.detections.list()}?analysisTypes[]=RULE&page=1&sortBy=lastModified&sortDir=descending`}
+                />
                 <Route exact path={urls.logAnalysis.overview()} component={LogAnalysisOverview} />
-                <Route exact path={urls.logAnalysis.rules.list()} component={ListRulesPage} />
-                <Route exact path={urls.logAnalysis.rules.create()} component={CreateRulePage} />
                 <Route
                   exact
                   path={urls.logAnalysis.rules.details(':id')}
@@ -144,24 +149,139 @@ const PrimaryPageLayout: React.FunctionComponent = () => {
                 />
                 <Route
                   exact
-                  path={urls.logAnalysis.sources.list()}
+                  path={urls.logAnalysis.dataModels.list()}
+                  component={ListDataModelsPage}
+                />
+                <Route
+                  exact
+                  path={urls.logAnalysis.dataModels.create()}
+                  component={CreateDataModelPage}
+                />
+                <Route
+                  exact
+                  path={urls.logAnalysis.dataModels.edit(':id')}
+                  component={EditDataModelPage}
+                />
+                <Redirect
+                  exact
+                  from={urls.logAnalysis.dataModels.details(':id')}
+                  to={urls.logAnalysis.dataModels.edit(':id')}
+                />
+                <Route exact path={urls.packs.list()} component={ListAnalysisPacks} />
+                <Route exact path={urls.packs.details(':id')} component={AnalysisPackDetails} />
+                {/* ******************* INTEGRATIONS ***************************** */}
+                <Redirect
+                  exact
+                  from={urls.integrations.home()}
+                  to={urls.integrations.logSources.list()}
+                />
+                <Redirect
+                  exact
+                  from={`${urls.integrations.logSources.list()}:type`}
+                  to={urls.integrations.logSources.list()}
+                />
+                <Route
+                  exact
+                  path={urls.integrations.logSources.list()}
                   component={ListLogSourcesPage}
                 />
                 <Route
                   exact
-                  path={urls.logAnalysis.sources.create()}
+                  path={urls.integrations.logSources.create(':type')}
                   component={CreateLogSourcePage}
                 />
                 <Route
                   exact
-                  path={urls.logAnalysis.sources.edit(':id')}
-                  component={EditLogSourcePage}
+                  path={urls.integrations.logSources.create()}
+                  component={LogSourceOnboarding}
                 />
-                /******************** SETTINGS ******************************/
+                <Route
+                  exact
+                  path={urls.integrations.logSources.edit(':id', 's3')}
+                  component={EditS3LogSourcePage}
+                />
+                <Route
+                  exact
+                  path={urls.integrations.logSources.edit(':id', 'sqs')}
+                  component={EditSqsLogSource}
+                />
+                <Route
+                  exact
+                  path={urls.integrations.cloudAccounts.list()}
+                  component={ListComplianceSourcesPage}
+                />
+                <Route
+                  exact
+                  path={urls.integrations.cloudAccounts.create()}
+                  component={CreateComplianceSourcePage}
+                />
+                <Route
+                  exact
+                  path={urls.integrations.cloudAccounts.edit(':id')}
+                  component={EditComplianceSourcePage}
+                />
+                <Route
+                  exact
+                  path={urls.integrations.destinations.create()}
+                  component={CreateDestinationPage}
+                />
+                <Route
+                  exact
+                  path={urls.integrations.destinations.edit(':id')}
+                  component={EditDestinationPage}
+                />
+                <Route
+                  exact
+                  path={urls.integrations.destinations.list()}
+                  component={ListDestinationsPage}
+                />
+                {/* ******************* SETTINGS ***************************** */}
                 <Redirect exact from={urls.settings.home()} to={urls.settings.general()} />
                 <Route exact path={urls.settings.general()} component={GeneralSettingsPage} />
+                <Route exact path={urls.settings.general()} component={GeneralSettingsPage} />
+                <Route
+                  exact
+                  path={urls.settings.globalPythonModules.list()}
+                  component={ListGlobalPythonModulesPage}
+                />
+                <Route
+                  exact
+                  path={urls.settings.globalPythonModules.create()}
+                  component={CreateGlobalPythonModulePage}
+                />
+                <Route
+                  exact
+                  path={urls.settings.globalPythonModules.edit(':id')}
+                  component={EditGlobalPythonModulePage}
+                />
+                <Route exact path={urls.settings.bulkUploader()} component={BulkUploaderPage} />
+                <Redirect
+                  exact
+                  from={`${urls.settings.globalPythonModules.list()}:id`}
+                  to={urls.settings.globalPythonModules.edit(':id')}
+                />
                 <Route exact path={urls.settings.users()} component={UsersPage} />
-                <Route exact path={urls.settings.destinations()} component={DestinationsPage} />
+                <Route
+                  exact
+                  path={urls.logAnalysis.customLogs.create()}
+                  component={CreateCustomLogPage}
+                />
+                <Route
+                  exact
+                  path={urls.logAnalysis.customLogs.details(':logType')}
+                  component={CustomLogDetailsPage}
+                />
+                <Route
+                  exact
+                  path={urls.logAnalysis.customLogs.edit(':logType')}
+                  component={EditCustomLogPage}
+                />
+                <Route
+                  exact
+                  path={urls.logAnalysis.customLogs.list()}
+                  component={ListCustomLogsPage}
+                />
+                <Route exact path={urls.account.support()} component={SupportPage} />
                 <Route component={Page404} />
               </Switch>
             </APIErrorFallback>

@@ -19,14 +19,16 @@ package outputs
  */
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
 func TestAsanaAlert(t *testing.T) {
@@ -35,27 +37,31 @@ func TestAsanaAlert(t *testing.T) {
 
 	createdAtTime, err := time.Parse(time.RFC3339, "2019-08-03T11:40:13Z")
 	require.NoError(t, err)
-	alert := &alertmodels.Alert{
-		PolicyID:          aws.String("ruleId"),
-		CreatedAt:         &createdAtTime,
-		OutputIDs:         aws.StringSlice([]string{"output-id"}),
-		PolicyDescription: aws.String("description"),
-		PolicyName:        aws.String("policy_name"),
-		Severity:          aws.String("INFO"),
+	alert := &deliverymodel.Alert{
+		AlertID:             aws.String("alertId"),
+		AnalysisID:          "ruleId",
+		Type:                deliverymodel.PolicyType,
+		CreatedAt:           createdAtTime,
+		OutputIds:           []string{"output-id"},
+		AnalysisDescription: "description",
+		AnalysisName:        aws.String("policy_name"),
+		Severity:            "INFO",
+		Context:             map[string]interface{}{"key": "value"},
 	}
 
-	asanaConfig := &outputmodels.AsanaConfig{PersonalAccessToken: aws.String("token"), ProjectGids: aws.StringSlice([]string{"projectGid"})}
+	asanaConfig := &outputModels.AsanaConfig{PersonalAccessToken: "token", ProjectGids: []string{"projectGid"}}
 
 	asanaRequest := map[string]interface{}{
 		"data": map[string]interface{}{
 			"name": "Policy Failure: policy_name",
 			"notes": "policy_name failed on new resources\n" +
-				"For more details please visit: https://panther.io/policies/ruleId\nSeverity: INFO\nRunbook: \nDescription:description",
-			"projects": aws.StringSlice([]string{"projectGid"}),
+				"For more details please visit: https://panther.io/alerts/alertId\nSeverity: INFO\nRunbook: \n" +
+				"Reference: \nDescription: description\nAlertContext: {\"key\":\"value\"}",
+			"projects": []string{"projectGid"},
 		},
 	}
 
-	authorization := "Bearer " + *asanaConfig.PersonalAccessToken
+	authorization := "Bearer " + asanaConfig.PersonalAccessToken
 	requestHeader := map[string]string{
 		AuthorizationHTTPHeader: authorization,
 	}
@@ -64,9 +70,9 @@ func TestAsanaAlert(t *testing.T) {
 		body:    asanaRequest,
 		headers: requestHeader,
 	}
+	ctx := context.Background()
+	httpWrapper.On("post", ctx, expectedPostInput).Return((*AlertDeliveryResponse)(nil))
 
-	httpWrapper.On("post", expectedPostInput).Return((*AlertDeliveryError)(nil))
-
-	require.Nil(t, client.Asana(alert, asanaConfig))
+	assert.Nil(t, client.Asana(ctx, alert, asanaConfig))
 	httpWrapper.AssertExpectations(t)
 }

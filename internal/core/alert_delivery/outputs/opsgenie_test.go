@@ -19,58 +19,77 @@ package outputs
  */
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
-var opsgenieConfig = &outputmodels.OpsgenieConfig{APIKey: aws.String("apikey")}
+var opsgenieConfig = &outputModels.OpsgenieConfig{APIKey: "apikey", ServiceRegion: OpsgenieServiceRegionUS}
 
 func TestOpsgenieAlert(t *testing.T) {
 	httpWrapper := &mockHTTPWrapper{}
 	client := &OutputClient{httpWrapper: httpWrapper}
 
-	var createdAtTime, _ = time.Parse(time.RFC3339, "2019-08-03T11:40:13Z")
-	alert := &alertmodels.Alert{
-		PolicyID:   aws.String("policyId"),
-		CreatedAt:  &createdAtTime,
-		OutputIDs:  aws.StringSlice([]string{"output-id"}),
-		PolicyName: aws.String("policyName"),
-		Severity:   aws.String("CRITICAL"),
+	createdAtTime, err := time.Parse(time.RFC3339, "2019-08-03T11:40:13Z")
+	require.NoError(t, err)
+	alert := &deliverymodel.Alert{
+		AlertID:      aws.String("alertId"),
+		AnalysisID:   "policyId",
+		Type:         deliverymodel.PolicyType,
+		CreatedAt:    createdAtTime,
+		OutputIds:    []string{"output-id"},
+		AnalysisName: aws.String("policyName"),
+		Severity:     "CRITICAL",
+		Tags:         []string{"tag"},
+		Context:      map[string]interface{}{"key": "value"},
 	}
 
 	opsgenieRequest := map[string]interface{}{
 		"message": "Policy Failure: policyName",
 		"description": strings.Join([]string{
 			"<strong>Description:</strong> ",
-			"<a href=\"https://panther.io/policies/policyId\">Click here to view in the Panther UI</a>",
+			"<a href=\"https://panther.io/alerts/alertId\">Click here to view in the Panther UI</a>",
 			" <strong>Runbook:</strong> ",
 			" <strong>Severity:</strong> CRITICAL",
+			" <strong>AlertContext:</strong> {\"key\":\"value\"}",
 		}, "\n"),
-		"tags":     []string{},
+		"tags":     []string{"tag"},
 		"priority": "P1",
 	}
 
-	authorization := "GenieKey " + *opsgenieConfig.APIKey
+	authorization := "GenieKey " + opsgenieConfig.APIKey
 
 	requestHeader := map[string]string{
 		AuthorizationHTTPHeader: authorization,
 	}
-	requestEndpoint := "https://api.opsgenie.com/v2/alerts"
+
+	requestEndpoint := GetOpsGenieRegionalEndpoint(opsgenieConfig.ServiceRegion)
+
 	expectedPostInput := &PostInput{
 		url:     requestEndpoint,
 		body:    opsgenieRequest,
 		headers: requestHeader,
 	}
+	ctx := context.Background()
+	httpWrapper.On("post", ctx, expectedPostInput).Return((*AlertDeliveryResponse)(nil))
 
-	httpWrapper.On("post", expectedPostInput).Return((*AlertDeliveryError)(nil))
-
-	require.Nil(t, client.Opsgenie(alert, opsgenieConfig))
+	assert.Nil(t, client.Opsgenie(ctx, alert, opsgenieConfig))
 	httpWrapper.AssertExpectations(t)
+}
+
+func TestOpsgenieServiceRegion(t *testing.T) {
+	opsGenieRegions := []string{"", OpsgenieServiceRegionUS, OpsgenieServiceRegionEU}
+	//nolint:lll
+	expectedEndpoints := []string{"https://api.opsgenie.com/v2/alerts", "https://api.opsgenie.com/v2/alerts", "https://api.eu.opsgenie.com/v2/alerts"}
+	for i, serviceRegion := range opsGenieRegions {
+		assert.Equal(t, expectedEndpoints[i], GetOpsGenieRegionalEndpoint(serviceRegion))
+	}
 }

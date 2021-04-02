@@ -1,22 +1,22 @@
 ---
 name: Story
-about: Planned or ongoing development work
-title: ''
+about: A user story with acceptance criteria
+title: '[FE/BE]: ...'
 labels: story
 assignees: ''
 ---
 
-### Description
+# User Story
 
-Explain what you are trying to achieve and why this story needs to be implemented. What is the value that this will provide?
+As a PERSONA
+I want to HAVE NEW FUNCTIONALITY
+To OBTAIN SOME RESULT
 
-### Acceptance Criteria
+# Acceptance Criteria
 
-Create a concise list of criteria that have to be matched to consider this story done. This should act as a checklist that
-would allow anyone reading this issue to be able to verify that your implementation is complete and working as expected. For example:
+- If PERSONA interacts with NEW FEATURE, they get THIS RESULT
+- A very detailed set of examples of how this feature will be used
 
-- We can collect anonymized frontend crash logs from user browsers
-- Users can opt in to send these logs to panther
-- The crash logs will contain the following fields : browser version
-- Users can opt-out from collection at any time
-- ...
+# Implementation Details
+
+- A technical explanation of the frontend/backend component

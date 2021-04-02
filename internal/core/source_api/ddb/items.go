@@ -18,25 +18,65 @@ package ddb
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import "time"
+import (
+	"time"
 
-// UpdateIntegrationItem updates almost every attribute in the table.
-//
-// It's used for attributes that can change, which is almost all of them except for the
-// creation based ones (CreatedAtTime and CreatedBy).
-type UpdateIntegrationItem struct {
-	RemediationEnabled   *bool      `json:"remediationEnabled"`
-	CWEEnabled           *bool      `json:"cweEnabled"`
-	IntegrationID        *string    `json:"integrationId"`
-	IntegrationLabel     *string    `json:"integrationLabel"`
-	IntegrationType      *string    `json:"integrationType"`
-	LastScanEndTime      *time.Time `json:"lastScanEndTime"`
-	LastScanErrorMessage *string    `json:"lastScanErrorMessage"`
-	LastScanStartTime    *time.Time `json:"lastScanStartTime"`
-	ScanStatus           *string    `json:"scanStatus"`
-	ScanIntervalMins     *int       `json:"scanIntervalMins"`
-	S3Bucket             *string    `json:"s3Bucket"`
-	S3Prefix             *string    `json:"s3Prefix"`
-	KmsKey               *string    `json:"kmsKey"`
-	LogTypes             []*string  `json:"logTypes" dynamodbav:"logTypes,stringset"`
+	"github.com/panther-labs/panther/api/lambda/source/models"
+)
+
+// Integration represents an integration item as it is stored in DynamoDB.
+type Integration struct {
+	CreatedAtTime    time.Time `json:"createdAtTime,omitempty"`
+	CreatedBy        string    `json:"createdBy,omitempty"`
+	IntegrationID    string    `json:"integrationId,omitempty"`
+	IntegrationLabel string    `json:"integrationLabel,omitempty"`
+	IntegrationType  string    `json:"integrationType,omitempty"`
+
+	AWSAccountID       string `json:"awsAccountId,omitempty"`
+	RemediationEnabled *bool  `json:"remediationEnabled,omitempty"`
+	CWEEnabled         *bool  `json:"cweEnabled,omitempty"`
+
+	LastScanStartTime    *time.Time `json:"lastScanStartTime,omitempty"`
+	LastScanEndTime      *time.Time `json:"lastScanEndTime,omitempty"`
+	LastScanErrorMessage string     `json:"lastScanErrorMessage,omitempty"`
+	ScanIntervalMins     int        `json:"scanIntervalMins,omitempty"`
+	IntegrationStatus
+
+	// fields for configurable cloud security sources
+	Enabled                 *bool    `json:"enabled"`
+	RegionIgnoreList        []string `json:"regionIgnoreList"`
+	ResourceTypeIgnoreList  []string `json:"resourceTypeIgnoreList"`
+	ResourceRegexIgnoreList []string `json:"resourceRegexIgnoreList"`
+
+	// fields specific for an s3 integration (plus AWSAccountID, StackName)
+	S3Bucket         string                  `json:"s3Bucket,omitempty"`
+	S3PrefixLogTypes models.S3PrefixLogtypes `json:"s3PrefixLogTypes,omitempty"`
+	// Deprecated. Use S3PrefixLogTypes. Kept for backwards compatibility. Don't use omitempty to overwrite to empty during writes.
+	S3Prefix string `json:"s3Prefix"`
+	// Deprecated. Use S3PrefixLogTypes. Kept for backwards compatibility.Don't use omitempty to overwrite to empty during writes.
+	LogTypes                   []string `json:"logTypes" dynamodbav:",stringset"`
+	KmsKey                     string   `json:"kmsKey,omitempty"`
+	StackName                  string   `json:"stackName,omitempty"`
+	LogProcessingRole          string   `json:"logProcessingRole,omitempty"`
+	ManagedBucketNotifications bool     `json:"managedBucketNotifications,omitempty"`
+
+	SqsConfig *SqsConfig `json:"sqsConfig,omitempty"`
+
+	// The Panther version in which this source was created.
+	PantherVersion string `json:"pantherVersion,omitempty"`
+}
+
+type IntegrationStatus struct {
+	ScanStatus        string     `json:"scanStatus,omitempty"`
+	EventStatus       string     `json:"eventStatus,omitempty"`
+	LastEventReceived *time.Time `json:"lastEventReceived,omitempty"`
+}
+
+type SqsConfig struct {
+	S3Bucket             string   `json:"s3Bucket,omitempty"`
+	LogProcessingRole    string   `json:"logProcessingRole,omitempty"`
+	LogTypes             []string `json:"logTypes" dynamodbav:",stringset"`
+	AllowedPrincipalArns []string `json:"allowedPrincipalArns" dynamodbav:",stringset"`
+	AllowedSourceArns    []string `json:"allowedSourceArns" dynamodbav:",stringset"`
+	QueueURL             string   `json:"queueUrl,omitempty"`
 }

@@ -19,79 +19,286 @@ package api
  */
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	"github.com/panther-labs/panther/api/lambda/source/models"
 	"github.com/panther-labs/panther/internal/core/source_api/ddb"
+	"github.com/panther-labs/panther/internal/log_analysis/datacatalog_updater/datacatalog"
 	"github.com/panther-labs/panther/pkg/genericapi"
+	"github.com/panther-labs/panther/pkg/stringset"
+)
+
+var (
+	updateIntegrationInternalError = &genericapi.InternalError{Message: "Failed to update source, please try again later"}
 )
 
 // UpdateIntegrationSettings makes an update to an integration from the UI.
 //
 // This endpoint updates attributes such as the behavior of the integration, or display information.
-func (api API) UpdateIntegrationSettings(input *models.UpdateIntegrationSettingsInput) (*models.SourceIntegration, error) {
-	// First get the current integration settings so that we can properly evaluate it
-	integration, err := db.GetIntegration(input.IntegrationID)
+func (api *API) UpdateIntegrationSettings(input *models.UpdateIntegrationSettingsInput) (*models.SourceIntegration, error) {
+	// First get the current existingItem settings so that we can properly evaluate it
+	existingItem, err := api.getItem(input.IntegrationID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Validate the updated integration settings
-	reason, passing, err := evaluateIntegrationFunc(api, &models.CheckIntegrationInput{
-		// From existing integration
-		AWSAccountID:    integration.AWSAccountID,
-		IntegrationType: integration.IntegrationType,
+	if err = api.validateUniqueConstraints(existingItem, input); err != nil {
+		return nil, err
+	}
 
-		// From update integration request
+	// Validate the updates
+	// Validate the new integration (healthcheck).
+	if existingItem.IntegrationType != models.IntegrationTypeAWS3 {
+		// For s3 sources, allow saving regardless of the healthcheck result. This allows
+		// users to manage the log processing role and other infra asynchronously.
+		if err := api.checkSource(existingItem, input); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := api.updateTables(existingItem, input); err != nil {
+		zap.L().Error("failed to update tables", zap.Error(err))
+		return nil, updateIntegrationInternalError
+	}
+
+	updateIntegrationDBItem(existingItem, input)
+
+	if existingItem.IntegrationType == models.IntegrationTypeSqs {
+		err := api.UpdateSourceSqsQueue(
+			existingItem.IntegrationID, existingItem.SqsConfig.AllowedPrincipalArns, existingItem.SqsConfig.AllowedSourceArns)
+		if err != nil {
+			zap.L().Error("failed to update integration", zap.Error(err))
+			return nil, updateIntegrationInternalError
+		}
+	}
+
+	existingIntegration := ddb.ItemToIntegration(existingItem)
+
+	if existingIntegration.IntegrationType == models.IntegrationTypeAWS3 &&
+		existingIntegration.ManagedBucketNotifications {
+
+		api.handleManagedBucketNotifications(existingIntegration)
+	}
+
+	item := integrationToItem(existingIntegration)
+	if err := api.DdbClient.PutItem(item); err != nil {
+		zap.L().Error("failed to put item in ddb", zap.Error(err))
+		return nil, updateIntegrationInternalError
+	}
+
+	return existingIntegration, nil
+}
+
+func (api *API) checkSource(existingItem *ddb.Integration, input *models.UpdateIntegrationSettingsInput) error {
+	reason, passing, err := api.EvaluateIntegrationFunc(&models.CheckIntegrationInput{
+		// Same as the existing integration item
+		AWSAccountID:    existingItem.AWSAccountID,
+		IntegrationType: existingItem.IntegrationType,
+
+		// From update existingItem request
 		IntegrationLabel:  input.IntegrationLabel,
 		EnableCWESetup:    input.CWEEnabled,
 		EnableRemediation: input.RemediationEnabled,
 		S3Bucket:          input.S3Bucket,
-		S3Prefix:          input.S3Prefix,
+		S3PrefixLogTypes:  input.S3PrefixLogTypes,
 		KmsKey:            input.KmsKey,
+		SqsConfig:         input.SqsConfig,
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if !passing {
 		zap.L().Warn("UpdateIntegration: resource has a misconfiguration",
 			zap.Error(err),
 			zap.String("reason", reason),
 			zap.Any("input", input))
-		return nil, &genericapi.InvalidInputError{Message: fmt.Sprintf("integration %s did not pass configuration check because of %s",
-			*integration.AWSAccountID, reason)}
+		return &genericapi.InvalidInputError{
+			Message: fmt.Sprintf("source %s did not pass configuration check because of %s",
+				existingItem.AWSAccountID, reason),
+		}
+	}
+	return nil
+}
+
+func (api *API) validateUniqueConstraints(existingIntegrationItem *ddb.Integration, input *models.UpdateIntegrationSettingsInput) error {
+	// Prefixes in the same S3 source should should be unique (although we allow overlapping for now)
+	if existingIntegrationItem.IntegrationType == models.IntegrationTypeAWS3 {
+		prefixes := input.S3PrefixLogTypes.S3Prefixes()
+		if len(prefixes) != len(stringset.Dedup(prefixes)) {
+			return &genericapi.InvalidInputError{
+				Message: "Cannot have duplicate prefixes in an s3 source.",
+			}
+		}
 	}
 
-	return db.UpdateItem(&ddb.UpdateIntegrationItem{
-		IntegrationID:      input.IntegrationID,
-		IntegrationLabel:   input.IntegrationLabel,
-		ScanIntervalMins:   input.ScanIntervalMins,
-		CWEEnabled:         input.CWEEnabled,
-		RemediationEnabled: input.RemediationEnabled,
-		S3Bucket:           input.S3Bucket,
-		S3Prefix:           input.S3Prefix,
-		KmsKey:             input.KmsKey,
-		LogTypes:           input.LogTypes,
-	})
+	existingIntegrations, err := api.ListIntegrations(&models.ListIntegrationsInput{})
+	if err != nil {
+		zap.L().Error("failed to fetch integrations", zap.Error(errors.WithStack(err)))
+		return updateIntegrationInternalError
+	}
+	for _, existingIntegration := range existingIntegrations {
+		if existingIntegration.IntegrationType == existingIntegrationItem.IntegrationType &&
+			existingIntegration.IntegrationID != existingIntegrationItem.IntegrationID {
+
+			switch existingIntegration.IntegrationType {
+			case models.IntegrationTypeAWS3:
+				if existingIntegration.AWSAccountID == existingIntegrationItem.AWSAccountID &&
+					existingIntegration.IntegrationLabel == input.IntegrationLabel {
+					// Log sources for same account need to have different labels
+					return &genericapi.InvalidInputError{
+						Message: fmt.Sprintf("Log source for account %s with label %s already onboarded",
+							existingIntegrationItem.AWSAccountID,
+							input.IntegrationLabel),
+					}
+				}
+				// A bucket/prefix combination should be unique among s3 sources.
+				if existingIntegration.S3Bucket == input.S3Bucket {
+					for _, existingPrefix := range existingIntegration.S3PrefixLogTypes.S3Prefixes() {
+						for _, prefix := range input.S3PrefixLogTypes.S3Prefixes() {
+							if strings.TrimSpace(existingPrefix) == strings.TrimSpace(prefix) {
+								return &genericapi.InvalidInputError{
+									Message: "An S3 source with the same S3 bucket and prefix already exists.",
+								}
+							}
+						}
+					}
+				}
+			case models.IntegrationTypeSqs:
+				if existingIntegration.IntegrationLabel == input.IntegrationLabel {
+					// Sqs sources need to have different labels
+					return &genericapi.InvalidInputError{
+						Message: fmt.Sprintf("Integration with label %s already exists", input.IntegrationLabel),
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func updateIntegrationDBItem(item *ddb.Integration, input *models.UpdateIntegrationSettingsInput) {
+	switch item.IntegrationType {
+	case models.IntegrationTypeAWSScan:
+		item.IntegrationLabel = input.IntegrationLabel
+		item.ScanIntervalMins = input.ScanIntervalMins
+		item.CWEEnabled = input.CWEEnabled
+		item.RemediationEnabled = input.RemediationEnabled
+		item.Enabled = input.Enabled
+		item.RegionIgnoreList = input.RegionIgnoreList
+		item.ResourceTypeIgnoreList = input.ResourceTypeIgnoreList
+		item.ResourceRegexIgnoreList = input.ResourceRegexIgnoreList
+	case models.IntegrationTypeAWS3:
+		if input.IntegrationLabel != "" {
+			item.IntegrationLabel = input.IntegrationLabel
+			item.StackName = getStackName(models.IntegrationTypeAWS3, input.IntegrationLabel)
+			item.LogProcessingRole = generateLogProcessingRoleArn(item.AWSAccountID, input.IntegrationLabel)
+		}
+		item.S3Bucket = input.S3Bucket
+		item.KmsKey = input.KmsKey
+		item.S3PrefixLogTypes = input.S3PrefixLogTypes
+		// These fields are replaced by S3PrefixLogTypes, clear them to avoid confusion when checking old records.
+		item.S3Prefix = ""
+		item.LogTypes = nil
+	case models.IntegrationTypeSqs:
+		item.IntegrationLabel = input.IntegrationLabel
+		item.SqsConfig.LogTypes = input.SqsConfig.LogTypes
+		item.SqsConfig.AllowedSourceArns = input.SqsConfig.AllowedSourceArns
+		item.SqsConfig.AllowedPrincipalArns = input.SqsConfig.AllowedPrincipalArns
+	}
 }
 
 // UpdateIntegrationLastScanStart updates an integration when a new scan is started.
-func (API) UpdateIntegrationLastScanStart(input *models.UpdateIntegrationLastScanStartInput) (*models.SourceIntegration, error) {
-	return db.UpdateItem(&ddb.UpdateIntegrationItem{
-		IntegrationID:     input.IntegrationID,
-		LastScanStartTime: input.LastScanStartTime,
-		ScanStatus:        input.ScanStatus,
-	})
+func (api *API) UpdateIntegrationLastScanStart(input *models.UpdateIntegrationLastScanStartInput) error {
+	existingIntegration, err := api.getItem(input.IntegrationID)
+	if err != nil {
+		return err
+	}
+
+	existingIntegration.LastScanStartTime = &input.LastScanStartTime
+	existingIntegration.ScanStatus = input.ScanStatus
+	err = api.DdbClient.PutItem(existingIntegration)
+	if err != nil {
+		return &genericapi.InternalError{Message: "Failed updating the integration last scan start"}
+	}
+	return nil
 }
 
 // UpdateIntegrationLastScanEnd updates an integration when a scan ends.
-func (API) UpdateIntegrationLastScanEnd(input *models.UpdateIntegrationLastScanEndInput) (*models.SourceIntegration, error) {
-	return db.UpdateItem(&ddb.UpdateIntegrationItem{
-		IntegrationID:        input.IntegrationID,
-		LastScanEndTime:      input.LastScanEndTime,
-		LastScanErrorMessage: input.LastScanErrorMessage,
-		ScanStatus:           input.ScanStatus,
-	})
+func (api *API) UpdateIntegrationLastScanEnd(input *models.UpdateIntegrationLastScanEndInput) error {
+	existingIntegration, err := api.getItem(input.IntegrationID)
+	if err != nil {
+		return err
+	}
+
+	existingIntegration.LastScanEndTime = &input.LastScanEndTime
+	existingIntegration.LastScanErrorMessage = input.LastScanErrorMessage
+	existingIntegration.ScanStatus = input.ScanStatus
+	err = api.DdbClient.PutItem(existingIntegration)
+	if err != nil {
+		return &genericapi.InternalError{Message: "Failed updating the integration last scan end"}
+	}
+	return nil
+}
+
+func (api *API) getItem(integrationID string) (*ddb.Integration, error) {
+	item, err := api.DdbClient.GetItem(integrationID)
+	if err != nil {
+		return nil, &genericapi.InternalError{Message: "Error fetching the existing integration"}
+	}
+
+	if item == nil {
+		return nil, &genericapi.DoesNotExistError{Message: "Integration does not exist"}
+	}
+	return item, nil
+}
+
+func (api *API) updateTables(item *ddb.Integration, input *models.UpdateIntegrationSettingsInput) error {
+	var existingLogTypes, newLogTypes []string
+	switch item.IntegrationType {
+	case models.IntegrationTypeAWS3:
+		// Need to include `item.LogTypes` for backwards compatibility reasons
+		existingLogTypes = append(item.S3PrefixLogTypes.LogTypes(), item.LogTypes...)
+		newLogTypes = input.S3PrefixLogTypes.LogTypes()
+	case models.IntegrationTypeSqs:
+		existingLogTypes = item.SqsConfig.LogTypes
+		newLogTypes = input.SqsConfig.LogTypes
+	}
+
+	// If the user hasn't added new log types to the integration
+	// don't create new tables
+	if !newLogsAdded(existingLogTypes, newLogTypes) {
+		return nil
+	}
+
+	client := datacatalog.Client{
+		SQSAPI:   api.SqsClient,
+		QueueURL: api.Config.DataCatalogUpdaterQueueURL,
+	}
+	err := client.SendCreateTablesForLogTypes(context.TODO(), newLogTypes...)
+	if err != nil {
+		return errors.Wrap(err, "failed to create Glue tables")
+	}
+	return nil
+}
+
+// Returns True if user has added new logs, false otherwise
+func newLogsAdded(old, new []string) bool {
+	for i := range new {
+		found := false
+		for j := range old {
+			if new[i] == old[j] {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return true
+		}
+	}
+	return false
 }

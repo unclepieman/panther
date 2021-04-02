@@ -17,14 +17,16 @@
  */
 
 import React from 'react';
-import { Field, Formik } from 'formik';
+import { Field, Form, Formik } from 'formik';
 import * as Yup from 'yup';
-import { Alert, Box, useSnackbar } from 'pouncejs';
+import { Alert, Box, Flex, TextInput, useSnackbar } from 'pouncejs';
 import SubmitButton from 'Components/buttons/SubmitButton';
 import FormikTextInput from 'Components/fields/TextInput';
 import useRouter from 'Hooks/useRouter';
 import useAuth from 'Hooks/useAuth';
 import urls from 'Source/urls';
+import { yupPasswordValidationSchema } from 'Helpers/utils';
+import FieldPolicyChecker from 'Components/FieldPolicyChecker/FieldPolicyChecker';
 
 interface ForgotPasswordConfirmFormProps {
   email: string;
@@ -37,10 +39,11 @@ interface ForgotPasswordConfirmFormValues {
 }
 
 const validationSchema = Yup.object().shape({
-  newPassword: Yup.string().required(),
-  confirmNewPassword: Yup.string()
-    .oneOf([Yup.ref('newPassword')], 'Passwords must match')
-    .required(),
+  newPassword: yupPasswordValidationSchema,
+  confirmNewPassword: yupPasswordValidationSchema.oneOf(
+    [Yup.ref('newPassword')],
+    'Passwords must match'
+  ),
 });
 
 const ForgotPasswordConfirmForm: React.FC<ForgotPasswordConfirmFormProps> = ({ email, token }) => {
@@ -74,40 +77,34 @@ const ForgotPasswordConfirmForm: React.FC<ForgotPasswordConfirmFormProps> = ({ e
         })
       }
     >
-      {({ isValid, handleSubmit, isSubmitting, status, dirty }) => (
-        <Box as="form" width={1} onSubmit={handleSubmit}>
-          {status && (
-            <Alert variant="error" title={status.title} description={status.message} mb={6} />
-          )}
-          <Field
-            as={FormikTextInput}
-            label="New Password"
-            placeholder="Type your new password..."
-            type="password"
-            name="newPassword"
-            autoco
-            aria-required
-            autoComplete="new-password"
-            mb={6}
-          />
-          <Field
-            as={FormikTextInput}
-            label="Confirm New Password"
-            placeholder="Type your new password again..."
-            type="password"
-            name="confirmNewPassword"
-            aria-required
-            autoComplete="new-password"
-            mb={6}
-          />
-          <SubmitButton
-            width={1}
-            submitting={isSubmitting}
-            disabled={isSubmitting || !isValid || !dirty}
-          >
-            Update password
-          </SubmitButton>
-        </Box>
+      {({ status, values }) => (
+        <Form>
+          <Flex direction="column" spacing={4}>
+            {status && <Alert variant="error" title={status.title} description={status.message} />}
+            <Field
+              as={TextInput}
+              label="New Password"
+              placeholder="Type your new password..."
+              type="password"
+              name="newPassword"
+              required
+              autoComplete="new-password"
+            />
+            <Field
+              as={FormikTextInput}
+              label="Confirm New Password"
+              placeholder="Type your new password again..."
+              type="password"
+              name="confirmNewPassword"
+              required
+              autoComplete="new-password"
+            />
+            <Box py={3}>
+              <FieldPolicyChecker schema={yupPasswordValidationSchema} value={values.newPassword} />
+            </Box>
+            <SubmitButton fullWidth>Update password</SubmitButton>
+          </Flex>
+        </Form>
       )}
     </Formik>
   );

@@ -21,12 +21,12 @@
 #
 # ****************     BUILD STAGE     *******************
 #
-FROM node:13.2-alpine AS build-env
+FROM node:14.15-alpine AS build-env
 
 LABEL description="The image that builds the web code and serves it through an express NodeJS server"
 
 # Update debian distro
-RUN apk update && apk add --no-cache --update git nasm libtool alpine-sdk autoconf automake
+RUN apk update && apk add --no-cache --update nasm libtool alpine-sdk autoconf automake python
 
 # Move all of our logic
 RUN mkdir /code
@@ -41,8 +41,6 @@ ADD package.json package-lock.json ./
 RUN npm i
 
 # Mount the necessary source code
-ADD .git .git
-ADD out/.env.aws out/.env.aws
 ADD web web
 
 # Build the project (additional ENV vars are read from a .env)
@@ -51,9 +49,9 @@ RUN npm run build
 #
 # ****************     DEPLOYMENT & SERVE STAGE     *******************
 #
-FROM node:13.2-alpine
+FROM node:14.15-alpine
 
-# Setup default port for fallback. This variable will be overriden on runtime by the associated ECS service.
+# Default to exposing `8080`
 ENV SERVER_PORT=8080
 
 # Make sure we add a folder to not pollute our root
@@ -74,11 +72,11 @@ ADD web/scripts web/scripts
 ## WARNING: Be careful not to add the package.json, since it will install all of your dependencies
 ## even when you explicitly try to install a single one
 #
-RUN npm install express express-static-gzip
+RUN npm install express express-static-gzip ejs chalk dotenv helmet
 
 # Run the express server to serve the assets
 CMD npm run serve
 
-# through the port chosen during build time (defaults to 8080)
+# through the chosen port
 EXPOSE ${SERVER_PORT}
 

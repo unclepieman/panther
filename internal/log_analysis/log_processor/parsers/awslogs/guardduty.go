@@ -26,10 +26,6 @@ import (
 	"github.com/panther-labs/panther/pkg/extract"
 )
 
-var GuardDutyDesc = `Amazon GuardDuty is a threat detection service that continuously monitors for malicious activity 
-and unauthorized behavior inside AWS Accounts. 
-See also GuardDuty Finding Format : https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_finding-format.html`
-
 // nolint:lll
 type GuardDuty struct {
 	SchemaVersion *string              `json:"schemaVersion" validate:"required" description:"The schema format version of this record."`
@@ -52,15 +48,15 @@ type GuardDuty struct {
 }
 
 type GuardDutyService struct {
-	AdditionalInfo *jsoniter.RawMessage `json:"additionalInfo"`
-	Action         *jsoniter.RawMessage `json:"action"`
+	AdditionalInfo *jsoniter.RawMessage `json:"additionalInfo,omitempty"`
+	Action         *jsoniter.RawMessage `json:"action,omitempty"`
 	ServiceName    *string              `json:"serviceName" validate:"required"`
 	DetectorID     *string              `json:"detectorId" validate:"required"`
-	ResourceRole   *string              `json:"resourceRole"`
-	EventFirstSeen *timestamp.RFC3339   `json:"eventFirstSeen"`
-	EventLastSeen  *timestamp.RFC3339   `json:"eventLastSeen"`
-	Archived       *bool                `json:"archived"`
-	Count          *int                 `json:"count"`
+	ResourceRole   *string              `json:"resourceRole,omitempty"`
+	EventFirstSeen *timestamp.RFC3339   `json:"eventFirstSeen,omitempty"`
+	EventLastSeen  *timestamp.RFC3339   `json:"eventLastSeen,omitempty"`
+	Archived       *bool                `json:"archived,omitempty"`
+	Count          *int                 `json:"count,omitempty"`
 }
 
 // VPCFlowParser parses AWS VPC Flow Parser logs
@@ -90,7 +86,7 @@ func (p *GuardDutyParser) Parse(log string) ([]*parsers.PantherLog, error) {
 
 // LogType returns the log type supported by this parser
 func (p *GuardDutyParser) LogType() string {
-	return "AWS.GuardDuty"
+	return TypeGuardDuty
 }
 
 func (event *GuardDuty) updatePantherFields(p *GuardDutyParser) {

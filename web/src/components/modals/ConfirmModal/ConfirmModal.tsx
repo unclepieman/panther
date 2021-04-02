@@ -17,37 +17,37 @@
  */
 
 import React from 'react';
-import { Modal, Text, Flex, Button } from 'pouncejs';
-import SubmitButton from 'Components/buttons/SubmitButton';
+import { Box, Modal, Text, Flex, Button, ModalProps } from 'pouncejs';
 
-export interface ConfirmModalProps {
+export interface ConfirmModalProps extends ModalProps {
   title: string;
   subtitle: React.ReactNode;
   loading: boolean;
   onConfirm: () => void;
-  onClose: () => void;
 }
 
 const ConfirmModal: React.FC<ConfirmModalProps> = ({
-  title,
   subtitle,
   loading,
   onConfirm,
   onClose,
+  ...rest
 }) => {
   return (
-    <Modal open onClose={onClose} title={title}>
-      <Text size="large" color="grey500" mb={8} textAlign="center">
-        {subtitle}
-      </Text>
-      <Flex justify="flex-end">
-        <Button size="large" variant="default" onClick={onClose} mr={3}>
-          Cancel
-        </Button>
-        <SubmitButton onClick={onConfirm} submitting={loading} disabled={loading}>
-          Confirm
-        </SubmitButton>
-      </Flex>
+    <Modal aria-describedby="modal-subtitle" onClose={onClose} {...rest}>
+      <Box maxWidth={700}>
+        <Text mb={8} textAlign="center" id="modal-subtitle">
+          {subtitle}
+        </Text>
+        <Flex justify="flex-end" spacing={3}>
+          <Button variant="outline" variantColor="navyblue" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variantColor="red" onClick={onConfirm}>
+            Confirm
+          </Button>
+        </Flex>
+      </Box>
     </Modal>
   );
 };

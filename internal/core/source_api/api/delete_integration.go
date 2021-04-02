@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/panther-labs/panther/api/lambda/source/models"
+	"github.com/panther-labs/panther/internal/core/source_api/ddb"
 	"github.com/panther-labs/panther/pkg/genericapi"
 )
 
@@ -32,65 +33,84 @@ var (
 )
 
 // DeleteIntegration deletes a specific integration.
-func (API) DeleteIntegration(input *models.DeleteIntegrationInput) (err error) {
-	var integrationForDeletePermissions *models.SourceIntegrationMetadata
-	defer func() {
-		if err != nil && integrationForDeletePermissions != nil {
-			// In case we have already removed the Permissions from SQS but some other operation failed
-			// re-add the permissions
-			if _, undoErr := AddPermissionToLogProcessorQueue(*integrationForDeletePermissions.AWSAccountID); undoErr != nil {
-				zap.L().Error("failed to re-add SQS permission for integration. SQS is missing permissions that have to be added manually",
-					zap.String("integrationId", *integrationForDeletePermissions.IntegrationID),
-					zap.Error(undoErr),
-					zap.Error(err))
-			}
-		}
-	}()
-
-	var integration *models.SourceIntegrationMetadata
-	integration, err = db.GetIntegration(input.IntegrationID)
+func (api *API) DeleteIntegration(input *models.DeleteIntegrationInput) error {
+	integrationItem, err := api.DdbClient.GetItem(input.IntegrationID)
 	if err != nil {
-		errMsg := "failed to get integration"
+		errMsg := "failed to get integrationItem"
+		err = errors.Wrap(err, errMsg)
+
 		zap.L().Error(errMsg,
-			zap.String("integrationId", *input.IntegrationID),
-			zap.Error(errors.Wrap(err, errMsg)))
+			zap.String("integrationId", input.IntegrationID),
+			zap.Error(err))
 		return deleteIntegrationInternalError
 	}
 
-	if integration == nil {
+	if integrationItem == nil {
 		return &genericapi.DoesNotExistError{Message: "Integration does not exist"}
 	}
 
-	if *integration.IntegrationType == models.IntegrationTypeAWS3 {
-		existingIntegrations, err := db.ScanIntegrations(&models.ListIntegrationsInput{IntegrationType: aws.String(models.IntegrationTypeAWS3)})
+	switch integrationItem.IntegrationType {
+	case models.IntegrationTypeAWS3:
+		existingIntegrations, err := api.DdbClient.ScanIntegrations(aws.String(models.IntegrationTypeAWS3))
 		if err != nil {
+			zap.L().Error("failed to scan integration", zap.Error(err))
 			return deleteIntegrationInternalError
 		}
 
 		shouldRemovePermissions := true
 		for _, existingIntegration := range existingIntegrations {
-			if *existingIntegration.AWSAccountID == *integration.AWSAccountID &&
-				*existingIntegration.IntegrationID != *integration.IntegrationID {
-				// if another integration exists for the same account
+			if existingIntegration.AWSAccountID == integrationItem.AWSAccountID &&
+				existingIntegration.IntegrationID != integrationItem.IntegrationID {
+				// if another integrationItem exists for the same account
 				// don't remove queue permissions. Allow the account to keep sending
 				// us SQS notifications
 				shouldRemovePermissions = false
 				break
 			}
 		}
-
 		if shouldRemovePermissions {
-			if err = RemovePermissionFromLogProcessorQueue(*integration.AWSAccountID); err != nil {
-				zap.L().Error("failed to remove permission from SQS queue for integration",
-					zap.String("integrationId", *input.IntegrationID),
-					zap.Error(errors.Wrap(err, "failed to remove permission from SQS queue for integration")))
+			if err = api.DisableExternalSnsTopicSubscription(integrationItem.AWSAccountID); err != nil {
+				zap.L().Error("failed to remove permission from SQS queue for integrationItem",
+					zap.String("integrationId", input.IntegrationID),
+					zap.Error(err))
 				return deleteIntegrationInternalError
 			}
-			integrationForDeletePermissions = integration
+		}
+
+		if integrationItem.ManagedBucketNotifications {
+			source := ddb.ItemToIntegration(integrationItem)
+			panther := pantherDeployment{
+				sess:          api.AwsSession,
+				accountID:     api.Config.AccountID,
+				partition:     api.Config.AWSPartition,
+				inputQueueARN: api.Config.LogProcessorQueueArn,
+			}
+			err = RemoveBucketNotifications(api.DdbClient, panther, *source)
+			if err != nil {
+				// Handle the error here and allow the delete operation to succeed. The users may have already deleted
+				// the IAM role we assume to configure bucket notifications.
+				zap.L().Warn("failed to remove bucket notifications",
+					zap.Error(err), zap.String("integrationId", input.IntegrationID))
+			}
+		}
+	case models.IntegrationTypeSqs:
+		if err := api.RemoveSourceFromLambdaTrigger(input.IntegrationID); err != nil {
+			zap.L().Error("failed to remove sqs queue from source",
+				zap.String("integrationId", input.IntegrationID),
+				zap.Error(err))
+			return deleteIntegrationInternalError
+		}
+		if err := api.DeleteSourceSqsQueue(input.IntegrationID); err != nil {
+			zap.L().Error("failed to delete source queue",
+				zap.String("integrationId", input.IntegrationID),
+				zap.Error(err))
+			return deleteIntegrationInternalError
 		}
 	}
-	err = db.DeleteIntegrationItem(input)
+
+	err = api.DdbClient.DeleteItem(input.IntegrationID)
 	if err != nil {
+		zap.L().Error("failed to delete item", zap.Error(err))
 		return deleteIntegrationInternalError
 	}
 	return nil

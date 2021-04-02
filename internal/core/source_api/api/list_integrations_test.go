@@ -34,13 +34,15 @@ import (
 )
 
 func TestListIntegrations(t *testing.T) {
+	t.Parallel()
+	apiTest := NewAPITest()
 	lastScanEndTime, err := time.Parse(time.RFC3339, "2019-04-10T23:00:00Z")
 	require.NoError(t, err)
 
 	lastScanStartTime, err := time.Parse(time.RFC3339, "2019-04-10T22:59:00Z")
 	require.NoError(t, err)
 
-	db = &ddb.DDB{
+	apiTest.DdbClient = &ddb.DDB{
 		Client: &modelstest.MockDDBClient{
 			MockScanAttributes: []map[string]*dynamodb.AttributeValue{
 				{
@@ -62,21 +64,20 @@ func TestListIntegrations(t *testing.T) {
 	}
 
 	expected := &models.SourceIntegration{
-		SourceIntegrationMetadata: &models.SourceIntegrationMetadata{
-			AWSAccountID:     aws.String("123456789012"),
-			IntegrationID:    aws.String(testIntegrationID),
-			IntegrationLabel: aws.String(testIntegrationLabel),
-			IntegrationType:  aws.String(models.IntegrationTypeAWSScan),
-			ScanIntervalMins: aws.Int(1440),
+		SourceIntegrationMetadata: models.SourceIntegrationMetadata{
+			AWSAccountID:     "123456789012",
+			IntegrationID:    testIntegrationID,
+			IntegrationLabel: testIntegrationLabel,
+			IntegrationType:  models.IntegrationTypeAWSScan,
+			ScanIntervalMins: 1440,
 		},
-		SourceIntegrationStatus: &models.SourceIntegrationStatus{
-			ScanStatus:  aws.String(models.StatusOK),
-			EventStatus: aws.String(models.StatusOK),
+		SourceIntegrationStatus: models.SourceIntegrationStatus{
+			ScanStatus:  models.StatusOK,
+			EventStatus: models.StatusOK,
 		},
-		SourceIntegrationScanInformation: &models.SourceIntegrationScanInformation{
-			LastScanEndTime:      &lastScanEndTime,
-			LastScanErrorMessage: aws.String(""),
-			LastScanStartTime:    &lastScanStartTime,
+		SourceIntegrationScanInformation: models.SourceIntegrationScanInformation{
+			LastScanEndTime:   &lastScanEndTime,
+			LastScanStartTime: &lastScanStartTime,
 		},
 	}
 	out, err := apiTest.ListIntegrations(&models.ListIntegrationsInput{})
@@ -85,11 +86,14 @@ func TestListIntegrations(t *testing.T) {
 	require.NotEmpty(t, out)
 	assert.Len(t, out, 1)
 	assert.Equal(t, expected, out[0])
+	apiTest.AssertExpectations(t)
 }
 
 // An empty list of integrations is returned instead of null
 func TestListIntegrationsEmpty(t *testing.T) {
-	db = &ddb.DDB{
+	t.Parallel()
+	apiTest := NewAPITest()
+	apiTest.DdbClient = &ddb.DDB{
 		Client: &modelstest.MockDDBClient{
 			MockScanAttributes: []map[string]*dynamodb.AttributeValue{},
 			TestErr:            false,
@@ -104,7 +108,9 @@ func TestListIntegrationsEmpty(t *testing.T) {
 }
 
 func TestHandleListIntegrationsScanError(t *testing.T) {
-	db = &ddb.DDB{
+	t.Parallel()
+	apiTest := NewAPITest()
+	apiTest.DdbClient = &ddb.DDB{
 		Client: &modelstest.MockDDBClient{
 			MockScanAttributes: []map[string]*dynamodb.AttributeValue{},
 			TestErr:            true,
@@ -116,4 +122,32 @@ func TestHandleListIntegrationsScanError(t *testing.T) {
 
 	require.NotNil(t, err)
 	assert.Nil(t, out)
+}
+
+func TestListIntegrations_ExcludeSourcesWithoutType(t *testing.T) {
+	dynamoClient := &ddb.DDB{
+		Client: &modelstest.MockDDBClient{
+			MockScanAttributes: []map[string]*dynamodb.AttributeValue{
+				{
+					"integrationId":    {S: aws.String("123")},
+					"integrationLabel": {S: aws.String("with-type")},
+					"integrationType":  {S: aws.String(models.IntegrationTypeAWS3)},
+				}, {
+					"integrationId":    {S: aws.String("456")},
+					"integrationLabel": {S: aws.String("without-type")},
+				},
+			},
+			TestErr: false,
+		},
+		TableName: "test",
+	}
+
+	testAPI := API{
+		DdbClient: dynamoClient,
+	}
+	out, err := testAPI.ListIntegrations(&models.ListIntegrationsInput{})
+
+	require.NoError(t, err)
+	require.Equal(t, len(out), 1)
+	require.Equal(t, out[0].IntegrationID, "123")
 }

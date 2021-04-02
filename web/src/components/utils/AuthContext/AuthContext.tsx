@@ -19,7 +19,9 @@
 import React from 'react';
 import Auth, { CognitoUser } from '@aws-amplify/auth';
 import { USER_INFO_STORAGE_KEY } from 'Source/constants';
+import { pantherConfig } from 'Source/config';
 import storage from 'Helpers/storage';
+import { EventEnum, SrcEnum, trackError, TrackErrorEnum, trackEvent } from 'Helpers/analytics';
 
 // Challenge names from Cognito from
 // https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_RespondToAuthChallenge.html#API_RespondToAuthChallenge_RequestSyntax
@@ -40,21 +42,25 @@ interface AuthError {
   name?: string;
 }
 
-interface EnhancedCognitoUser extends CognitoUser {
+export interface EnhancedCognitoUser extends CognitoUser {
   challengeParam: {
     userAttributes: {
+      /* eslint-disable  camelcase  */
       email: string;
       given_name?: string;
       family_name?: string;
+      /* eslint-enable  camelcase  */
     };
   };
   challengeName?: CHALLENGE_NAMES;
   attributes: {
+    /* eslint-disable  camelcase  */
     email: string;
     email_verified: boolean;
     family_name?: string;
     given_name?: string;
     sub: string;
+    /* eslint-enable  camelcase  */
   };
   signInUserSession?: {
     accessToken?: {
@@ -65,7 +71,13 @@ interface EnhancedCognitoUser extends CognitoUser {
   };
 }
 
-export type UserInfo = EnhancedCognitoUser['attributes'];
+export type UserInfo = {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  givenName?: string;
+  familyName?: string;
+};
 
 interface SignOutParams {
   global?: boolean;
@@ -94,12 +106,6 @@ interface VerifyTotpSetupParams {
 
 interface SetNewPasswordParams {
   newPassword: string;
-  onSuccess?: () => void;
-  onError?: (err: AuthError) => void;
-}
-
-interface UpdateUserInfoParams {
-  newAttributes: Partial<EnhancedCognitoUser['attributes']>;
   onSuccess?: () => void;
   onError?: (err: AuthError) => void;
 }
@@ -144,7 +150,6 @@ export interface AuthContextValue {
   verifyTotpSetup: (params: VerifyTotpSetupParams) => Promise<void>;
   requestTotpSecretCode: () => Promise<string>;
   signOut: (params?: SignOutParams) => Promise<void>;
-  updateUserInfo: (params: UpdateUserInfoParams) => Promise<void>;
   changePassword: (params: ChangePasswordParams) => Promise<void>;
   resetPassword: (params: ResetPasswordParams) => Promise<void>;
   forgotPassword: (params: ForgotPasswordParams) => Promise<void>;
@@ -158,7 +163,7 @@ const AuthContext = React.createContext<AuthContextValue>(undefined);
 // in the Amplify, since the `isAuthenticated` flag just decides which screens to show.
 const previousUserSessionExists = Boolean(
   storage.local.read(
-    `CognitoIdentityServiceProvider.${process.env.WEB_APPLICATION_USER_POOL_CLIENT_ID}.LastAuthUser`
+    `CognitoIdentityServiceProvider.${pantherConfig.WEB_APPLICATION_USER_POOL_CLIENT_ID}.LastAuthUser`
   )
 );
 
@@ -177,9 +182,17 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
    */
   const userInfo = React.useMemo<UserInfo>(() => {
     // if a user is present, derive the user info from him
-    // ! Check if this is calculated
+    // Check if this is calculated
     if (authUser?.attributes) {
-      return authUser.attributes;
+      // eslint-disable-next-line  camelcase
+      const { family_name, given_name, sub, email_verified, ...rest } = authUser.attributes;
+      return {
+        ...rest,
+        id: sub,
+        familyName: family_name,
+        givenName: given_name,
+        emailVerified: email_verified,
+      };
     }
 
     // if no user is present, attempt to return data from the stored session. This is true when
@@ -261,9 +274,10 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
         const confirmedUser = await Auth.currentAuthenticatedUser();
         setAuthUser(confirmedUser);
         setAuthenticated(true);
-
+        trackEvent({ event: EventEnum.SignedIn, src: SrcEnum.Auth });
         onSuccess();
       } catch (err) {
+        trackError({ event: TrackErrorEnum.FailedMfa, src: SrcEnum.Auth });
         onError(err as AuthError);
       }
     },
@@ -285,27 +299,6 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
         const confirmedUser = await Auth.currentAuthenticatedUser();
         setAuthUser(confirmedUser);
         setAuthenticated(true);
-        onSuccess();
-      } catch (err) {
-        onError(err as AuthError);
-      }
-    },
-    [authUser]
-  );
-
-  /**
-   *
-   * @public
-   * Updates the user's personal information
-   *
-   */
-  const updateUserInfo = React.useCallback(
-    async ({ newAttributes, onSuccess = () => {}, onError = () => {} }: UpdateUserInfoParams) => {
-      try {
-        await Auth.updateUserAttributes(authUser, newAttributes);
-        const updatedUser = await Auth.currentAuthenticatedUser({ bypassCache: true });
-        setAuthUser(updatedUser);
-
         onSuccess();
       } catch (err) {
         onError(err as AuthError);
@@ -439,7 +432,7 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
    */
   React.useEffect(() => {
     if (previousUserSessionExists) {
-      Auth.currentAuthenticatedUser()
+      Auth.currentAuthenticatedUser({ bypassCache: true })
         .then(setAuthUser)
         .catch(() => signOut());
     }
@@ -456,7 +449,6 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
       isAuthenticated,
       currentAuthChallengeName: authUser?.challengeName || null,
       userInfo,
-      updateUserInfo,
       refetchUserInfo,
 
       signIn,

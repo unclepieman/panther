@@ -26,9 +26,6 @@ import (
 	"github.com/panther-labs/panther/internal/log_analysis/log_processor/parsers/timestamp"
 )
 
-var DifferentialDesc = `Differential contains all the data included in OsQuery differential logs
-Reference: https://osquery.readthedocs.io/en/stable/deployment/logging/`
-
 // nolint:lll
 type Differential struct { // FIXME: field descriptions need updating!
 	Action               *string                `json:"action,omitempty" validate:"required" description:"Action"`
@@ -82,7 +79,7 @@ func (p *DifferentialParser) Parse(log string) ([]*parsers.PantherLog, error) {
 
 // LogType returns the log type supported by this parser
 func (p *DifferentialParser) LogType() string {
-	return "Osquery.Differential"
+	return TypeDifferential
 }
 
 func (event *Differential) updatePantherFields(p *DifferentialParser) {
@@ -91,4 +88,10 @@ func (event *Differential) updatePantherFields(p *DifferentialParser) {
 
 	event.AppendAnyIPAddress(event.Columns["local_address"])
 	event.AppendAnyIPAddress(event.Columns["remote_address"])
+	event.AppendAnyIPAddress(event.Columns["address"])
+	event.AppendAnyIPAddress(event.Columns["host_ip"])
+	event.AppendAnyIPAddress(event.Columns["ipv4_address"])
+	if host := event.Columns["host"]; !event.AppendAnyIPAddress(host) {
+		event.AppendAnyDomainNames(host)
+	}
 }

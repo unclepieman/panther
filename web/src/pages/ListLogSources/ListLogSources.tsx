@@ -17,26 +17,27 @@
  */
 
 import React from 'react';
-import TablePlaceholder from 'Components/TablePlaceholder';
-import { Alert, Box, Button, Card, Flex, Icon } from 'pouncejs';
+import { Alert, Box } from 'pouncejs';
 import Panel from 'Components/Panel';
-import { Link as RRLink } from 'react-router-dom';
 import urls from 'Source/urls';
 import ErrorBoundary from 'Components/ErrorBoundary';
+import LinkButton from 'Components/buttons/LinkButton';
 import { extractErrorMessage } from 'Helpers/utils';
+import withSEO from 'Hoc/withSEO';
+import useTrackPageView from 'Hooks/useTrackPageView';
+import { PageViewEnum } from 'Helpers/analytics';
 import { useListLogSources } from './graphql/listLogSources.generated';
 import EmptyDataFallback from './EmptyDataFallback';
-import LogSourceTable from './LogSourceTable';
+import Skeleton from './Skeleton';
+import ListDestinationsCards from './ListLogSourceCards';
 
 const ListLogSources = () => {
+  useTrackPageView(PageViewEnum.ListLogSources);
+
   const { loading, error, data } = useListLogSources();
 
   if (loading && !data) {
-    return (
-      <Card p={9}>
-        <TablePlaceholder />
-      </Card>
-    );
+    return <Skeleton />;
   }
 
   if (error) {
@@ -60,22 +61,18 @@ const ListLogSources = () => {
     <Box mb={6}>
       <Panel
         title="Log Sources"
-        size="large"
         actions={
-          <Button size="large" variant="primary" as={RRLink} to={urls.logAnalysis.sources.create()}>
-            <Flex align="center">
-              <Icon type="add" size="small" mr={1} />
-              Add Source
-            </Flex>
-          </Button>
+          <LinkButton to={urls.integrations.logSources.create()} icon="add">
+            Add Source
+          </LinkButton>
         }
       >
         <ErrorBoundary>
-          <LogSourceTable sources={data.listLogIntegrations} />
+          <ListDestinationsCards sources={data.listLogIntegrations} />
         </ErrorBoundary>
       </Panel>
     </Box>
   );
 };
 
-export default ListLogSources;
+export default withSEO({ title: 'Log Analysis Sources' })(ListLogSources);

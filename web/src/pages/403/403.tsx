@@ -17,40 +17,29 @@
  */
 
 import React from 'react';
-import { Box, Button, Flex, Heading, Text } from 'pouncejs';
+import { Box, Flex, Heading, Text } from 'pouncejs';
 import useAuth from 'Hooks/useAuth';
-import { Link as RRLink } from 'react-router-dom';
 import AccessDeniedImg from 'Assets/illustrations/authentication.svg';
+import withSEO from 'Hoc/withSEO';
+import LinkButton from 'Components/buttons/LinkButton';
 
 const Page403: React.FC = () => {
   const { userInfo } = useAuth();
 
   return (
-    <Flex
-      justify="center"
-      align="center"
-      width="100vw"
-      height="100vh"
-      position="fixed"
-      left={0}
-      top={0}
-      bg="white"
-      direction="column"
-    >
+    <Flex justify="center" align="center" direction="column">
       <Box mb={10}>
         <img alt="Access denied illustration" src={AccessDeniedImg} width="auto" height={400} />
       </Box>
-      <Heading size="medium" color="grey300" mb={4}>
-        You have no power here, {userInfo ? userInfo.given_name : 'Anonymous'} the Grey
+      <Heading mb={2}>
+        You have no power here, {userInfo ? userInfo.givenName : 'Anonymous'} the Grey
       </Heading>
-      <Text size="medium" color="grey200" as="p" mb={10}>
+      <Text fontSize="medium" color="gray-300" mb={10}>
         ( Sarum... Your administrator has restricted your powers )
       </Text>
-      <Button size="small" variant="default" as={RRLink} to="/">
-        Back to Shire
-      </Button>
+      <LinkButton to="/">Back to Shire</LinkButton>
     </Flex>
   );
 };
 
-export default Page403;
+export default withSEO({ title: 'Permission Denied' })(Page403);

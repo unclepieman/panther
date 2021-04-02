@@ -17,9 +17,10 @@
  */
 
 import React from 'react';
-import { Label, Table } from 'pouncejs';
+import { Badge, Box, Table } from 'pouncejs';
 import dayjs from 'dayjs';
-import { ListUsers } from 'Pages/Users/ListUsers/graphql/listUsers.generated';
+import { getUserDisplayName } from 'Helpers/utils';
+import { ListUsers } from '../graphql/listUsers.generated';
 import ListUsersTableRowOptions from './ListUsersTableRowOptions';
 
 type ListUsersTableProps = Pick<ListUsers, 'users'>;
@@ -29,32 +30,32 @@ const ListUsersTable: React.FC<ListUsersTableProps> = ({ users }) => {
     <Table>
       <Table.Head>
         <Table.Row>
-          <Table.HeaderCell />
           <Table.HeaderCell>Name</Table.HeaderCell>
           <Table.HeaderCell>Email</Table.HeaderCell>
           <Table.HeaderCell>Role</Table.HeaderCell>
           <Table.HeaderCell>Invited At</Table.HeaderCell>
-          <Table.HeaderCell>Status</Table.HeaderCell>
+          <Table.HeaderCell align="center">Status</Table.HeaderCell>
           <Table.HeaderCell />
         </Table.Row>
       </Table.Head>
       <Table.Body>
-        {users.map((user, index) => (
+        {users.map(user => (
           <Table.Row key={user.id}>
-            <Table.Cell>
-              <Label size="medium">{index + 1}</Label>
-            </Table.Cell>
-            <Table.Cell>
-              {user.givenName} {user.familyName}
-            </Table.Cell>
+            <Table.Cell>{getUserDisplayName(user)}</Table.Cell>
             <Table.Cell>{user.email}</Table.Cell>
             <Table.Cell>Admin</Table.Cell>
             <Table.Cell>
               {dayjs(user.createdAt * 1000).format('MM/DD/YYYY, HH:mm G[M]TZZ')}
             </Table.Cell>
-            <Table.Cell>{user.status}</Table.Cell>
+            <Table.Cell align="center">
+              <Box my={-1} display="inline-block">
+                <Badge color="blue-300">{user.status.replace(/_/g, ' ')}</Badge>
+              </Box>
+            </Table.Cell>
             <Table.Cell>
-              <ListUsersTableRowOptions user={user} />
+              <Box my={-2}>
+                <ListUsersTableRowOptions user={user} />
+              </Box>
             </Table.Cell>
           </Table.Row>
         ))}

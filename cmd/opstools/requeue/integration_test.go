@@ -1,5 +1,23 @@
 package requeue
 
+/**
+ * Panther is a Cloud-Native SIEM for the Modern Security Team.
+ * Copyright (C) 2020 Panther Labs Inc
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 import (
 	"os"
 	"strings"
@@ -72,9 +90,12 @@ func TestIntegrationRequeue(t *testing.T) {
 	require.NoError(t, err)
 
 	// check
-	numberMovedMessages, err := testutils.CountMessagesInQueue(sqsClient, toq, messageBatchSize, visibilityTimeoutSeconds)
+	numberMovedMessages, numberMovedMessagesWithAttrs, err := testutils.CountMessagesInQueue(sqsClient, toq,
+		messageBatchSize, visibilityTimeoutSeconds)
 	assert.NoError(t, err)
 	assert.Equal(t, numberTestMessages, numberMovedMessages)
+	// 1/2 will have attributes, see testutils.AddMessagesToQueue()
+	assert.Equal(t, numberTestMessages/2, numberMovedMessagesWithAttrs)
 
 	// clean up
 	err = testutils.DeleteQueue(sqsClient, fromq)

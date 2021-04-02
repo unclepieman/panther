@@ -16,10 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../../../__generated__/schema';
 
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
@@ -73,3 +72,17 @@ export type ResetUserPasswordMutationOptions = ApolloReactCommon.BaseMutationOpt
   ResetUserPassword,
   ResetUserPasswordVariables
 >;
+export function mockResetUserPassword({
+  data,
+  variables,
+  errors,
+}: {
+  data: ResetUserPassword;
+  variables?: ResetUserPasswordVariables;
+  errors?: GraphQLError[];
+}) {
+  return {
+    request: { query: ResetUserPasswordDocument, variables },
+    result: { data, errors },
+  };
+}

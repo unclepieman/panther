@@ -20,11 +20,14 @@ import React from 'react';
 import { Field } from 'formik';
 import * as Yup from 'yup';
 import FormikTextInput from 'Components/fields/TextInput';
+import SensitiveTextInput from 'Components/fields/SensitiveTextInput';
 import { DestinationConfigInput } from 'Generated/schema';
 import BaseDestinationForm, {
   BaseDestinationFormValues,
   defaultValidationSchema,
 } from 'Components/forms/BaseDestinationForm';
+import { yupWebhookValidation } from 'Helpers/utils';
+import { SimpleGrid } from 'pouncejs';
 
 type MicrosoftTeamsFieldValues = Pick<DestinationConfigInput, 'msTeams'>;
 
@@ -33,40 +36,49 @@ interface MicrosoftTeamsDestinationFormProps {
   onSubmit: (values: BaseDestinationFormValues<MicrosoftTeamsFieldValues>) => void;
 }
 
-const msTeamsFieldsValidationSchema = Yup.object().shape({
-  outputConfig: Yup.object().shape({
-    msTeams: Yup.object().shape({
-      webhookURL: Yup.string()
-        .url('Must be a valid webhook URL')
-        .required(),
-    }),
-  }),
-});
-
-// @ts-ignore
-// We merge the two schemas together: the one deriving from the common fields, plus the custom
-// ones that change for each destination.
-// https://github.com/jquense/yup/issues/522
-const mergedValidationSchema = defaultValidationSchema.concat(msTeamsFieldsValidationSchema);
-
 const MicrosoftTeamsDestinationForm: React.FC<MicrosoftTeamsDestinationFormProps> = ({
   onSubmit,
   initialValues,
 }) => {
+  const existing = initialValues.outputId;
+
+  const msTeamsFieldsValidationSchema = Yup.object().shape({
+    outputConfig: Yup.object().shape({
+      msTeams: Yup.object().shape({
+        webhookURL: existing ? yupWebhookValidation : yupWebhookValidation.required(),
+      }),
+    }),
+  });
+
+  const mergedValidationSchema = defaultValidationSchema.concat(msTeamsFieldsValidationSchema);
+
   return (
     <BaseDestinationForm<MicrosoftTeamsFieldValues>
       initialValues={initialValues}
       validationSchema={mergedValidationSchema}
       onSubmit={onSubmit}
     >
-      <Field
-        as={FormikTextInput}
-        name="outputConfig.msTeams.webhookURL"
-        label="Microsoft Teams Webhook URL"
-        placeholder="Where should we send a push notification to?"
-        mb={6}
-        aria-required
-      />
+      <SimpleGrid gap={5} columns={2}>
+        <Field
+          name="displayName"
+          as={FormikTextInput}
+          label="* Display Name"
+          placeholder="How should we name this?"
+          required
+        />
+        <Field
+          as={SensitiveTextInput}
+          shouldMask={!!existing}
+          name="outputConfig.msTeams.webhookURL"
+          label="Microsoft Teams Webhook URL"
+          placeholder={
+            existing
+              ? 'Information is hidden. New values will override the existing ones.'
+              : 'Where should we send a push notification to?'
+          }
+          required={!existing}
+        />
+      </SimpleGrid>
     </BaseDestinationForm>
   );
 };

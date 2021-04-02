@@ -16,10 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../__generated__/schema';
 
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 
 export type DestinationFull = { __typename: 'Destination' } & Pick<
@@ -33,6 +32,7 @@ export type DestinationFull = { __typename: 'Destination' } & Pick<
   | 'outputType'
   | 'verificationStatus'
   | 'defaultForSeverity'
+  | 'alertTypes'
 > & {
     outputConfig: {
       slack?: Types.Maybe<Pick<Types.SlackConfig, 'webhookURL'>>;
@@ -42,13 +42,14 @@ export type DestinationFull = { __typename: 'Destination' } & Pick<
       jira?: Types.Maybe<
         Pick<
           Types.JiraConfig,
-          'orgDomain' | 'projectKey' | 'userName' | 'apiKey' | 'assigneeId' | 'issueType'
+          'orgDomain' | 'projectKey' | 'userName' | 'apiKey' | 'assigneeId' | 'issueType' | 'labels'
         >
       >;
-      opsgenie?: Types.Maybe<Pick<Types.OpsgenieConfig, 'apiKey'>>;
+      opsgenie?: Types.Maybe<Pick<Types.OpsgenieConfig, 'apiKey' | 'serviceRegion'>>;
       msTeams?: Types.Maybe<Pick<Types.MsTeamsConfig, 'webhookURL'>>;
-      sqs?: Types.Maybe<Pick<Types.SqsConfig, 'queueUrl'>>;
+      sqs?: Types.Maybe<Pick<Types.SqsDestinationConfig, 'queueUrl'>>;
       asana?: Types.Maybe<Pick<Types.AsanaConfig, 'personalAccessToken' | 'projectGids'>>;
+      customWebhook?: Types.Maybe<Pick<Types.CustomWebhookConfig, 'webhookURL'>>;
     };
   };
 
@@ -82,9 +83,11 @@ export const DestinationFull = gql`
         apiKey
         assigneeId
         issueType
+        labels
       }
       opsgenie {
         apiKey
+        serviceRegion
       }
       msTeams {
         webhookURL
@@ -96,9 +99,13 @@ export const DestinationFull = gql`
         personalAccessToken
         projectGids
       }
+      customWebhook {
+        webhookURL
+      }
     }
     verificationStatus
     defaultForSeverity
+    alertTypes
     __typename
   }
 `;

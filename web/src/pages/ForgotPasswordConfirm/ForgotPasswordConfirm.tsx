@@ -17,11 +17,12 @@
  */
 
 import React from 'react';
-import Banner from 'Assets/sign-up-banner.jpg';
 import AuthPageContainer from 'Components/AuthPageContainer';
 import queryString from 'query-string';
 import ForgotPasswordConfirmForm from 'Components/forms/ForgotPasswordConfirmForm';
 import useRouter from 'Hooks/useRouter';
+import withSEO from 'Hoc/withSEO';
+import { FadeIn } from 'pouncejs';
 
 const ForgotPasswordConfirmPage: React.FC = () => {
   const { location } = useRouter();
@@ -30,24 +31,30 @@ const ForgotPasswordConfirmPage: React.FC = () => {
   const { email, token } = queryString.parse(location.search) as { email: string; token: string };
   if (!token || !email) {
     return (
-      <AuthPageContainer banner={Banner}>
-        <AuthPageContainer.Caption
-          title="Something seems off..."
-          subtitle="Are you sure that the URL you followed is valid?"
-        />
+      <AuthPageContainer>
+        <AuthPageContainer.Content>
+          <AuthPageContainer.Caption
+            title="Something seems off..."
+            subtitle="Are you sure that the URL you followed is valid?"
+          />
+        </AuthPageContainer.Content>
       </AuthPageContainer>
     );
   }
 
   return (
-    <AuthPageContainer banner={Banner}>
-      <AuthPageContainer.Caption
-        title="Alrighty then.."
-        subtitle="Let's set you up with a new password."
-      />
-      <ForgotPasswordConfirmForm email={email} token={token} />
+    <AuthPageContainer>
+      <FadeIn delay={100}>
+        <AuthPageContainer.Content>
+          <AuthPageContainer.Caption
+            title="Alrighty then.."
+            subtitle="Let's set you up with a new password."
+          />
+          <ForgotPasswordConfirmForm email={email} token={token} />
+        </AuthPageContainer.Content>
+      </FadeIn>
     </AuthPageContainer>
   );
 };
 
-export default ForgotPasswordConfirmPage;
+export default withSEO({ title: 'Reset Password' })(ForgotPasswordConfirmPage);

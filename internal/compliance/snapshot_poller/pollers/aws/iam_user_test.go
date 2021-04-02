@@ -28,7 +28,6 @@ import (
 
 	awsmodels "github.com/panther-labs/panther/internal/compliance/snapshot_poller/models/aws"
 	"github.com/panther-labs/panther/internal/compliance/snapshot_poller/pollers/aws/awstest"
-	"github.com/panther-labs/panther/internal/compliance/snapshot_poller/pollers/utils"
 )
 
 func TestGetCredentialReport(t *testing.T) {
@@ -113,29 +112,58 @@ func TestExtractCredentialReportError(t *testing.T) {
 func TestIAMUsersList(t *testing.T) {
 	mockSvc := awstest.BuildMockIAMSvc([]string{"ListUsersPages"})
 
-	out := listUsers(mockSvc)
+	out, marker, err := listUsers(mockSvc, nil)
 	assert.Equal(t, awstest.ExampleListUsers.Users, out)
+	assert.Nil(t, marker)
+	assert.NoError(t, err)
+}
+
+// Test the iterator works on consecutive pages but stops at max page size
+func TestIamUserListIterator(t *testing.T) {
+	var users []*iam.User
+	var marker *string
+
+	cont := iamUserIterator(awstest.ExampleListUsers, &users, &marker)
+	assert.True(t, cont)
+	assert.Nil(t, marker)
+	assert.Len(t, users, 2)
+
+	for i := 2; i < 50; i++ {
+		cont = iamUserIterator(awstest.ExampleListUsersContinue, &users, &marker)
+		assert.True(t, cont)
+		assert.NotNil(t, marker)
+		assert.Len(t, users, i*2)
+	}
+
+	cont = iamUserIterator(awstest.ExampleListUsersContinue, &users, &marker)
+	assert.False(t, cont)
+	assert.NotNil(t, marker)
+	assert.Len(t, users, 100)
 }
 
 func TestIAMUsersListError(t *testing.T) {
 	mockSvc := awstest.BuildMockIAMSvcError([]string{"ListUsersPages"})
 
-	out := listUsers(mockSvc)
+	out, marker, err := listUsers(mockSvc, nil)
 	assert.Nil(t, out)
+	assert.Nil(t, marker)
+	assert.Error(t, err)
 }
 
 func TestIAMUsersGetPolicy(t *testing.T) {
 	mockSvc := awstest.BuildMockIAMSvc([]string{"GetUserPolicy"})
 
-	out := getUserPolicy(mockSvc, aws.String("ExampleUser"), aws.String("ExamplePolicy"))
+	out, err := getUserPolicy(mockSvc, aws.String("ExampleUser"), aws.String("ExamplePolicy"))
 	assert.Equal(t, awstest.ExampleGetUserPolicy.PolicyDocument, out)
+	assert.NoError(t, err)
 }
 
 func TestIAMUsersGetUserPolicyError(t *testing.T) {
 	mockSvc := awstest.BuildMockIAMSvcError([]string{"GetUserPolicy"})
 
-	out := getUserPolicy(mockSvc, aws.String("ExampleUser"), aws.String("ExamplePolicy"))
+	out, err := getUserPolicy(mockSvc, aws.String("ExampleUser"), aws.String("ExamplePolicy"))
 	assert.Nil(t, out)
+	assert.Error(t, err)
 }
 
 func TestIAMUsersGetPolicies(t *testing.T) {
@@ -175,11 +203,11 @@ func TestIAMUsersListVirtualMFADevices(t *testing.T) {
 
 	expected := map[string]*awsmodels.VirtualMFADevice{
 		"123456789012": {
-			EnableDate:   awstest.ExampleDate,
+			EnableDate:   &awstest.ExampleTime,
 			SerialNumber: aws.String("arn:aws:iam::123456789012:mfa/root-account-mfa-device"),
 		},
 		"AAAAAAAQQQQQO2HVVVVVV": {
-			EnableDate:   awstest.ExampleDate,
+			EnableDate:   &awstest.ExampleTime,
 			SerialNumber: aws.String("arn:aws:iam::123456789012:mfa/unit_test_user"),
 		},
 	}
@@ -198,11 +226,12 @@ func TestIAMUsersListVirtualMFADevicesError(t *testing.T) {
 }
 
 func TestIAMUsersPoller(t *testing.T) {
+	resetCache()
 	awstest.MockIAMForSetup = awstest.BuildMockIAMSvcAll()
 
 	IAMClientFunc = awstest.SetupMockIAM
 
-	resources, err := PollIAMUsers(&awsmodels.ResourcePollerInput{
+	resources, marker, err := PollIAMUsers(&awsmodels.ResourcePollerInput{
 		AuthSource:          &awstest.ExampleAuthSource,
 		AuthSourceParsedARN: awstest.ExampleAuthSourceParsedARN,
 		IntegrationID:       awstest.ExampleIntegrationID,
@@ -213,7 +242,7 @@ func TestIAMUsersPoller(t *testing.T) {
 		GenericResource: awsmodels.GenericResource{
 			ResourceID:   aws.String("arn:aws:iam::123456789012:root"),
 			ResourceType: aws.String(awsmodels.IAMRootUserSchema),
-			TimeCreated:  utils.DateTimeFormat(*awstest.ExampleDate),
+			TimeCreated:  &awstest.ExampleTime,
 		},
 		GenericAWSResource: awsmodels.GenericAWSResource{
 			AccountID: awstest.ExampleAccountId,
@@ -224,7 +253,7 @@ func TestIAMUsersPoller(t *testing.T) {
 		},
 		CredentialReport: awstest.ExampleExtractedCredentialReport["<root_account>"],
 		VirtualMFA: &awsmodels.VirtualMFADevice{
-			EnableDate:   awstest.ExampleDate,
+			EnableDate:   &awstest.ExampleTime,
 			SerialNumber: aws.String("arn:aws:iam::123456789012:mfa/root-account-mfa-device"),
 		},
 	}
@@ -234,7 +263,7 @@ func TestIAMUsersPoller(t *testing.T) {
 			GenericResource: awsmodels.GenericResource{
 				ResourceID:   aws.String("arn:aws:iam::123456789012:user/unit_test_user"),
 				ResourceType: aws.String(awsmodels.IAMUserSchema),
-				TimeCreated:  utils.DateTimeFormat(*awstest.ExampleDate),
+				TimeCreated:  &awstest.ExampleTime,
 			},
 			GenericAWSResource: awsmodels.GenericAWSResource{
 				AccountID: awstest.ExampleAccountId,
@@ -250,7 +279,7 @@ func TestIAMUsersPoller(t *testing.T) {
 				awstest.ExampleGroup,
 			},
 			VirtualMFA: &awsmodels.VirtualMFADevice{
-				EnableDate:   awstest.ExampleDate,
+				EnableDate:   &awstest.ExampleTime,
 				SerialNumber: aws.String("arn:aws:iam::123456789012:mfa/unit_test_user"),
 			},
 			InlinePolicies: map[string]*string{
@@ -263,7 +292,7 @@ func TestIAMUsersPoller(t *testing.T) {
 			GenericResource: awsmodels.GenericResource{
 				ResourceID:   aws.String("arn:aws:iam::123456789012:user/Franklin"),
 				ResourceType: aws.String(awsmodels.IAMUserSchema),
-				TimeCreated:  utils.DateTimeFormat(*awstest.ExampleDate),
+				TimeCreated:  &awstest.ExampleTime,
 			},
 			GenericAWSResource: awsmodels.GenericAWSResource{
 				AccountID: awstest.ExampleAccountId,
@@ -287,21 +316,23 @@ func TestIAMUsersPoller(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, err)
 	assert.NotEmpty(t, resources)
 	// Root and two IAM users
 	assert.Len(t, resources, 3)
 	assert.Equal(t, expectedIamUserSnapshots[0], resources[0].Attributes)
 	assert.Equal(t, expectedIamUserSnapshots[1], resources[1].Attributes)
 	assert.Equal(t, rootSnapshot, resources[2].Attributes)
+	assert.Nil(t, marker)
+	assert.NoError(t, err)
 }
 
 func TestIAMUsersPollerError(t *testing.T) {
+	resetCache()
 	awstest.MockIAMForSetup = awstest.BuildMockIAMSvcAllError()
 
 	IAMClientFunc = awstest.SetupMockIAM
 
-	resources, err := PollIAMUsers(&awsmodels.ResourcePollerInput{
+	resources, marker, err := PollIAMUsers(&awsmodels.ResourcePollerInput{
 		AuthSource:          &awstest.ExampleAuthSource,
 		AuthSourceParsedARN: awstest.ExampleAuthSourceParsedARN,
 		IntegrationID:       awstest.ExampleIntegrationID,
@@ -310,6 +341,7 @@ func TestIAMUsersPollerError(t *testing.T) {
 
 	// Even though ListUsers will return no users, the poller will continue making API calls to build
 	// the root user and error when building the credential report
-	require.Error(t, err)
 	assert.Nil(t, resources)
+	assert.Nil(t, marker)
+	assert.Error(t, err)
 }

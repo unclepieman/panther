@@ -1,3 +1,4 @@
+// Package gcplogs has log parsers for Google Cloud Platform
 package gcplogs
 
 /**
@@ -21,18 +22,39 @@ package gcplogs
 import (
 	"strings"
 
+	"github.com/panther-labs/panther/internal/log_analysis/log_processor/logtypes"
+	"github.com/panther-labs/panther/internal/log_analysis/log_processor/parsers"
 	"github.com/panther-labs/panther/internal/log_analysis/log_processor/parsers/numerics"
 	"github.com/panther-labs/panther/internal/log_analysis/log_processor/parsers/timestamp"
 )
 
-// Package gcplogs has log parsers for Google Cloud Platform
+const (
+	LogTypePrefix = "GCP"
+	TypeAuditLog  = LogTypePrefix + ".AuditLog"
+)
+
+// LogTypes exports the available log type entries
+func LogTypes() logtypes.Group {
+	return logTypes
+}
+
+//nolint: lll
+var logTypes = logtypes.Must(LogTypePrefix, logtypes.Config{
+	Name: TypeAuditLog,
+	Description: `Cloud Audit Logs maintains three audit logs for each Google Cloud project, folder, and organization: Admin Activity, Data Access, and System Event.
+Google Cloud services write audit log entries to these logs to help you answer the questions of "who did what, where, and when?" within your Google Cloud resources.
+`,
+	ReferenceURL: `https://cloud.google.com/logging/docs/audit`,
+	Schema:       LogEntryAuditLog{},
+	NewParser:    parsers.AdapterFactory(&AuditLogParser{}),
+})
 
 // nolint:lll
 type LogEntry struct {
 	LogName          *string                 `json:"logName" validate:"required" description:"The resource name of the log to which this log entry belongs."`
 	Severity         *string                 `json:"severity,omitempty" description:"The severity of the log entry. The default value is LogSeverity.DEFAULT."`
 	InsertID         *string                 `json:"insertId,omitempty" description:"A unique identifier for the log entry."`
-	Resource         MonitoredResource       `json:"resource" validate:"required" description:"The monitored resource that produced this log entry."`
+	Resource         *MonitoredResource      `json:"resource,omitempty" description:"The monitored resource that produced this log entry."`
 	Timestamp        *timestamp.RFC3339      `json:"timestamp,omitempty" description:"The time the event described by the log entry occurred."`
 	ReceiveTimestamp *timestamp.RFC3339      `json:"receiveTimestamp" validate:"required" description:"The time the log entry was received by Logging."`
 	Labels           Labels                  `json:"labels,omitempty" description:"A set of user-defined (key, value) data that provides additional information about the log entry."`

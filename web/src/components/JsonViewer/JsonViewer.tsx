@@ -17,22 +17,45 @@
  */
 
 import React from 'react';
-import { useTheme } from 'pouncejs';
-import { copyTextToClipboard } from 'Helpers/utils';
+import { useTheme, Box, Button } from 'pouncejs';
+import { copyTextToClipboard, remToPx } from 'Helpers/utils';
 
 const ReactJSONView = React.lazy(() =>
   import(/* webpackChunkName: 'react-json-view' */ 'react-json-view')
 );
 
 interface JsonViewerProps {
-  data: { [key: string]: string | object | number };
+  data: Record<string, unknown>;
   collapsed?: boolean;
 }
 
 const JsonViewer: React.FC<JsonViewerProps> = ({ data, collapsed }) => {
   const theme = useTheme();
+  const [isExpanded, toggle] = React.useState(false);
 
-  const jsonViewerStyle = React.useMemo(() => ({ fontSize: theme.fontSizes[2] }), [theme]);
+  const toggleDepth = React.useCallback(() => {
+    toggle(!isExpanded);
+  }, [isExpanded]);
+
+  const jsonViewerStyle = React.useMemo(
+    () => ({
+      fontFamily: 'inherit',
+      fontSize: remToPx(theme.fontSizes.medium),
+      background: 'transparent',
+      wordBreak: 'break-all' as const,
+    }),
+    [theme]
+  );
+
+  const depth = React.useMemo(() => {
+    if (collapsed && !isExpanded) {
+      return false;
+    }
+    if (isExpanded) {
+      return 100;
+    }
+    return 1;
+  }, [collapsed, isExpanded]);
 
   const handleCopy = React.useCallback(copy => {
     copyTextToClipboard(JSON.stringify(copy.src, null, '\t'));
@@ -40,18 +63,31 @@ const JsonViewer: React.FC<JsonViewerProps> = ({ data, collapsed }) => {
 
   return (
     <React.Suspense fallback={null}>
-      <ReactJSONView
-        src={data}
-        name={false}
-        theme="grayscale:inverted"
-        iconStyle="triangle"
-        displayObjectSize={false}
-        displayDataTypes={false}
-        collapsed={collapsed || 1}
-        style={jsonViewerStyle}
-        sortKeys
-        enableClipboard={handleCopy}
-      />
+      <Box position="relative" width="100%">
+        <Box position="absolute" top="0" right="0" zIndex={10}>
+          <Button
+            data-testid="toggle-json"
+            size="medium"
+            variantColor="navyblue"
+            onClick={toggleDepth}
+          >
+            {isExpanded ? 'Collapse All' : 'Expand All'}
+          </Button>
+        </Box>
+        <ReactJSONView
+          data-testId="json-viewer"
+          src={data}
+          name={false}
+          theme="shapeshifter"
+          iconStyle="triangle"
+          displayObjectSize={false}
+          displayDataTypes={false}
+          collapsed={depth}
+          style={jsonViewerStyle}
+          sortKeys
+          enableClipboard={handleCopy}
+        />
+      </Box>
     </React.Suspense>
   );
 };

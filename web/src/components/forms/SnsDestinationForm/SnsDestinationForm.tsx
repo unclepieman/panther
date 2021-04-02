@@ -20,12 +20,13 @@ import React from 'react';
 import { Field } from 'formik';
 import * as Yup from 'yup';
 import FormikTextInput from 'Components/fields/TextInput';
-import { Text, Box } from 'pouncejs';
+import { AbstractButton, Box, Collapse, FormHelperText, SimpleGrid } from 'pouncejs';
 import { DestinationConfigInput } from 'Generated/schema';
 import BaseDestinationForm, {
   BaseDestinationFormValues,
   defaultValidationSchema,
 } from 'Components/forms/BaseDestinationForm';
+import { pantherConfig } from 'Source/config';
 import JsonViewer from 'Components/JsonViewer';
 import { getArnRegexForService } from 'Helpers/utils';
 
@@ -37,7 +38,7 @@ const SNS_TOPIC_POLICY = {
       Effect: 'Allow',
       Action: 'sns:Publish',
       Principal: {
-        AWS: `arn:aws:iam::${process.env.AWS_ACCOUNT_ID}:root`,
+        AWS: `arn:aws:iam::${pantherConfig.AWS_ACCOUNT_ID}:root`,
       },
       Resource: '<Destination-SNS-Topic-ARN>',
     },
@@ -61,34 +62,55 @@ const snsFieldsValidationSchema = Yup.object().shape({
   }),
 });
 
-// @ts-ignore
 // We merge the two schemas together: the one deriving from the common fields, plus the custom
 // ones that change for each destination.
 // https://github.com/jquense/yup/issues/522
 const mergedValidationSchema = defaultValidationSchema.concat(snsFieldsValidationSchema);
 
 const SnsDestinationForm: React.FC<SNSDestinationFormProps> = ({ onSubmit, initialValues }) => {
+  const [showPolicy, setShowPolicy] = React.useState(false);
+
   return (
     <BaseDestinationForm<SNSFieldValues>
       initialValues={initialValues}
       validationSchema={mergedValidationSchema}
       onSubmit={onSubmit}
     >
-      <Field
-        as={FormikTextInput}
-        name="outputConfig.sns.topicArn"
-        label="Topic ARN"
-        placeholder="Where should we publish a notification to?"
-        mb={2}
-        aria-required
-      />
-      <Box mb={6}>
-        <Text size="small" color="grey400" mb={2}>
-          <b>Note</b>: You would need to allow Panther <b>sns:Publish</b> access to send alert
-          messages to your SNS topic
-        </Text>
-        <JsonViewer data={SNS_TOPIC_POLICY} collapsed={false} />
-      </Box>
+      <SimpleGrid gap={5} columns={2}>
+        <Field
+          name="displayName"
+          as={FormikTextInput}
+          label="* Display Name"
+          placeholder="How should we name this?"
+          required
+        />
+        <Box as="fieldset">
+          <Field
+            as={FormikTextInput}
+            name="outputConfig.sns.topicArn"
+            label="Topic ARN"
+            placeholder="Where should we publish a notification to?"
+            required
+            aria-describedby="topicArn-label topicArn-policy"
+          />
+          <FormHelperText id="topicArn-label" mt={2}>
+            <b>Note</b>: You would need to allow Panther <b>sns:Publish</b> access to send alert
+            messages to your SNS topic.{' '}
+            {!showPolicy && (
+              <AbstractButton color="blue-400" onClick={() => setShowPolicy(true)}>
+                Show Policy
+              </AbstractButton>
+            )}
+          </FormHelperText>
+          {showPolicy && (
+            <Collapse open={showPolicy}>
+              <Box my={4} id="topicArn-policy">
+                <JsonViewer data={SNS_TOPIC_POLICY} collapsed={false} />
+              </Box>
+            </Collapse>
+          )}
+        </Box>
+      </SimpleGrid>
     </BaseDestinationForm>
   );
 };

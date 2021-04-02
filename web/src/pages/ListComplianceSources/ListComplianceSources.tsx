@@ -17,26 +17,23 @@
  */
 
 import React from 'react';
-import TablePlaceholder from 'Components/TablePlaceholder';
-import { Alert, Box, Button, Card, Flex, Icon } from 'pouncejs';
+import { Alert, Box } from 'pouncejs';
 import { extractErrorMessage } from 'Helpers/utils';
 import Panel from 'Components/Panel';
-import { Link as RRLink } from 'react-router-dom';
 import urls from 'Source/urls';
 import ErrorBoundary from 'Components/ErrorBoundary';
+import LinkButton from 'Components/buttons/LinkButton';
+import withSEO from 'Hoc/withSEO';
 import { useListComplianceSources } from './graphql/listComplianceSources.generated';
 import EmptyDataFallback from './EmptyDataFallback';
-import ComplianceSourceTable from './ComplianceSourceTable';
+import Skeleton from './Skeleton';
+import ListComplianceSourceCards from './ListComplianceSourceCards';
 
 const ListComplianceSources = () => {
   const { loading, error, data } = useListComplianceSources();
 
   if (loading) {
-    return (
-      <Card p={9}>
-        <TablePlaceholder />
-      </Card>
-    );
+    return <Skeleton />;
   }
 
   if (error) {
@@ -60,22 +57,18 @@ const ListComplianceSources = () => {
     <Box mb={6}>
       <Panel
         title="Connected Accounts"
-        size="large"
         actions={
-          <Button size="large" variant="primary" as={RRLink} to={urls.compliance.sources.create()}>
-            <Flex align="center">
-              <Icon type="add" size="small" mr={1} />
-              Add Account
-            </Flex>
-          </Button>
+          <LinkButton to={urls.integrations.cloudAccounts.create()} icon="add">
+            Add Account
+          </LinkButton>
         }
       >
         <ErrorBoundary>
-          <ComplianceSourceTable sources={data.listComplianceIntegrations} />
+          <ListComplianceSourceCards sources={data.listComplianceIntegrations} />
         </ErrorBoundary>
       </Panel>
     </Box>
   );
 };
 
-export default ListComplianceSources;
+export default withSEO({ title: 'Cloud Security Sources' })(ListComplianceSources);

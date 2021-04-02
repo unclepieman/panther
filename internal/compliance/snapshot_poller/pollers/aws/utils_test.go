@@ -19,7 +19,6 @@ package aws
  */
 
 import (
-	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 
 	"github.com/panther-labs/panther/internal/compliance/snapshot_poller/pollers/aws/awstest"
@@ -27,11 +26,11 @@ import (
 
 func init() {
 	// sets an empty session for tests
-	snapshotPollerSession = &session.Session{}
+	SnapshotPollerSession = &session.Session{}
 
 	// mocks the assume role
-	assumeRoleFunc = awstest.AssumeRoleMock
-	verifyAssumedCredsFunc = func(creds *credentials.Credentials, region string) error {
+	AssumeRoleFunc = awstest.AssumeRoleMock
+	VerifyAssumedCredsFunc = func(creds *session.Session, region string) error {
 		return nil
 	}
 }

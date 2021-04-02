@@ -16,10 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../../../__generated__/schema';
 
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
@@ -29,7 +28,10 @@ export type UpdateGeneralSettingsConsentsVariables = {
 };
 
 export type UpdateGeneralSettingsConsents = {
-  updateGeneralSettings: Pick<Types.GeneralSettings, 'email' | 'errorReportingConsent'>;
+  updateGeneralSettings: Pick<
+    Types.GeneralSettings,
+    'email' | 'errorReportingConsent' | 'analyticsConsent'
+  >;
 };
 
 export const UpdateGeneralSettingsConsentsDocument = gql`
@@ -37,6 +39,7 @@ export const UpdateGeneralSettingsConsentsDocument = gql`
     updateGeneralSettings(input: $input) {
       email
       errorReportingConsent
+      analyticsConsent
     }
   }
 `;
@@ -83,3 +86,17 @@ export type UpdateGeneralSettingsConsentsMutationOptions = ApolloReactCommon.Bas
   UpdateGeneralSettingsConsents,
   UpdateGeneralSettingsConsentsVariables
 >;
+export function mockUpdateGeneralSettingsConsents({
+  data,
+  variables,
+  errors,
+}: {
+  data: UpdateGeneralSettingsConsents;
+  variables?: UpdateGeneralSettingsConsentsVariables;
+  errors?: GraphQLError[];
+}) {
+  return {
+    request: { query: UpdateGeneralSettingsConsentsDocument, variables },
+    result: { data, errors },
+  };
+}

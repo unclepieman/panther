@@ -17,9 +17,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: IAM roles for an account being scanned by Panther.
 
-Metadata:
-  Version: v1.0.1
-
 Mappings:
   # DO NOT EDIT PantherParameters section. Panther application relies on the exact format (including comments)
   # in order to replace the default values with an appropriate ones.
@@ -152,6 +149,15 @@ Resources:
                   - waf:ListTagsForResource
                   - waf-regional:ListTagsForResource
                 Resource: '*'
+        - PolicyName: EKSFargateProfile
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - eks:ListFargateProfiles
+                  - eks:DescribeFargateProfile
+                Resource: '*'
       Tags:
         - Key: Application
           Value: Panther
@@ -269,7 +275,15 @@ Outputs:
     Condition: EnableCloudWatchEvent
     Description: The Arn of the CloudFormation StackSet Execution Role for configuring Panther infra.
     Value: !GetAtt CloudFormationStackSetExecutionRole.Arn
+  CloudFormationStackSetExecutionRoleName:
+    Condition: EnableCloudWatchEvent
+    Description: The name of the CloudFormation StackSet Execution Role for configuring Panther infra.
+    Value: !Ref CloudFormationStackSetExecutionRole
   PantherRemediationRoleArn:
     Condition: EnableAutoRemediation
     Description: The Arn of the Panther Auto Remediation IAM Role
     Value: !GetAtt RemediationRole.Arn
+  PantherRemediationRoleName:
+    Condition: EnableAutoRemediation
+    Description: The name of the Panther Auto Remediation IAM Role
+    Value: !Ref RemediationRole

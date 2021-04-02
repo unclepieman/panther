@@ -16,35 +16,77 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../__generated__/schema';
 
+import { DeliveryResponseFull } from './DeliveryResponseFull.generated';
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 
 export type AlertDetailsFull = Pick<
   Types.AlertDetails,
   | 'alertId'
-  | 'ruleId'
+  | 'type'
   | 'title'
   | 'creationTime'
-  | 'eventsMatched'
+  | 'description'
+  | 'reference'
+  | 'runbook'
   | 'updateTime'
-  | 'eventsLastEvaluatedKey'
-  | 'events'
-  | 'dedupString'
->;
+  | 'severity'
+  | 'status'
+  | 'lastUpdatedBy'
+  | 'lastUpdatedByTime'
+> & {
+  deliveryResponses: Array<Types.Maybe<DeliveryResponseFull>>;
+  detection:
+    | Pick<
+        Types.AlertDetailsRuleInfo,
+        | 'ruleId'
+        | 'logTypes'
+        | 'eventsMatched'
+        | 'eventsLastEvaluatedKey'
+        | 'events'
+        | 'dedupString'
+      >
+    | Pick<
+        Types.AlertSummaryPolicyInfo,
+        'policyId' | 'resourceTypes' | 'resourceId' | 'policySourceId'
+      >;
+};
 
 export const AlertDetailsFull = gql`
   fragment AlertDetailsFull on AlertDetails {
     alertId
-    ruleId
+    type
     title
     creationTime
-    eventsMatched
+    description
+    reference
+    runbook
+    deliveryResponses {
+      ...DeliveryResponseFull
+    }
     updateTime
-    eventsLastEvaluatedKey
-    events
-    dedupString
+    severity
+    status
+    lastUpdatedBy
+    lastUpdatedByTime
+    detection {
+      ... on AlertSummaryPolicyInfo {
+        policyId
+        resourceTypes
+        resourceId
+        policySourceId
+      }
+      ... on AlertDetailsRuleInfo {
+        ruleId
+        logTypes
+        eventsMatched
+        eventsLastEvaluatedKey
+        events
+        dedupString
+      }
+    }
   }
+  ${DeliveryResponseFull}
 `;

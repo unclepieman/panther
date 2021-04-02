@@ -16,68 +16,58 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable import/order, import/no-duplicates, @typescript-eslint/no-unused-vars */
-
 import * as Types from '../../../../__generated__/schema';
 
+import { GraphQLError } from 'graphql';
 import gql from 'graphql-tag';
 import * as ApolloReactCommon from '@apollo/client';
 import * as ApolloReactHooks from '@apollo/client';
 
 export type UpdatePolicyVariables = {
-  input: Types.CreateOrModifyPolicyInput;
+  input: Types.UpdatePolicyInput;
 };
 
 export type UpdatePolicy = {
-  updatePolicy?: Types.Maybe<
-    Pick<
-      Types.PolicyDetails,
-      | 'autoRemediationId'
-      | 'autoRemediationParameters'
-      | 'description'
-      | 'displayName'
-      | 'enabled'
-      | 'suppressions'
-      | 'id'
-      | 'reference'
-      | 'resourceTypes'
-      | 'runbook'
-      | 'severity'
-      | 'tags'
-      | 'body'
-    > & {
-      tests?: Types.Maybe<
-        Array<
-          Types.Maybe<
-            Pick<Types.PolicyUnitTest, 'expectedResult' | 'name' | 'resource' | 'resourceType'>
-          >
-        >
-      >;
-    }
-  >;
+  updatePolicy: Pick<
+    Types.Policy,
+    | 'autoRemediationId'
+    | 'autoRemediationParameters'
+    | 'body'
+    | 'description'
+    | 'displayName'
+    | 'enabled'
+    | 'id'
+    | 'outputIds'
+    | 'reference'
+    | 'resourceTypes'
+    | 'runbook'
+    | 'severity'
+    | 'suppressions'
+    | 'tags'
+  > & { tests: Array<Pick<Types.DetectionTestDefinition, 'expectedResult' | 'name' | 'resource'>> };
 };
 
 export const UpdatePolicyDocument = gql`
-  mutation UpdatePolicy($input: CreateOrModifyPolicyInput!) {
+  mutation UpdatePolicy($input: UpdatePolicyInput!) {
     updatePolicy(input: $input) {
       autoRemediationId
       autoRemediationParameters
+      body
       description
       displayName
       enabled
-      suppressions
       id
+      outputIds
       reference
       resourceTypes
       runbook
       severity
+      suppressions
       tags
-      body
       tests {
         expectedResult
         name
         resource
-        resourceType
       }
     }
   }
@@ -118,3 +108,17 @@ export type UpdatePolicyMutationOptions = ApolloReactCommon.BaseMutationOptions<
   UpdatePolicy,
   UpdatePolicyVariables
 >;
+export function mockUpdatePolicy({
+  data,
+  variables,
+  errors,
+}: {
+  data: UpdatePolicy;
+  variables?: UpdatePolicyVariables;
+  errors?: GraphQLError[];
+}) {
+  return {
+    request: { query: UpdatePolicyDocument, variables },
+    result: { data, errors },
+  };
+}

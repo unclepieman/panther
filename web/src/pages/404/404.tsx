@@ -17,37 +17,24 @@
  */
 
 import React from 'react';
-import { Flex, Heading, Text, Button, Box } from 'pouncejs';
-import { Link as RRLink } from 'react-router-dom';
+import { Flex, Heading, Text, Box } from 'pouncejs';
 import NotFoundImg from 'Assets/illustrations/not-found.svg';
+import withSEO from 'Hoc/withSEO';
+import LinkButton from 'Components/buttons/LinkButton';
 
 const Page404: React.FC = () => {
   return (
-    <Flex
-      justify="center"
-      align="center"
-      width="100vw"
-      height="100vh"
-      position="fixed"
-      left={0}
-      top={0}
-      bg="white"
-      direction="column"
-    >
+    <Flex justify="center" align="center" direction="column" height="100%" width="100%">
       <Box mb={10}>
         <img alt="Page not found illustration" src={NotFoundImg} width="auto" height={400} />
       </Box>
-      <Heading size="medium" color="grey300" mb={4}>
-        Not all who wander are lost...
-      </Heading>
-      <Text size="large" color="grey200" as="p" mb={10}>
+      <Heading mb={2}>Not all who wander are lost...</Heading>
+      <Text color="gray-300" mb={10}>
         ( You definitely are though )
       </Text>
-      <Button size="small" variant="default" as={RRLink} to="/">
-        Back to Home
-      </Button>
+      <LinkButton to="/">Back to Home</LinkButton>
     </Flex>
   );
 };
 
-export default Page404;
+export default withSEO({ title: 'Not Found' })(Page404);

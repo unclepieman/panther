@@ -24,9 +24,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/aws/aws-sdk-go/service/iam/iamiface"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
-	apimodels "github.com/panther-labs/panther/api/gateway/resources/models"
+	apimodels "github.com/panther-labs/panther/api/lambda/resources/models"
 	awsmodels "github.com/panther-labs/panther/internal/compliance/snapshot_poller/models/aws"
 	pollermodels "github.com/panther-labs/panther/internal/compliance/snapshot_poller/models/poller"
 	"github.com/panther-labs/panther/internal/compliance/snapshot_poller/pollers/utils"
@@ -44,7 +45,7 @@ func setupIAMClient(sess *session.Session, cfg *aws.Config) interface{} {
 func getIAMClient(pollerResourceInput *awsmodels.ResourcePollerInput, region string) (iamiface.IAMAPI, error) {
 	client, err := getClient(pollerResourceInput, IAMClientFunc, "iam", region)
 	if err != nil {
-		return nil, err // error is logged in getClient()
+		return nil, err
 	}
 
 	return client.(iamiface.IAMAPI), nil
@@ -57,7 +58,9 @@ func PollPasswordPolicyResource(
 	_ *pollermodels.ScanEntry,
 ) (interface{}, error) {
 
-	snapshot, err := PollPasswordPolicy(pollerResourceInput)
+	// Throw away the dummy next page response, password policy resources don't need paging
+	// during scanning
+	snapshot, _, err := PollPasswordPolicy(pollerResourceInput)
 	if err != nil || snapshot == nil {
 		return nil, err
 	}
@@ -68,30 +71,29 @@ func PollPasswordPolicyResource(
 func getPasswordPolicy(svc iamiface.IAMAPI) (*iam.PasswordPolicy, error) {
 	out, err := svc.GetAccountPasswordPolicy(&iam.GetAccountPasswordPolicyInput{})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "IAM.GetAccountPasswordPolicy")
 	}
 
 	return out.PasswordPolicy, nil
 }
 
 // PollPasswordPolicy gathers information on all PasswordPolicy in an AWS account.
-func PollPasswordPolicy(pollerInput *awsmodels.ResourcePollerInput) ([]*apimodels.AddResourceEntry, error) {
+func PollPasswordPolicy(pollerInput *awsmodels.ResourcePollerInput) ([]apimodels.AddResourceEntry, *string, error) {
 	zap.L().Debug("starting Password Policy resource poller")
 	iamSvc, err := getIAMClient(pollerInput, defaultRegion)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	anyExist := true
-	passwordPolicy, getErr := getPasswordPolicy(iamSvc)
-	if getErr != nil {
-		if awsErr, ok := getErr.(awserr.Error); ok {
-			switch awsErr.Code() {
-			case iam.ErrCodeNoSuchEntityException:
-				anyExist = false
-			default:
-				utils.LogAWSError("IAM.GetPasswordPolicy", getErr)
-			}
+	passwordPolicy, err := getPasswordPolicy(iamSvc)
+	if err != nil {
+		var awsErr awserr.Error
+		if errors.As(err, &awsErr) && awsErr.Code() == iam.ErrCodeNoSuchEntityException {
+			anyExist = false
+		} else {
+			// The error wasn't caused by the password policy not existing: return it
+			return nil, nil, err
 		}
 	}
 
@@ -101,6 +103,10 @@ func PollPasswordPolicy(pollerInput *awsmodels.ResourcePollerInput) ([]*apimodel
 		awsmodels.PasswordPolicySchema,
 	)
 
+	// Check if ResourceID matches the integration's regex filter
+	if pollerInput.ShouldIgnoreResource(resourceID) {
+		return nil, nil, nil
+	}
 	genericFields := awsmodels.GenericResource{
 		ResourceID:   aws.String(resourceID),
 		ResourceType: aws.String(awsmodels.PasswordPolicySchema),
@@ -111,30 +117,31 @@ func PollPasswordPolicy(pollerInput *awsmodels.ResourcePollerInput) ([]*apimodel
 		Region:    aws.String(awsmodels.GlobalRegion),
 	}
 
+	// Password Policy never pages
 	if anyExist && passwordPolicy != nil {
-		return []*apimodels.AddResourceEntry{{
+		return []apimodels.AddResourceEntry{{
 			Attributes: &awsmodels.PasswordPolicy{
 				GenericResource:    genericFields,
 				GenericAWSResource: genericAWSFields,
 				AnyExist:           anyExist,
 				PasswordPolicy:     *passwordPolicy,
 			},
-			ID:              apimodels.ResourceID(resourceID),
-			IntegrationID:   apimodels.IntegrationID(*pollerInput.IntegrationID),
-			IntegrationType: apimodels.IntegrationTypeAws,
+			ID:              resourceID,
+			IntegrationID:   *pollerInput.IntegrationID,
+			IntegrationType: integrationType,
 			Type:            awsmodels.PasswordPolicySchema,
-		}}, nil
+		}}, nil, nil
 	}
 
-	return []*apimodels.AddResourceEntry{{
+	return []apimodels.AddResourceEntry{{
 		Attributes: &awsmodels.PasswordPolicy{
 			GenericResource:    genericFields,
 			GenericAWSResource: genericAWSFields,
 			AnyExist:           anyExist,
 		},
-		ID:              apimodels.ResourceID(resourceID),
-		IntegrationID:   apimodels.IntegrationID(*pollerInput.IntegrationID),
-		IntegrationType: apimodels.IntegrationTypeAws,
+		ID:              resourceID,
+		IntegrationID:   *pollerInput.IntegrationID,
+		IntegrationType: integrationType,
 		Type:            awsmodels.PasswordPolicySchema,
-	}}, nil
+	}}, nil, nil
 }

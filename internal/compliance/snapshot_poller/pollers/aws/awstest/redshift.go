@@ -42,7 +42,7 @@ var (
 					Address: aws.String("example-cluster.asdf123.us-west-2.redshift.amazonaws.com"),
 					Port:    aws.Int64(5439),
 				},
-				ClusterCreateTime:                ExampleDate,
+				ClusterCreateTime:                &ExampleTime,
 				AutomatedSnapshotRetentionPeriod: aws.Int64(1),
 				ManualSnapshotRetentionPeriod:    aws.Int64(-1),
 				ClusterParameterGroups: []*redshift.ClusterParameterGroupStatus{
@@ -81,6 +81,14 @@ var (
 		},
 	}
 
+	ExampleDescribeClustersOutputContinue = &redshift.DescribeClustersOutput{
+		Clusters: []*redshift.Cluster{
+			ExampleDescribeClustersOutput.Clusters[0],
+			ExampleDescribeClustersOutput.Clusters[0],
+		},
+		Marker: aws.String("1"),
+	}
+
 	ExampleLoggingStatus = &redshift.LoggingStatus{
 		LoggingEnabled: aws.Bool(false),
 	}
@@ -115,7 +123,7 @@ var (
 // Redshift mock
 
 // SetupMockRedshift is used to override the Redshift Client initializer
-func SetupMockRedshift(sess *session.Session, cfg *aws.Config) interface{} {
+func SetupMockRedshift(_ *session.Session, _ *aws.Config) interface{} {
 	return MockRedshiftForSetup
 }
 

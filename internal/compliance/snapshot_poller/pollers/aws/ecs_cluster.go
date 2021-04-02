@@ -24,9 +24,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/aws/aws-sdk-go/service/ecs/ecsiface"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
-	apimodels "github.com/panther-labs/panther/api/gateway/resources/models"
+	apimodels "github.com/panther-labs/panther/api/lambda/resources/models"
 	awsmodels "github.com/panther-labs/panther/internal/compliance/snapshot_poller/models/aws"
 	pollermodels "github.com/panther-labs/panther/internal/compliance/snapshot_poller/models/poller"
 	"github.com/panther-labs/panther/internal/compliance/snapshot_poller/pollers/utils"
@@ -42,7 +43,7 @@ func setupEcsClient(sess *session.Session, cfg *aws.Config) interface{} {
 func getEcsClient(pollerResourceInput *awsmodels.ResourcePollerInput, region string) (ecsiface.ECSAPI, error) {
 	client, err := getClient(pollerResourceInput, EcsClientFunc, "ecs", region)
 	if err != nil {
-		return nil, err // error is logged in getClient()
+		return nil, err
 	}
 
 	return client.(ecsiface.ECSAPI), nil
@@ -60,7 +61,10 @@ func PollECSCluster(
 		return nil, err
 	}
 
-	snapshot := buildEcsClusterSnapshot(client, scanRequest.ResourceID)
+	snapshot, err := buildEcsClusterSnapshot(client, scanRequest.ResourceID)
+	if err != nil {
+		return nil, err
+	}
 	if snapshot == nil {
 		return nil, nil
 	}
@@ -70,28 +74,35 @@ func PollECSCluster(
 	return snapshot, nil
 }
 
-// listClusters returns all ECS clusters in the account
-func listClusters(ecsSvc ecsiface.ECSAPI) (clusters []*string) {
-	err := ecsSvc.ListClustersPages(&ecs.ListClustersInput{},
+// listECSClusters returns all ECS clusters in the account
+func listECSClusters(ecsSvc ecsiface.ECSAPI, nextMarker *string) (clusters []*string, marker *string, err error) {
+	err = ecsSvc.ListClustersPages(&ecs.ListClustersInput{
+		NextToken:  nextMarker,
+		MaxResults: aws.Int64(int64(defaultBatchSize)),
+	},
 		func(page *ecs.ListClustersOutput, lastPage bool) bool {
-			clusters = append(clusters, page.ClusterArns...)
-			return true
+			return ecsClusterIterator(page, &clusters, &marker)
 		})
 	if err != nil {
-		utils.LogAWSError("ECS.ListClustersPages", err)
+		return nil, nil, errors.Wrap(err, "ECS.ListClustersPages")
 	}
 	return
 }
 
-// describeCluster provides detailed information for a given ECS cluster
-func describeCluster(ecsSvc ecsiface.ECSAPI, arn *string) (*ecs.Cluster, error) {
+func ecsClusterIterator(page *ecs.ListClustersOutput, clusters *[]*string, marker **string) bool {
+	*clusters = append(*clusters, page.ClusterArns...)
+	*marker = page.NextToken
+	return len(*clusters) < defaultBatchSize
+}
+
+// describeECSCluster provides detailed information for a given ECS cluster
+func describeECSCluster(ecsSvc ecsiface.ECSAPI, arn *string) (*ecs.Cluster, error) {
 	out, err := ecsSvc.DescribeClusters(&ecs.DescribeClustersInput{
 		Clusters: []*string{arn},
 		Include:  []*string{aws.String("TAGS")},
 	})
 	if err != nil {
-		utils.LogAWSError("ECS.DescribeClusters", err)
-		return nil, err
+		return nil, errors.Wrapf(err, "ECS.DescribeClusters: %s", aws.StringValue(arn))
 	}
 
 	if len(out.Clusters) == 0 {
@@ -103,11 +114,19 @@ func describeCluster(ecsSvc ecsiface.ECSAPI, arn *string) (*ecs.Cluster, error) 
 		return nil, nil
 	}
 
+	if len(out.Clusters) != 1 {
+		return nil, errors.WithMessagef(
+			errors.New("ECS.DescribeClusters"),
+			"expected exactly one ECS cluster when describing %s, but found %d clusters",
+			aws.StringValue(arn),
+			len(out.Clusters),
+		)
+	}
 	return out.Clusters[0], nil
 }
 
-// getClusterTasks enumerates and then describes all active tasks of a cluster
-func getClusterTasks(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodels.EcsTask, error) {
+// getECSClusterTasks enumerates and then describes all active tasks of a cluster
+func getECSClusterTasks(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodels.EcsTask, error) {
 	// Enumerate tasks
 	var taskArns []*string
 	err := ecsSvc.ListTasksPages(&ecs.ListTasksInput{Cluster: clusterArn},
@@ -117,8 +136,7 @@ func getClusterTasks(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodels.E
 		})
 
 	if err != nil {
-		utils.LogAWSError("ECS.ListTasksPages", err)
-		return nil, err
+		return nil, errors.Wrapf(err, "ECS.ListTasksPages: %s", aws.StringValue(clusterArn))
 	}
 
 	// If there are no tasks stop here
@@ -128,18 +146,32 @@ func getClusterTasks(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodels.E
 
 	// Describe tasks
 	//
-	// Oddly, the DescribeTasks API call does not have a version with builtin paging like the list
-	// API call does. If we run into issues here we may need to implement paging ourselves.
-	rawTasks, err := ecsSvc.DescribeTasks(&ecs.DescribeTasksInput{
-		Cluster: clusterArn,
-		// This only accepts one argument, which is the string TAGS
-		// Indicates that we want to included the task tags
-		Include: []*string{aws.String("TAGS")},
-		Tasks:   taskArns,
-	})
-	if err != nil {
-		utils.LogAWSError("ECS.DescribeTasks", err)
-		return nil, err
+	// The DescribeTasks API call does not have a version with builtin paging like the list
+	// API call does. API set a limit of 100 tasks to describe in a single operation.
+	// Loop through results 100 elements at a time and aggregate the results
+	const ecsTasksBatchSize = 100
+	// initialize the rawTasks variable
+	var rawTasks ecs.DescribeTasksOutput
+	// loop through the items in taskArns, 100 at a time
+	for i := 0; i < len(taskArns); i += ecsTasksBatchSize {
+		end := i + ecsTasksBatchSize
+		if end > len(taskArns) {
+			end = len(taskArns)
+		}
+		rawTasksPage, err := ecsSvc.DescribeTasks(&ecs.DescribeTasksInput{
+			Cluster: clusterArn,
+			// This only accepts one argument, which is the string TAGS
+			// Indicates that we want to included the task tags
+			Include: []*string{aws.String("TAGS")},
+			Tasks:   taskArns[i:end],
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "ECS.DescribeTasks: %s", aws.StringValue(clusterArn))
+		}
+		// Append each round of rawTasksPage.Tasks results to overall rawTasks var.
+		// rawTasks.Failures will only contain details of tasks removed between
+		// ListTasksPages and DescribeTasks, we can safely discard those results.
+		rawTasks.Tasks = append(rawTasks.Tasks, rawTasksPage.Tasks...)
 	}
 
 	tasks := make([]*awsmodels.EcsTask, 0, len(rawTasks.Tasks))
@@ -154,13 +186,13 @@ func getClusterTasks(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodels.E
 			AvailabilityZone:      task.AvailabilityZone,
 			CapacityProviderName:  task.CapacityProviderName,
 			Connectivity:          task.Connectivity,
-			ConnectivityAt:        utils.DateTimeFormat(aws.TimeValue(task.ConnectivityAt)),
+			ConnectivityAt:        task.ConnectivityAt,
 			ContainerInstanceArn:  task.ContainerInstanceArn,
 			Containers:            task.Containers,
 			Cpu:                   task.Cpu,
-			TimeCreated:           utils.DateTimeFormat(aws.TimeValue(task.CreatedAt)),
+			TimeCreated:           task.CreatedAt,
 			DesiredStatus:         task.DesiredStatus,
-			ExecutionStoppedAt:    utils.DateTimeFormat(aws.TimeValue(task.ExecutionStoppedAt)),
+			ExecutionStoppedAt:    task.ExecutionStoppedAt,
 			Group:                 task.Group,
 			HealthStatus:          task.HealthStatus,
 			InferenceAccelerators: task.InferenceAccelerators,
@@ -169,14 +201,14 @@ func getClusterTasks(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodels.E
 			Memory:                task.Memory,
 			Overrides:             task.Overrides,
 			PlatformVersion:       task.PlatformVersion,
-			PullStartedAt:         utils.DateTimeFormat(aws.TimeValue(task.PullStartedAt)),
-			PullStoppedAt:         utils.DateTimeFormat(aws.TimeValue(task.PullStoppedAt)),
-			StartedAt:             utils.DateTimeFormat(aws.TimeValue(task.StartedAt)),
+			PullStartedAt:         task.PullStartedAt,
+			PullStoppedAt:         task.PullStoppedAt,
+			StartedAt:             task.StartedAt,
 			StartedBy:             task.StartedBy,
 			StopCode:              task.StopCode,
-			StoppedAt:             utils.DateTimeFormat(aws.TimeValue(task.StoppedAt)),
+			StoppedAt:             task.StoppedAt,
 			StoppedReason:         task.StoppedReason,
-			StoppingAt:            utils.DateTimeFormat(aws.TimeValue(task.StoppingAt)),
+			StoppingAt:            task.StoppingAt,
 			TaskDefinitionArn:     task.TaskDefinitionArn,
 			Version:               task.Version,
 		})
@@ -185,8 +217,8 @@ func getClusterTasks(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodels.E
 	return tasks, nil
 }
 
-// getClusterServices enumerates and then describes all active services of a cluster
-func getClusterServices(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodels.EcsService, error) {
+// getECSClusterServices enumerates and then describes all active services of a cluster
+func getECSClusterServices(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodels.EcsService, error) {
 	// Enumerate services
 	var serviceArns []*string
 	err := ecsSvc.ListServicesPages(&ecs.ListServicesInput{Cluster: clusterArn},
@@ -196,30 +228,40 @@ func getClusterServices(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodel
 		})
 
 	if err != nil {
-		utils.LogAWSError("ECS.ListServicesPages", err)
-		return nil, err
+		return nil, errors.Wrapf(err, "ECS.ListServicesPages: %s", aws.StringValue(clusterArn))
 	}
 
-	// If there are no services stop here
+	// If there are no services, stop here
 	if len(serviceArns) == 0 {
 		return nil, nil
 	}
 
 	// Describe services
 	//
-	// Oddly, the DescribeServices API call does not have a version with builtin paging like the list
-	// API call does. If we run into issues here we may need to implement paging ourselves.
-	rawServices, err := ecsSvc.DescribeServices(&ecs.DescribeServicesInput{
-		Cluster: clusterArn,
-		// This only accepts one argument, which is the string TAGS
-		// Indicates that we want to included the task tags
-		Include:  []*string{aws.String("TAGS")},
-		Services: serviceArns,
-	})
-
-	if err != nil {
-		utils.LogAWSError("ECS.DescribeServices", err)
-		return nil, err
+	// The DescribeServices API call does not have a version with builtin paging like the list
+	// API call does. API set a limit of 10 services to describe in a single operation.
+	// Loop through results 10 elements at a time and aggregate the results
+	const ecsServiceBatchSize = 10
+	// initialize the rawServices variable
+	var rawServices ecs.DescribeServicesOutput
+	// loop through the items in serviceArns, 10 at a time
+	for i := 0; i < len(serviceArns); i += ecsServiceBatchSize {
+		end := i + ecsServiceBatchSize
+		if end > len(serviceArns) {
+			end = len(serviceArns)
+		}
+		rawServicesPage, err := ecsSvc.DescribeServices(&ecs.DescribeServicesInput{
+			Cluster:  clusterArn,
+			Include:  []*string{aws.String("TAGS")},
+			Services: serviceArns[i:end],
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "ECS.DescribeServices: %s", aws.StringValue(clusterArn))
+		}
+		// Append each round of rawServicesPage.Services results to overall rawServices var.
+		// rawServices.Failures will only contain details of services deleted between
+		// ListServicesPages and DescribeServices, we can safely discard those results.
+		rawServices.Services = append(rawServices.Services, rawServicesPage.Services...)
 	}
 
 	services := make([]*awsmodels.EcsService, 0, len(rawServices.Services))
@@ -231,7 +273,7 @@ func getClusterServices(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodel
 				Tags: utils.ParseTagSlice(service.Tags),
 			},
 			CapacityProviderStrategy:      service.CapacityProviderStrategy,
-			TimeCreated:                   utils.DateTimeFormat(aws.TimeValue(service.CreatedAt)),
+			TimeCreated:                   service.CreatedAt,
 			CreatedBy:                     service.CreatedBy,
 			DeploymentConfiguration:       service.DeploymentConfiguration,
 			DeploymentController:          service.DeploymentController,
@@ -262,14 +304,15 @@ func getClusterServices(ecsSvc ecsiface.ECSAPI, clusterArn *string) ([]*awsmodel
 }
 
 // buildEcsClusterSnapshot returns a complete snapshot of an ECS cluster
-func buildEcsClusterSnapshot(ecsSvc ecsiface.ECSAPI, clusterArn *string) *awsmodels.EcsCluster {
+func buildEcsClusterSnapshot(ecsSvc ecsiface.ECSAPI, clusterArn *string) (*awsmodels.EcsCluster, error) {
 	if clusterArn == nil {
-		return nil
+		return nil, nil
 	}
 
-	details, err := describeCluster(ecsSvc, clusterArn)
+	details, err := describeECSCluster(ecsSvc, clusterArn)
+	// Can details ever be nil without an error?
 	if err != nil || details == nil {
-		return nil
+		return nil, err
 	}
 
 	ecsCluster := &awsmodels.EcsCluster{
@@ -295,65 +338,52 @@ func buildEcsClusterSnapshot(ecsSvc ecsiface.ECSAPI, clusterArn *string) *awsmod
 		Status:                            details.Status,
 	}
 
-	ecsCluster.Tasks, err = getClusterTasks(ecsSvc, details.ClusterArn)
+	ecsCluster.Tasks, err = getECSClusterTasks(ecsSvc, details.ClusterArn)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
-	ecsCluster.Services, err = getClusterServices(ecsSvc, details.ClusterArn)
+	ecsCluster.Services, err = getECSClusterServices(ecsSvc, details.ClusterArn)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
-	return ecsCluster
+	return ecsCluster, nil
 }
 
 // PollEcsCluster gathers information on each ECS Cluster for an AWS account.
-func PollEcsClusters(pollerInput *awsmodels.ResourcePollerInput) ([]*apimodels.AddResourceEntry, error) {
+func PollEcsClusters(pollerInput *awsmodels.ResourcePollerInput) ([]apimodels.AddResourceEntry, *string, error) {
 	zap.L().Debug("starting ECS Cluster resource poller")
 	ecsClusterSnapshots := make(map[string]*awsmodels.EcsCluster)
 
-	for _, regionID := range utils.GetServiceRegions(pollerInput.Regions, "ecs") {
-		ecsSvc, err := getEcsClient(pollerInput, *regionID)
-		if err != nil {
-			return nil, err // error is logged in getClient()
-		}
-
-		// Start with generating a list of all clusters
-		clusters := listClusters(ecsSvc)
-		if len(clusters) == 0 {
-			zap.L().Debug("no ECS clusters found", zap.String("region", *regionID))
-			continue
-		}
-
-		for _, clusterArn := range clusters {
-			ecsClusterSnapshot := buildEcsClusterSnapshot(ecsSvc, clusterArn)
-			if ecsClusterSnapshot == nil {
-				continue
-			}
-			ecsClusterSnapshot.AccountID = aws.String(pollerInput.AuthSourceParsedARN.AccountID)
-			ecsClusterSnapshot.Region = regionID
-
-			if _, ok := ecsClusterSnapshots[*ecsClusterSnapshot.ARN]; ok {
-				zap.L().Info(
-					"overwriting existing ECS Certificate snapshot",
-					zap.String("resourceId", *ecsClusterSnapshot.ARN),
-				)
-			}
-			ecsClusterSnapshots[*ecsClusterSnapshot.ARN] = ecsClusterSnapshot
-		}
+	ecsSvc, err := getEcsClient(pollerInput, *pollerInput.Region)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	resources := make([]*apimodels.AddResourceEntry, 0, len(ecsClusterSnapshots))
-	for resourceID, ecsSnapshot := range ecsClusterSnapshots {
-		resources = append(resources, &apimodels.AddResourceEntry{
-			Attributes:      ecsSnapshot,
-			ID:              apimodels.ResourceID(resourceID),
-			IntegrationID:   apimodels.IntegrationID(*pollerInput.IntegrationID),
-			IntegrationType: apimodels.IntegrationTypeAws,
+	// Start with generating a list of all clusters
+	clusters, marker, err := listECSClusters(ecsSvc, pollerInput.NextPageToken)
+	if err != nil {
+		return nil, nil, errors.WithMessagef(err, "region: %s", *pollerInput.Region)
+	}
+
+	resources := make([]apimodels.AddResourceEntry, 0, len(ecsClusterSnapshots))
+	for _, clusterArn := range clusters {
+		ecsClusterSnapshot, err := buildEcsClusterSnapshot(ecsSvc, clusterArn)
+		if err != nil {
+			return nil, nil, err
+		}
+		ecsClusterSnapshot.AccountID = aws.String(pollerInput.AuthSourceParsedARN.AccountID)
+		ecsClusterSnapshot.Region = pollerInput.Region
+
+		resources = append(resources, apimodels.AddResourceEntry{
+			Attributes:      ecsClusterSnapshot,
+			ID:              *ecsClusterSnapshot.ResourceID,
+			IntegrationID:   *pollerInput.IntegrationID,
+			IntegrationType: integrationType,
 			Type:            awsmodels.EcsClusterSchema,
 		})
 	}
 
-	return resources, nil
+	return resources, marker, nil
 }

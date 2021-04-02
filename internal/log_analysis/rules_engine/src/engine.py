@@ -15,55 +15,153 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import collections
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from timeit import default_timer
 from typing import Any, Dict, List
+from unittest.mock import patch, MagicMock
 
-from . import EventMatch
+from . import EngineResult
 from .analysis_api import AnalysisAPIClient
+from .data_model import DataModel
+from .destination import Destination
+from .enriched_event import PantherEvent
 from .logging import get_logger
+from .outputs_api import OutputsAPIClient
 from .rule import Rule
 
 _RULES_CACHE_DURATION = timedelta(minutes=5)
 
+MISSING_UDM_EXCEPTION = AttributeError("'dict' object has no attribute 'udm'")
 
-class Engine:
+
+class Engine:  # pylint: disable=too-many-instance-attributes
     """The engine that runs Python rules."""
 
-    def __init__(self, analysis_api: AnalysisAPIClient) -> None:
+    def __init__(self, analysis_api: AnalysisAPIClient, outputs_api: OutputsAPIClient) -> None:
         self.logger = get_logger()
         self._last_update = datetime.utcfromtimestamp(0)
+        self.log_type_to_data_models: Dict[str, DataModel] = collections.defaultdict()
         self.log_type_to_rules: Dict[str, List[Rule]] = collections.defaultdict(list)
+        self.destinations: Dict[str, Destination] = collections.defaultdict()
+        self.display_name_to_destination: Dict[str, Destination] = collections.defaultdict()
         self._analysis_client = analysis_api
+        self._outputs_client = outputs_api
         self._populate_rules()
+        self._populate_data_models()
+        self._populate_destinations()
 
-    def analyze(self, log_type: str, event: Dict[str, Any]) -> List[EventMatch]:
+    def analyze_single_rule(self, raw_rule: dict, test_spec: Mapping) -> Dict[str, Any]:
+        """ Test a single rule against an event. """
+
+        # The rule during direct invocation doesn't have a version
+        raw_rule['versionId'] = 'default'
+        rule = Rule(raw_rule)
+        event = test_spec['data']
+        event_mocks = test_spec.get('mocks', dict())
+        log_type = event.get('p_log_type', 'default')
+
+        # enrich the event to have access to field by standard field name
+        #  via the `udm` method
+        event = PantherEvent(event, self.log_type_to_data_models.get(log_type))
+
+        # Setup mock functions
+        mock_methods = dict()
+        if event_mocks:
+            mock_methods = {k: MagicMock(return_value=v) for k, v in event_mocks.items()}
+
+        if mock_methods:
+            with patch.multiple(rule.module, **mock_methods):
+                rule_result = rule.run(event, self.destinations, self.display_name_to_destination, batch_mode=False)
+        else:
+            rule_result = rule.run(event, self.destinations, self.display_name_to_destination, batch_mode=False)
+
+        format_exception = lambda exc: '{}: {}'.format(type(exc).__name__, exc) if exc else exc
+        # for tests against rules using the `udm` method, you must specify `p_log_type`
+        # field in each test definition
+        if rule_result.rule_exception and type(
+            rule_result.rule_exception
+        ) is type(MISSING_UDM_EXCEPTION) and rule_result.rule_exception.args == MISSING_UDM_EXCEPTION.args:
+            rule_result.rule_exception = AttributeError(
+                'The test specification for rules using the \'udm\' method must specify the \'p_log_type\' field,' +
+                ' and there must be an enabled DataModel for the log type.'
+            )
+        return {
+            'id': test_spec['id'],
+            'ruleId': rule.rule_id,
+            'genericError': format_exception(rule_result.setup_exception),
+            'errored': rule_result.errored,
+            'ruleOutput': rule_result.matched,
+            'ruleError': format_exception(rule_result.rule_exception),
+            'titleOutput': rule_result.title_output,
+            'titleError': format_exception(rule_result.title_exception),
+            'descriptionOutput': rule_result.description_output,
+            'descriptionError': format_exception(rule_result.description_exception),
+            'referenceOutput': rule_result.reference_output,
+            'referenceError': format_exception(rule_result.reference_exception),
+            'severityOutput': rule_result.severity_output,
+            'severityError': format_exception(rule_result.severity_exception),
+            'runbookOutput': rule_result.runbook_output,
+            'runbookError': format_exception(rule_result.runbook_exception),
+            'destinationsOutput': rule_result.destinations_output,
+            'destinationsError': format_exception(rule_result.destinations_exception),
+            'dedupOutput': rule_result.dedup_output,
+            'dedupError': format_exception(rule_result.dedup_exception),
+            'alertContextOutput': rule_result.alert_context,
+            'alertContextError': format_exception(rule_result.alert_context_exception),
+        }
+
+    def analyze(self, log_type: str, event: Mapping) -> List[EngineResult]:
         """Analyze an event by running all the rules that apply to the log type.
         """
         if datetime.utcnow() - self._last_update > _RULES_CACHE_DURATION:
             self._populate_rules()
+            self._populate_data_models()
 
-        matched: List[EventMatch] = []
+        engine_results: List[EngineResult] = []
+
+        # enrich the event to have access to field by standard field name
+        #  via the `udm` method
+        panther_event = PantherEvent(event, self.log_type_to_data_models.get(log_type))
 
         for rule in self.log_type_to_rules[log_type]:
-            self.logger.debug('running rule [%s]', rule.rule_id)
-            result = rule.run(event)
-            if result.exception:
-                self.logger.error('failed to run rule %s %s %s', rule.rule_id, type(result).__name__, repr(result.exception))
-                continue
-            if result.matched:
-                match = EventMatch(
+            self.logger.debug("running rule [%s]", rule.rule_id)
+            result = rule.run(panther_event, self.destinations, self.display_name_to_destination, batch_mode=True)
+            if result.errored:
+                rule_error = EngineResult(
                     rule_id=rule.rule_id,
                     rule_version=rule.rule_version,
+                    rule_tags=rule.rule_tags,
+                    rule_reports=rule.rule_reports,
                     log_type=log_type,
-                    dedup=result.dedup_string,  # type: ignore
+                    dedup=result.error_type,  # type: ignore
                     dedup_period_mins=rule.rule_dedup_period_mins,
                     event=event,
-                    title=result.title
+                    title=result.short_error_message,
+                    error_message=result.error_message
                 )
-                matched.append(match)
+                engine_results.append(rule_error)
+            elif result.matched:
+                match = EngineResult(
+                    rule_id=rule.rule_id,
+                    rule_version=rule.rule_version,
+                    rule_tags=rule.rule_tags,
+                    rule_reports=rule.rule_reports,
+                    log_type=log_type,
+                    dedup=result.dedup_output,  # type: ignore
+                    dedup_period_mins=rule.rule_dedup_period_mins,
+                    event=event,
+                    title=result.title_output,
+                    alert_context=result.alert_context,
+                    description=result.description_output,
+                    reference=result.reference_output,
+                    severity=result.severity_output,
+                    runbook=result.runbook_output,
+                    destinations=result.destinations_output,
+                )
+                engine_results.append(match)
 
-        return matched
+        return engine_results
 
     def _populate_rules(self) -> None:
         """Import all rules."""
@@ -86,12 +184,70 @@ class Engine:
 
             import_count = import_count + 1
             # update lookup table from log type to rule
-            for log_type in raw_rule['resourceTypes']:
+            for log_type in raw_rule['logTypes']:
                 self.log_type_to_rules[log_type].append(rule)
 
         end = default_timer()
         self.logger.info('Imported %d rules in %d seconds', import_count, end - start)
         self._last_update = datetime.utcnow()
+
+    def _populate_data_models(self) -> None:
+        """Import all data models."""
+        import_count = 0
+        start = default_timer()
+        data_models = self._get_data_models()
+        end = default_timer()
+        self.logger.info('Retrieved %d data models in %s seconds', len(data_models), end - start)
+        start = default_timer()
+
+        # Clear old data models
+        self.log_type_to_data_models.clear()
+
+        for raw_data_model in data_models:
+            try:
+                data_model = DataModel(raw_data_model)
+            except Exception as err:  # pylint: disable=broad-except
+                self.logger.error('Failed to import data model %s. Error: [%s]', raw_data_model.get('id'), err)
+                continue
+
+            import_count = import_count + 1
+            # update lookup table from log type to data model
+            # there should only be one data model per log type
+            for log_type in raw_data_model['logTypes']:
+                self.log_type_to_data_models[log_type] = data_model
+
+        end = default_timer()
+        self.logger.info('Imported %d data models in %d seconds', import_count, end - start)
+        self._last_update = datetime.utcnow()
+
+    def _populate_destinations(self) -> None:
+        """Import all destinations."""
+        import_count = 0
+        start = default_timer()
+        destinations = self._get_destinations()
+        end = default_timer()
+        self.logger.info('Retrieved %d destinations in %s seconds', len(destinations), end - start)
+        start = default_timer()
+
+        # Clear old destinations
+        self.destinations.clear()
+
+        for raw_destination in destinations:
+            try:
+                destination = Destination(raw_destination)
+            except Exception as err:  # pylint: disable=broad-except
+                self.logger.error('Failed to import destination. Error: [%s]', err)
+                continue
+
+            import_count = import_count + 1
+            self.destinations[destination.destination_id] = destination
+
+        end = default_timer()
+        self.logger.info('Imported %d destinations in %d seconds', import_count, end - start)
+        self._last_update = datetime.utcnow()
+
+        # Map display names to destinations
+        self.display_name_to_destination = {v.destination_display_name: v for k, v in self.destinations.items()}
 
     def _get_rules(self) -> List[Dict[str, Any]]:
         """Retrieves all enabled rules.
@@ -100,3 +256,19 @@ class Engine:
             An array of Dict['id': rule_id, 'body': rule_body, ...] that contain all fields of a rule.
         """
         return self._analysis_client.get_enabled_rules()
+
+    def _get_data_models(self) -> List[Dict[str, Any]]:
+        """Retrieves all enabled data models.
+
+        Returns:
+            An array of Dict['id': data_model_id, 'body': body, 'mappings': [...] ...] that contain all fields of a data model.
+        """
+        return self._analysis_client.get_enabled_data_models()
+
+    def _get_destinations(self) -> List[Dict[str, Any]]:
+        """Retrieves all configured destinations.
+
+        Returns:
+            An array of Dict['displayName': display_name, 'outputId': output_id, ...] that contain all fields of a destination.
+        """
+        return self._outputs_client.get_outputs()

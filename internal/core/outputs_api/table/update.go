@@ -30,13 +30,23 @@ import (
 
 // UpdateOutput updates an existing item in the table
 func (table *OutputsTable) UpdateOutput(alertOutput *AlertOutputItem) (*AlertOutputItem, error) {
+	// These fields will always be sent
 	updateExpression := expression.
-		Set(expression.Name("displayName"), expression.Value(alertOutput.DisplayName)).
 		Set(expression.Name("lastModifiedBy"), expression.Value(alertOutput.LastModifiedBy)).
-		Set(expression.Name("lastModifiedTime"), expression.Value(alertOutput.LastModifiedTime)).
-		Set(expression.Name("outputType"), expression.Value(alertOutput.OutputType)).
-		Set(expression.Name("encryptedConfig"), expression.Value(alertOutput.EncryptedConfig)).
-		Set(expression.Name("defaultForSeverity"), expression.Value(alertOutput.DefaultForSeverity))
+		Set(expression.Name("lastModifiedTime"), expression.Value(alertOutput.LastModifiedTime))
+
+	if alertOutput.DisplayName != nil {
+		updateExpression.Set(expression.Name("displayName"), expression.Value(alertOutput.DisplayName))
+	}
+	if alertOutput.EncryptedConfig != nil {
+		updateExpression.Set(expression.Name("encryptedConfig"), expression.Value(alertOutput.EncryptedConfig))
+	}
+	if alertOutput.DefaultForSeverity != nil {
+		updateExpression.Set(expression.Name("defaultForSeverity"), expression.Value(alertOutput.DefaultForSeverity))
+	}
+	if alertOutput.AlertTypes != nil {
+		updateExpression.Set(expression.Name("alertTypes"), expression.Value(alertOutput.AlertTypes))
+	}
 
 	conditionExpression := expression.Name("outputId").Equal(expression.Value(alertOutput.OutputID))
 	combinedExpression, err := expression.NewBuilder().

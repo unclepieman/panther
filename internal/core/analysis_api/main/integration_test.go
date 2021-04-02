@@ -21,187 +21,201 @@ package main
 import (
 	"bufio"
 	"encoding/base64"
+	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudformation"
-	jsoniter "github.com/json-iterator/go"
+	"github.com/aws/aws-sdk-go/service/lambda"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/panther-labs/panther/api/gateway/analysis/client"
-	"github.com/panther-labs/panther/api/gateway/analysis/client/operations"
-	"github.com/panther-labs/panther/api/gateway/analysis/models"
+	"github.com/panther-labs/panther/api/lambda/analysis/models"
+	compliancemodels "github.com/panther-labs/panther/api/lambda/compliance/models"
 	"github.com/panther-labs/panther/pkg/gatewayapi"
 	"github.com/panther-labs/panther/pkg/shutil"
 	"github.com/panther-labs/panther/pkg/testutils"
 )
 
 const (
-	bootstrapStack      = "panther-bootstrap"
-	gatewayStack        = "panther-bootstrap-gateway"
 	tableName           = "panther-analysis"
-	policiesRoot        = "./test_policies"
-	policiesZipLocation = "./bulk_upload.zip"
+	packTableName       = "panther-analysis-packs"
+	analysesRoot        = "./bulk_test_resources/test_analyses"
+	analysesZipLocation = "./bulk_upload.zip"
+
+	bulkTestDataDirPath              = "./bulk_test_resources"
+	bulkInvalidRuleLogTypeDir        = "rule_invalid_logtype"
+	bulkInvalidDatamodelTypeDir      = "datamodel_invalid_logtype"
+	bulkInvalidPolicyResourceTypeDir = "policy_invalid_resourcetype"
+
+	packVersionID = 38139747
 )
 
 var (
 	integrationTest bool
-	awsSession      = session.Must(session.NewSession())
-	httpClient      = gatewayapi.GatewayClient(awsSession)
-	apiClient       *client.PantherAnalysis
+	apiClient       gatewayapi.API
 
-	userID = models.UserID("521a1c7b-273f-4a03-99a7-5c661de5b0e8")
+	userID       = "test-panther-user" // does NOT need to be a uuid4
+	systemUserID = "00000000-0000-4000-8000-000000000000"
 
+	// NOTE: this gets changed by the bulk upload!
 	policy = &models.Policy{
-		AutoRemediationID:         "fix-it",
-		AutoRemediationParameters: map[string]string{"hello": "world", "emptyParameter": ""},
-		ComplianceStatus:          models.ComplianceStatusPASS,
+		AnalysisType:              models.TypePolicy,
+		AutoRemediationParameters: map[string]string{},
 		Description:               "Matches every resource",
 		DisplayName:               "AlwaysTrue",
 		Enabled:                   true,
 		ID:                        "Test:Policy",
-		ResourceTypes:             []string{"AWS.S3.Bucket"},
-		Severity:                  "MEDIUM",
-		Suppressions:              models.Suppressions{"panther.*"},
-		Tags:                      nil,
-		Tests: []*models.UnitTest{
+		OutputIDs:                 []string{"policyOutput"},
+		Reports:                   map[string][]string{},
+		ResourceTypes:             []string{},
+		Severity:                  compliancemodels.SeverityMedium,
+		Suppressions:              []string{},
+		Tags:                      []string{"policyTag"},
+		Tests: []models.UnitTest{
 			{
 				Name:           "This will be True",
-				ResourceType:   "AWS.S3.Bucket",
 				ExpectedResult: true,
 				Resource:       `{}`,
 			},
 			{
 				Name:           "This will also be True",
-				ResourceType:   "AWS.S3.Bucket",
 				ExpectedResult: true,
 				Resource:       `{"nested": {}}`,
 			},
 		},
 	}
 
-	policyFromBulk = &models.Policy{
-		AutoRemediationParameters: map[string]string{"hello": "goodbye"},
-		ComplianceStatus:          models.ComplianceStatusPASS,
-		CreatedBy:                 userID,
-		ID:                        "AWS.CloudTrail.Log.Validation.Enabled",
-		Enabled:                   true,
-		ResourceTypes:             []string{"AWS.CloudTrail"},
-		LastModifiedBy:            userID,
-		Tags:                      []string{"AWS Managed Rules - Management and Governance", "CIS"},
-		Reference:                 "reference.link",
-		Runbook:                   "Runbook\n",
-		Severity:                  "MEDIUM",
-		Description:               "This rule validates that AWS CloudTrails have log file validation enabled.\n",
-		Tests: []*models.UnitTest{
-			{
-				Name:           "Log File Validation Disabled",
-				ResourceType:   "AWS.CloudTrail",
-				ExpectedResult: false,
-				Resource: `{
-        "Info": {
-          "LogFileValidationEnabled": false
-        },
-        "EventSelectors": [
-          {
-            "DataResources": [
-              {
-                "Type": "AWS::S3::Object",
-                "Values": null
-              }
-            ],
-            "IncludeManagementEvents": false,
-            "ReadWriteType": "All"
-          }
-        ]
-      }`,
-			},
-			{
-				Name:           "Log File Validation Enabled",
-				ResourceType:   "AWS.CloudTrail",
-				ExpectedResult: true,
-				Resource: `{
-        "Info": {
-          "LogFileValidationEnabled": true
-        },
-        "Bucket": {
-          "CreationDate": "2019-01-01T00:00:00Z",
-          "Grants": [
-            {
-              "Grantee": {
-                "URI": null
-              },
-              "Permission": "FULL_CONTROL"
-            }
-          ],
-          "Owner": {
-            "DisplayName": "panther-admins",
-            "ID": "longalphanumericstring112233445566778899"
-          },
-          "Versioning": null
-        },
-        "EventSelectors": [
-          {
-            "DataResources": [
-              {
-                "Type": "AWS::S3::Object",
-                "Values": null
-              }
-            ],
-            "ReadWriteType": "All"
-          }
-        ]
-      }`,
-			},
-		},
-	}
+	// this will get set when we modify policy for use in delete testing
+	versionedPolicy *models.Policy
 
-	policyFromBulkJSON = &models.Policy{
-		AutoRemediationID:         "fix-it",
-		AutoRemediationParameters: map[string]string{"hello": "goodbye"},
-		ComplianceStatus:          models.ComplianceStatusPASS,
-		CreatedBy:                 userID,
-		Description:               "Matches every resource",
-		DisplayName:               "AlwaysTrue",
-		Enabled:                   true,
-		ID:                        "Test:Policy:JSON",
-		LastModifiedBy:            userID,
-		ResourceTypes:             []string{"AWS.S3.Bucket"},
-		Severity:                  "MEDIUM",
-		Tags:                      nil,
-		Tests: []*models.UnitTest{
-			{
-				Name:           "This will be True",
-				ResourceType:   "AWS.S3.Bucket",
-				ExpectedResult: true,
-				Resource:       `{"Bucket": "empty"}`,
-			},
-		},
-	}
+	// Set during bulk upload
+	policyFromBulk     = &models.Policy{ID: "AWS.CloudTrail.Log.Validation.Enabled"}
+	policyFromBulkJSON = &models.Policy{ID: "Test:Policy:JSON"}
 
 	rule = &models.Rule{
+		AnalysisType:       models.TypeRule,
 		Body:               "def rule(event): return len(event) > 0\n",
+		DedupPeriodMinutes: 1440,
 		Description:        "Matches every non-empty event",
 		Enabled:            true,
 		ID:                 "NonEmptyEvent",
 		LogTypes:           []string{"AWS.CloudTrail"},
-		Severity:           "HIGH",
-		Tests:              []*models.UnitTest{},
-		DedupPeriodMinutes: 1440,
+		OutputIDs:          []string{"test-output1", "test-output2"},
+		Reports:            map[string][]string{},
+		Severity:           compliancemodels.SeverityHigh,
+		Tags:               []string{"test-tag"},
+		Tests:              []models.UnitTest{},
+		Threshold:          10,
 	}
 
 	global = &models.Global{
 		Body:        "def helper_is_true(truthy): return truthy is True\n",
 		Description: "Provides a helper function",
 		ID:          "GlobalTypeAnalysis",
+	}
+
+	dataModel = &models.DataModel{
+		Body:        "def get_source_ip(event): return 'source_ip'\n",
+		Description: "Example LogType Schema",
+		Enabled:     true,
+		ID:          "DataModelTypeAnalysis",
+		LogTypes:    []string{"Crowdstrike.DNSRequest"},
+		Mappings: []models.DataModelMapping{
+			{
+				Name: "source_ip",
+				Path: "ipAddress",
+			},
+		},
+	}
+	dataModelTwo = &models.DataModel{
+		Body:        "def get_source_ip(event): return 'source_ip'\n",
+		Description: "Example LogType Schema",
+		Enabled:     true,
+		ID:          "SecondDataModelTypeAnalysis",
+		LogTypes:    []string{"Crowdstrike.NetworkConnect"},
+		Mappings: []models.DataModelMapping{
+			{
+				Name: "source_ip",
+				Path: "ipAddress",
+			},
+		},
+	}
+	dataModelDisabled = &models.DataModel{
+		Body:        "def get_source_ip(event): return 'source_ip'\n",
+		Description: "Example LogType Schema",
+		Enabled:     false,
+		ID:          "ThirdDataModelTypeAnalysis",
+		LogTypes:    []string{"Crowdstrike.NetworkConnect"},
+		Mappings: []models.DataModelMapping{
+			{
+				Name: "source_ip",
+				Path: "ipAddress",
+			},
+		},
+	}
+	dataModels           = [3]*models.DataModel{dataModel, dataModelTwo, dataModelDisabled}
+	dataModelFromBulkYML = &models.DataModel{
+		Enabled:  true,
+		ID:       "Some.Events.DataModel",
+		LogTypes: []string{"Fastly.Access"},
+		Mappings: []models.DataModelMapping{
+			{
+				Name: "source_ip",
+				Path: "ipAddress",
+			},
+			{
+				Name: "dest_ip",
+				Path: "destAddress",
+			},
+		},
+	}
+	packOriginalReleaseStandardSet = &models.Pack{
+		AvailableVersions: []models.Version{
+			{ID: packVersionID, SemVer: "v1.16.0"},
+		},
+		CreatedBy:   systemUserID,
+		Description: "This pack groups the standard rules that leverage unified data models",
+		PackDefinition: models.PackDefinition{
+			IDs: []string{
+				"Standard.AWS.ALB",
+				"Standard.AWS.CloudTrail",
+				"Standard.AWS.S3ServerAccess",
+				"Standard.AWS.VPCFlow",
+				"Standard.Box.Event",
+				"Standard.GCP.AuditLog",
+				"Standard.GSuite.Reports",
+				"Standard.Okta.SystemLog",
+				"Standard.OneLogin.Events",
+				"Standard.AdminRoleAssigned",
+				"Standard.BruteForceByIP",
+				"panther_event_type_helpers",
+				"panther_base_helpers",
+			},
+		},
+		DisplayName:    "Panther Universal Detections",
+		Enabled:        false,
+		ID:             "PantherManaged.UniversalDetections",
+		LastModifiedBy: systemUserID,
+		PackVersion: models.Version{
+			ID:     packVersionID,
+			SemVer: "v1.16.0",
+		},
+		UpdateAvailable: false,
+		PackTypes: map[models.DetectionType]int{
+			models.TypeDataModel: 9,
+			models.TypeRule:      2,
+			models.TypeGlobal:    2,
+		},
 	}
 )
 
@@ -216,20 +230,36 @@ func TestIntegrationAPI(t *testing.T) {
 		t.Skip()
 	}
 
-	// Set expected bodies from test files
-	trueBody, err := ioutil.ReadFile(path.Join(policiesRoot, "always_true.py"))
-	require.NoError(t, err)
-	policy.Body = models.Body(trueBody)
-	policyFromBulkJSON.Body = models.Body(trueBody)
+	t.Cleanup(func() {
+		err := filepath.Walk(".", func(fPath string, info os.FileInfo, err error) error {
+			if info.IsDir() && fPath != "." {
+				return filepath.SkipDir
+			}
+			if filepath.Ext(fPath) == ".zip" {
+				assert.Nil(t, os.Remove(fPath))
+			}
+			return nil
+		})
+		assert.Nil(t, err)
+	})
 
-	cloudtrailBody, err := ioutil.ReadFile(path.Join(policiesRoot, "aws_cloudtrail_log_validation_enabled.py"))
+	awsSession := session.Must(session.NewSession())
+	apiClient = gatewayapi.NewClient(lambda.New(awsSession), "panther-analysis-api")
+
+	// Set expected bodies from test files
+	trueBody, err := ioutil.ReadFile(path.Join(analysesRoot, "policy_always_true.py"))
 	require.NoError(t, err)
-	policyFromBulk.Body = models.Body(cloudtrailBody)
+	policy.Body = string(trueBody)
+	policyFromBulkJSON.Body = string(trueBody)
+
+	cloudtrailBody, err := ioutil.ReadFile(path.Join(analysesRoot, "policy_aws_cloudtrail_log_validation_enabled.py"))
+	require.NoError(t, err)
+	policyFromBulk.Body = string(cloudtrailBody)
 
 	// Lookup analysis bucket name
 	cfnClient := cloudformation.New(awsSession)
 	response, err := cfnClient.DescribeStacks(
-		&cloudformation.DescribeStacksInput{StackName: aws.String(bootstrapStack)})
+		&cloudformation.DescribeStacksInput{StackName: aws.String("panther-bootstrap")})
 	require.NoError(t, err)
 	var bucketName string
 	for _, output := range response.Stacks[0].Outputs {
@@ -240,48 +270,49 @@ func TestIntegrationAPI(t *testing.T) {
 	}
 	require.NotEmpty(t, bucketName)
 
-	// Lookup analysis-api endpoint
-	response, err = cfnClient.DescribeStacks(
-		&cloudformation.DescribeStacksInput{StackName: aws.String(gatewayStack)})
-	require.NoError(t, err)
-	var endpoint string
-	for _, output := range response.Stacks[0].Outputs {
-		if aws.StringValue(output.OutputKey) == "AnalysisApiEndpoint" {
-			endpoint = *output.OutputValue
-			break
-		}
-	}
-	require.NotEmpty(t, endpoint)
-
 	// Reset data stores: S3 bucket and Dynamo table
 	require.NoError(t, testutils.ClearS3Bucket(awsSession, bucketName))
 	require.NoError(t, testutils.ClearDynamoTable(awsSession, tableName))
+	require.NoError(t, testutils.ClearDynamoTable(awsSession, packTableName))
 
-	apiClient = client.NewHTTPClientWithConfig(nil, client.DefaultTransportConfig().
-		WithBasePath("/v1").WithHost(endpoint))
+	// ORDER MATTERS!
 
+	// In general, each group of tests runs in parallel
 	t.Run("TestPolicies", func(t *testing.T) {
 		t.Run("TestPolicyPass", testPolicyPass)
+		t.Run("TestRulePass", testRulePass)
+		t.Run("TestPolicyPassAllResourceTypes", testPolicyPassAllResourceTypes)
+		t.Run("TestRulePassAllLogTypes", testRulePassAllLogTypes)
 		t.Run("TestPolicyFail", testPolicyFail)
+		t.Run("TestRuleFail", testRuleFail)
 		t.Run("TestPolicyError", testPolicyError)
-		t.Run("TestPolicyNotApplicable", testPolicyNotApplicable)
 		t.Run("TestPolicyMixed", testPolicyMixed)
-	})
-
-	// These tests must be run before any data is input
-	t.Run("TestEmpty", func(t *testing.T) {
-		t.Run("GetEnabledEmpty", getEnabledEmpty)
-		t.Run("ListNotFound", listNotFound)
 	})
 
 	t.Run("Create", func(t *testing.T) {
 		t.Run("CreatePolicyInvalid", createInvalid)
-		t.Run("CreatePolicySuccess", createSuccess)
+		t.Run("CreatePolicySuccess", createPolicySuccess)
 		t.Run("CreateRuleSuccess", createRuleSuccess)
+		t.Run("TestFailCreateRuleInvalidLogType", testFailCreateRuleInvalidLogType)
+
 		// This test (and the other global tests) does trigger the layer-manager lambda to run, but since there is only
 		// support for a single global nothing changes (the version gets bumped a few times). Once multiple globals are
 		// supported, these tests can be improved to run policies and rules that rely on these imports.
 		t.Run("CreateGlobalSuccess", createGlobalSuccess)
+		t.Run("CreateDataModel", createDataModel)
+		t.Run("TestFailCreateDataModelInvalidLogType", testFailCreateDataModelInvalidLogType)
+
+		t.Run("SaveEnabledPolicyFailingTests", saveEnabledPolicyFailingTests)
+		t.Run("SaveDisabledPolicyFailingTests", saveDisabledPolicyFailingTests)
+		t.Run("SaveEnabledPolicyPassingTests", saveEnabledPolicyPassingTests)
+		t.Run("SavePolicyInvalidTestInputJson", savePolicyInvalidTestInputJSON)
+
+		t.Run("SaveEnabledRuleFailingTests", saveEnabledRuleFailingTests)
+		t.Run("SaveDisabledRuleFailingTests", saveDisabledRuleFailingTests)
+		t.Run("SaveEnabledRulePassingTests", saveEnabledRulePassingTests)
+		t.Run("SaveRuleInvalidTestInputJson", saveRuleInvalidTestInputJSON)
+
+		t.Run("TestFailCreatePolicyInvalidResourceType", testFailCreatePolicyInvalidResourceType)
 	})
 	if t.Failed() {
 		return
@@ -294,222 +325,482 @@ func TestIntegrationAPI(t *testing.T) {
 		t.Run("GetRule", getRule)
 		t.Run("GetRuleWrongType", getRuleWrongType)
 		t.Run("GetGlobal", getGlobal)
+		t.Run("GetDataModel", getDataModel)
 	})
 
-	t.Run("Modify", func(t *testing.T) {
-		t.Run("ModifyInvalid", modifyInvalid)
-		t.Run("ModifyNotFound", modifyNotFound)
-		t.Run("ModifySuccess", modifySuccess)
-		t.Run("ModifyRule", modifyRule)
-		t.Run("ModifyGlobal", modifyGlobal)
-	})
-
-	t.Run("Suppress", func(t *testing.T) {
-		t.Run("SuppressNotFound", suppressNotFound)
-		t.Run("SuppressSuccess", suppressSuccess)
-	})
-
+	// NOTE! This will mutate the original policy above!
 	t.Run("BulkUpload", func(t *testing.T) {
 		t.Run("BulkUploadInvalid", bulkUploadInvalid)
 		t.Run("BulkUploadSuccess", bulkUploadSuccess)
+	})
+
+	t.Run("BulkUploadInvalid", func(t *testing.T) {
+		t.Run("BulkUploadInvalidPolicyResourceTypesFail", bulkUploadInvalidPolicyResourceTypesFail)
+		t.Run("BulkUploadInvalidRuleLogtypeFail", bulkUploadInvalidRuleLogtypeFail)
+		t.Run("BulkUploadInvalidDatamodelLogtypeFail", bulkUploadInvalidDatamodelLogtypeFail)
 	})
 	if t.Failed() {
 		return
 	}
 
-	// TODO: Add integration tests for integrated pass/fail info
-	// E.g. filter + sort policies with different failure counts
-
 	t.Run("List", func(t *testing.T) {
-		t.Run("ListSuccess", listSuccess)
+		t.Run("ListPolicies", listPolicies)
 		t.Run("ListFiltered", listFiltered)
+		t.Run("ListFilteredMultiple", listFilteredMultiple)
+		t.Run("ListFilteredNoUser", listFilteredNoUser)
 		t.Run("ListPaging", listPaging)
+		t.Run("ListProjection", listProjection)
 		t.Run("ListRules", listRules)
-		t.Run("GetEnabledSuccess", getEnabledPolicies)
-		t.Run("GetEnabledRules", getEnabledRules)
+		t.Run("ListGlobals", listGlobals)
+		t.Run("ListDataModels", listDataModels)
+		t.Run("ListEnabledDataModels", listEnabledDataModels)
+		t.Run("ListSortedDataModels", listSortedDataModels)
+		t.Run("ListDetections", listDetections)
+		t.Run("ListDetectionsFiltered", listDetectionsFiltered)
+		t.Run("ListDetectionsComplianceProjection", listDetectionsComplianceProjection)
+		t.Run("ListDetectionsAnalysisTypeFilter", listDetectionsAnalysisTypeFilter)
+		t.Run("ListDetectionsComplianceFilter", listDetectionsComplianceFilter)
+	})
+
+	t.Run("Modify", func(t *testing.T) {
+		t.Run("ModifyNotFound", modifyNotFound)
+		t.Run("ModifySuccess", modifySuccess)
+		t.Run("ModifyRule", modifyRule)
+		t.Run("ModifyGlobal", modifyGlobal)
+		t.Run("ModifyDataModel", modifyDataModel)
+	})
+	t.Run("Suppress", func(t *testing.T) {
+		t.Run("SuppressNotFound", suppressNotFound)
+		t.Run("SuppressSuccess", suppressSuccess)
 	})
 
 	t.Run("Delete", func(t *testing.T) {
-		t.Run("DeleteInvalid", deleteInvalid)
 		t.Run("DeleteNotExists", deleteNotExists)
-		t.Run("DeleteSuccess", deleteSuccess)
-		t.Run("DeleteGlobal", deleteGlobal)
+		t.Run("DeletePolicies", deletePolicies)
+		t.Run("DeleteRules", deleteRules)
+		t.Run("DeleteDataModels", deleteDataModels)
+		t.Run("DeleteGlobals", deleteGlobals)
+	})
+
+	// This has to run after the other detection changes since it will
+	// add/remove/update detections
+	t.Run("PollPack", func(t *testing.T) {
+		t.Run("PollAnalysisPacks", pollPacks)
+	})
+	t.Run("ListPacks", func(t *testing.T) {
+		t.Run("GetPack", getPack)
+		t.Run("ListPacks", listPacks)
+	})
+	t.Run("Patch", func(t *testing.T) {
+		t.Run("PatchPack", patchPack)
+		t.Run("EnumeratePack", enumeratePack)
 	})
 }
 
 func testPolicyPass(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.TestPolicy(&operations.TestPolicyParams{
-		Body: &models.TestPolicy{
-			AnalysisType:  models.AnalysisTypePOLICY,
+	input := models.LambdaInput{
+		TestPolicy: &models.TestPolicyInput{
 			Body:          policy.Body,
-			ResourceTypes: policy.ResourceTypes,
+			ResourceTypes: []string{"AWS.S3.Bucket"},
 			Tests:         policy.Tests,
 		},
-		HTTPClient: httpClient,
-	})
-
-	require.NoError(t, err)
-	expected := &models.TestPolicyResult{
-		TestSummary:  true,
-		TestsErrored: models.TestsErrored{},
-		TestsFailed:  models.TestsFailed{},
-		TestsPassed:  models.TestsPassed{string(policy.Tests[0].Name), string(policy.Tests[1].Name)},
 	}
-	assert.Equal(t, expected, result.Payload)
-}
-
-func testPolicyNotApplicable(t *testing.T) {
-	t.Parallel()
-	result, err := apiClient.Operations.TestPolicy(&operations.TestPolicyParams{
-		Body: &models.TestPolicy{
-			AnalysisType:  models.AnalysisTypePOLICY,
-			Body:          policy.Body,
-			ResourceTypes: policy.ResourceTypes,
-			Tests: models.TestSuite{
-				{
-					ExpectedResult: policy.Tests[0].ExpectedResult,
-					Name:           policy.Tests[0].Name,
-					Resource:       policy.Tests[0].Resource,
-					ResourceType:   "Wrong Resource Type",
+	expected := models.TestPolicyOutput{
+		Results: []models.TestPolicyRecord{
+			{
+				ID:     "passed-0",
+				Name:   input.TestPolicy.Tests[0].Name,
+				Passed: true,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"),
+					},
+				},
+			},
+			{
+				ID:     "passed-1",
+				Name:   input.TestPolicy.Tests[1].Name,
+				Passed: true,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"),
+					},
 				},
 			},
 		},
-		HTTPClient: httpClient,
-	})
+	}
 
+	var result models.TestPolicyOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
-	expected := &models.TestPolicyResult{
-		TestSummary: false,
-		TestsErrored: models.TestsErrored{
-			{
-				ErrorMessage: "test resource type Wrong Resource Type is not applicable to this policy",
-				Name:         string(policy.Tests[0].Name),
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, result)
+}
+
+func testRulePass(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		TestRule: &models.TestRuleInput{
+			Body:     "def rule(e): return True",
+			LogTypes: []string{"Osquery.Differential"},
+			Tests: []models.UnitTest{
+				{
+					Name:           "This will be True",
+					ExpectedResult: true,
+					Resource:       `{}`,
+				},
+				{
+					Name:           "This will also be True",
+					ExpectedResult: true,
+					Resource:       `{"nested": {}}`,
+				},
 			},
 		},
-		TestsFailed: models.TestsFailed{},
-		TestsPassed: models.TestsPassed{},
 	}
-	assert.Equal(t, expected, result.Payload)
+	expected := models.TestRuleOutput{
+		Results: []models.TestRuleRecord{
+			{
+				ID:     "0",
+				Name:   input.TestRule.Tests[0].Name,
+				Passed: true,
+				Functions: models.TestRuleRecordFunctions{
+					Rule: &models.TestDetectionSubRecord{
+						Output: aws.String("true"),
+					},
+					Dedup: &models.TestDetectionSubRecord{
+						Output: aws.String("defaultDedupString:RuleAPITestRule"),
+					},
+				},
+			}, {
+				ID:     "1",
+				Name:   input.TestRule.Tests[1].Name,
+				Passed: true,
+				Functions: models.TestRuleRecordFunctions{
+					Rule: &models.TestDetectionSubRecord{
+						Output: aws.String("true"),
+					},
+					Dedup: &models.TestDetectionSubRecord{
+						Output: aws.String("defaultDedupString:RuleAPITestRule"),
+					},
+				},
+			},
+		},
+	}
+
+	var result models.TestRuleOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, result)
+}
+
+func testPolicyPassAllResourceTypes(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		TestPolicy: &models.TestPolicyInput{
+			Body:          "def policy(resource): return True",
+			ResourceTypes: []string{},   // means applicable to all resource types
+			Tests:         policy.Tests, // just reuse from the example policy
+		},
+	}
+	expected := models.TestPolicyOutput{
+		Results: []models.TestPolicyRecord{
+			{
+				ID:     "passed-0",
+				Name:   input.TestPolicy.Tests[0].Name,
+				Passed: true,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"),
+					},
+				},
+			},
+			{
+				ID:     "passed-1",
+				Name:   input.TestPolicy.Tests[1].Name,
+				Passed: true,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"),
+					},
+				},
+			},
+		},
+	}
+
+	var result models.TestPolicyOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, result)
+}
+
+func testRulePassAllLogTypes(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		TestRule: &models.TestRuleInput{
+			Body:     "def rule(e): return True",
+			LogTypes: []string{}, // means applicable to all log types
+			Tests: []models.UnitTest{
+				{
+					Name:           "This will be True",
+					ExpectedResult: true,
+					Resource:       `{}`,
+				},
+			},
+		},
+	}
+	expected := models.TestRuleOutput{
+		Results: []models.TestRuleRecord{
+			{
+				ID:     "0",
+				Name:   input.TestRule.Tests[0].Name,
+				Passed: true,
+				Functions: models.TestRuleRecordFunctions{
+					Rule: &models.TestDetectionSubRecord{
+						Output: aws.String("true"),
+					},
+					Dedup: &models.TestDetectionSubRecord{
+						Output: aws.String("defaultDedupString:RuleAPITestRule"),
+					},
+				},
+			},
+		},
+	}
+
+	var result models.TestRuleOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, result)
 }
 
 func testPolicyFail(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.TestPolicy(&operations.TestPolicyParams{
-		Body: &models.TestPolicy{
-			AnalysisType:  models.AnalysisTypePOLICY,
+	input := models.LambdaInput{
+		TestPolicy: &models.TestPolicyInput{
 			Body:          "def policy(resource): return False",
 			ResourceTypes: policy.ResourceTypes,
 			Tests:         policy.Tests,
 		},
-		HTTPClient: httpClient,
-	})
-
-	require.NoError(t, err)
-	expected := &models.TestPolicyResult{
-		TestSummary:  false,
-		TestsErrored: models.TestsErrored{},
-		TestsFailed:  models.TestsFailed{string(policy.Tests[0].Name), string(policy.Tests[1].Name)},
-		TestsPassed:  models.TestsPassed{},
 	}
-	assert.Equal(t, expected, result.Payload)
+	expected := models.TestPolicyOutput{
+		Results: []models.TestPolicyRecord{
+			{
+				ID:     "failed-0",
+				Name:   input.TestPolicy.Tests[0].Name,
+				Passed: false,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"), // expected result
+					},
+				},
+			},
+			{
+				ID:     "failed-1",
+				Name:   input.TestPolicy.Tests[1].Name,
+				Passed: false,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"),
+					},
+				},
+			},
+		},
+	}
+
+	var result models.TestPolicyOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, result)
+}
+
+func testRuleFail(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		TestRule: &models.TestRuleInput{
+			Body:     "def rule(e): return False",
+			LogTypes: policy.ResourceTypes,
+			Tests: []models.UnitTest{
+				{
+					Name:           "This will be True",
+					ExpectedResult: true,
+					Resource:       `{}`,
+				},
+			},
+		},
+	}
+	expected := models.TestRuleOutput{
+		Results: []models.TestRuleRecord{
+			{
+				ID:     "0",
+				Name:   input.TestRule.Tests[0].Name,
+				Passed: false,
+				Functions: models.TestRuleRecordFunctions{
+					Rule: &models.TestDetectionSubRecord{
+						Output: aws.String("false"),
+					},
+					Dedup: &models.TestDetectionSubRecord{
+						Output: aws.String("defaultDedupString:RuleAPITestRule"),
+					},
+				},
+			},
+		},
+	}
+
+	var result models.TestRuleOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, result)
 }
 
 func testPolicyError(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.TestPolicy(&operations.TestPolicyParams{
-		Body: &models.TestPolicy{
-			AnalysisType:  models.AnalysisTypePOLICY,
+	input := models.LambdaInput{
+		TestPolicy: &models.TestPolicyInput{
 			Body:          "whatever, I do what I want",
 			ResourceTypes: policy.ResourceTypes,
 			Tests:         policy.Tests,
 		},
-		HTTPClient: httpClient,
-	})
-
-	require.NoError(t, err)
-	expected := &models.TestPolicyResult{
-		TestSummary: false,
-		TestsErrored: models.TestsErrored{
+	}
+	expected := models.TestPolicyOutput{
+		Results: []models.TestPolicyRecord{
 			{
-				ErrorMessage: "SyntaxError: invalid syntax (PolicyApiTestingPolicy.py, line 1)",
-				Name:         string(policy.Tests[0].Name),
+				ID:     "errored-0",
+				Name:   input.TestPolicy.Tests[0].Name,
+				Passed: false,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"), // expected result
+						Error: &models.TestError{
+							Message: "SyntaxError: invalid syntax (PolicyApiTestingPolicy.py, line 1)",
+						},
+					},
+				},
 			},
 			{
-				ErrorMessage: "SyntaxError: invalid syntax (PolicyApiTestingPolicy.py, line 1)",
-				Name:         string(policy.Tests[1].Name),
+				ID:     "errored-1",
+				Name:   input.TestPolicy.Tests[1].Name,
+				Passed: false,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"),
+						Error: &models.TestError{
+							Message: "SyntaxError: invalid syntax (PolicyApiTestingPolicy.py, line 1)",
+						},
+					},
+				},
 			},
 		},
-		TestsFailed: models.TestsFailed{},
-		TestsPassed: models.TestsPassed{},
 	}
-	assert.Equal(t, expected, result.Payload)
+
+	var result models.TestPolicyOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, result)
 }
 
 func testPolicyMixed(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.TestPolicy(&operations.TestPolicyParams{
-		Body: &models.TestPolicy{
-			AnalysisType:  models.AnalysisTypePOLICY,
+	input := models.LambdaInput{
+		TestPolicy: &models.TestPolicyInput{
 			Body:          "def policy(resource): return resource['Hello']",
 			ResourceTypes: policy.ResourceTypes,
-			Tests: models.TestSuite{
+			Tests: []models.UnitTest{
 				{
 					ExpectedResult: true,
-					Name:           "test-1",
+					Name:           "test-0",
 					Resource:       `{"Hello": true}`,
-					ResourceType:   "AWS.S3.Bucket",
 				},
 				{
 					ExpectedResult: false,
+					Name:           "test-1",
+					Resource:       `{"Hello": false}`,
+				},
+				{
+					ExpectedResult: true,
 					Name:           "test-2",
 					Resource:       `{"Hello": false}`,
-					ResourceType:   "AWS.S3.Bucket",
 				},
 				{
 					ExpectedResult: true,
 					Name:           "test-3",
-					Resource:       `{"Hello": false}`,
-					ResourceType:   "AWS.S3.Bucket",
-				},
-				{
-					ExpectedResult: true,
-					Name:           "test-4",
 					Resource:       `{"Goodbye": false}`,
-					ResourceType:   "AWS.S3.Bucket",
 				},
 			},
 		},
-		HTTPClient: httpClient,
-	})
-
-	require.NoError(t, err)
-	expected := &models.TestPolicyResult{
-		TestSummary: false,
-		TestsErrored: models.TestsErrored{
+	}
+	expected := models.TestPolicyOutput{
+		Results: []models.TestPolicyRecord{
 			{
-				ErrorMessage: "KeyError: 'Hello'",
-				Name:         "test-4",
+				ID:     "passed-0",
+				Name:   input.TestPolicy.Tests[0].Name,
+				Passed: true,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"),
+					},
+				},
+			},
+			{
+				ID:     "passed-1",
+				Name:   input.TestPolicy.Tests[1].Name,
+				Passed: true,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("false"),
+					},
+				},
+			},
+			{
+				ID:     "failed-2",
+				Name:   input.TestPolicy.Tests[2].Name,
+				Passed: false,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"), // expected result
+					},
+				},
+			},
+			{
+				ID:     "errored-3",
+				Name:   input.TestPolicy.Tests[3].Name,
+				Passed: false,
+				Functions: models.TestPolicyRecordFunctions{
+					Policy: models.TestDetectionSubRecord{
+						Output: aws.String("true"), // expected result
+						Error:  &models.TestError{Message: "KeyError: 'Hello'"},
+					},
+				},
 			},
 		},
-		TestsFailed: models.TestsFailed{"test-3"},
-		TestsPassed: models.TestsPassed{"test-1", "test-2"},
 	}
-	assert.Equal(t, expected, result.Payload)
+
+	var result models.TestPolicyOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, result)
 }
 
 func createInvalid(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.CreatePolicy(&operations.CreatePolicyParams{HTTPClient: httpClient})
-	assert.Nil(t, result)
-	require.Error(t, err)
-	require.IsType(t, &operations.CreatePolicyBadRequest{}, err)
+	input := models.LambdaInput{
+		CreatePolicy: &models.CreatePolicyInput{},
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
+	assert.Equal(t, http.StatusBadRequest, statusCode)
+	assert.Error(t, err)
 }
 
-func createSuccess(t *testing.T) {
+func createPolicySuccess(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.CreatePolicy(&operations.CreatePolicyParams{
-		Body: &models.UpdatePolicy{
+	input := models.LambdaInput{
+		CreatePolicy: &models.CreatePolicyInput{
 			AutoRemediationID:         policy.AutoRemediationID,
 			AutoRemediationParameters: policy.AutoRemediationParameters,
 			Body:                      policy.Body,
@@ -517,255 +808,847 @@ func createSuccess(t *testing.T) {
 			DisplayName:               policy.DisplayName,
 			Enabled:                   policy.Enabled,
 			ID:                        policy.ID,
+			OutputIDs:                 policy.OutputIDs,
 			ResourceTypes:             policy.ResourceTypes,
 			Severity:                  policy.Severity,
 			Suppressions:              policy.Suppressions,
 			Tags:                      policy.Tags,
-			UserID:                    userID,
 			Tests:                     policy.Tests,
+			UserID:                    userID,
 		},
-		HTTPClient: httpClient,
+	}
+	var result models.Policy
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, statusCode)
+
+	assert.NotEmpty(t, result.ComplianceStatus)
+	assert.NotZero(t, result.CreatedAt)
+	assert.NotZero(t, result.LastModified)
+
+	expectedPolicy := *policy
+	expectedPolicy.ComplianceStatus = result.ComplianceStatus
+	expectedPolicy.CreatedAt = result.CreatedAt
+	expectedPolicy.CreatedBy = userID
+	expectedPolicy.LastModified = result.LastModified
+	expectedPolicy.LastModifiedBy = userID
+	expectedPolicy.VersionID = result.VersionID
+	assert.Equal(t, expectedPolicy, result)
+	policy = &result
+}
+
+// Create policy fail when policy contains invalid ResourceTypes
+func testFailCreatePolicyInvalidResourceType(t *testing.T) {
+	input := models.LambdaInput{
+		CreatePolicy: &models.CreatePolicyInput{
+			AutoRemediationID:         policy.AutoRemediationID,
+			AutoRemediationParameters: policy.AutoRemediationParameters,
+			Body:                      policy.Body,
+			Description:               policy.Description,
+			DisplayName:               "Duplicate AWS Config Recording Status",
+			Enabled:                   policy.Enabled,
+			ID:                        "AWS.Config.DuplicateRecordingNoErrors",
+			OutputIDs:                 policy.OutputIDs,
+			ResourceTypes: []string{
+				"AWS.Config.DuplicateRecorder",
+			},
+			Severity:     policy.Severity,
+			Suppressions: policy.Suppressions,
+			Tags:         policy.Tags,
+			Tests:        policy.Tests,
+			UserID:       userID,
+		},
+	}
+	var result models.Policy
+	statusCode, err := apiClient.Invoke(&input, &result)
+	assert.Equal(t, http.StatusBadRequest, statusCode)
+	assert.Error(t, err)
+
+	errStr := "policy contains invalid resource type: AWS.Config.DuplicateRecorder"
+	errMsg := fmt.Sprintf("panther-analysis-api: unsuccessful status code 400: %s", errStr)
+	assert.Equal(t, errMsg, err.Error())
+}
+
+// Tests that a policy cannot be saved if it is enabled and its tests fail.
+func saveEnabledPolicyFailingTests(t *testing.T) {
+	t.Parallel()
+	policyID := uuid.New().String()
+	defer batchDeletePolicies(t, policyID)
+
+	req := models.UpdatePolicyInput{
+		Body:     "def policy(resource): return resource['key']",
+		Enabled:  true,
+		ID:       policyID,
+		Severity: policy.Severity,
+		Tests: []models.UnitTest{
+			{
+				Name:           "This will pass",
+				ExpectedResult: true,
+				Resource:       `{"key":true}`,
+			}, {
+				Name:           "This will fail",
+				ExpectedResult: false,
+				Resource:       `{"key":true}`,
+			}, {
+				Name:           "This will fail too",
+				ExpectedResult: false,
+				Resource:       `{}`,
+			},
+		},
+		UserID: userID,
+	}
+
+	expectedErrorMessage := "cannot save an enabled policy with failing unit tests"
+	t.Run("Create", func(t *testing.T) {
+		input := models.LambdaInput{CreatePolicy: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.Error(t, err)
+		assert.Equal(t, http.StatusBadRequest, statusCode)
+		assert.Contains(t, err.Error(), expectedErrorMessage)
 	})
 
-	require.NoError(t, err)
+	t.Run("Modify", func(t *testing.T) {
+		input := models.LambdaInput{UpdatePolicy: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.Error(t, err)
+		assert.Equal(t, http.StatusBadRequest, statusCode)
+		assert.Contains(t, err.Error(), expectedErrorMessage)
+	})
+}
 
-	require.NoError(t, result.Payload.Validate(nil))
-	assert.NotZero(t, result.Payload.CreatedAt)
-	assert.NotZero(t, result.Payload.LastModified)
+// Tests a disabled policy can be saved even if its tests fail.
+func saveDisabledPolicyFailingTests(t *testing.T) {
+	t.Parallel()
+	policyID := uuid.New().String()
+	defer batchDeletePolicies(t, policyID)
 
-	policy.CreatedAt = result.Payload.CreatedAt
-	policy.CreatedBy = userID
-	policy.LastModified = result.Payload.LastModified
-	policy.LastModifiedBy = userID
-	policy.Tags = []string{} // nil was converted to empty list
-	policy.VersionID = result.Payload.VersionID
-	assert.Equal(t, policy, result.Payload)
+	req := models.UpdatePolicyInput{
+		Body:     "def policy(resource): return True",
+		Enabled:  false,
+		ID:       policyID,
+		Severity: policy.Severity,
+		Tests: []models.UnitTest{
+			{
+				Name:           "This will fail",
+				ExpectedResult: false,
+				Resource:       `{}`,
+			},
+		},
+		UserID: userID,
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		input := models.LambdaInput{CreatePolicy: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusCreated, statusCode)
+	})
+
+	t.Run("Modify", func(t *testing.T) {
+		input := models.LambdaInput{UpdatePolicy: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, statusCode)
+	})
+}
+
+// Tests that a policy can be saved if it is enabled and its tests pass.
+func saveEnabledPolicyPassingTests(t *testing.T) {
+	t.Parallel()
+	policyID := uuid.New().String()
+	defer batchDeletePolicies(t, policyID)
+
+	req := models.UpdatePolicyInput{
+		Body:     "def policy(resource): return True",
+		Enabled:  true,
+		ID:       policyID,
+		Severity: policy.Severity,
+		Tests: []models.UnitTest{
+			{
+				Name:           "Compliant",
+				ExpectedResult: true,
+				Resource:       `{}`,
+			}, {
+				Name:           "Compliant 2",
+				ExpectedResult: true,
+				Resource:       `{}`,
+			},
+		},
+		UserID: userID,
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		input := models.LambdaInput{CreatePolicy: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusCreated, statusCode)
+	})
+
+	t.Run("Modify", func(t *testing.T) {
+		input := models.LambdaInput{UpdatePolicy: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, statusCode)
+	})
+}
+
+func savePolicyInvalidTestInputJSON(t *testing.T) {
+	t.Parallel()
+	policyID := uuid.New().String()
+	defer batchDeletePolicies(t, policyID)
+
+	req := models.UpdatePolicyInput{
+		Body:     "def policy(resource): return True",
+		Enabled:  true,
+		ID:       policyID,
+		Severity: policy.Severity,
+		Tests: []models.UnitTest{
+			{
+				Name:           "PolicyName",
+				ExpectedResult: true,
+				Resource:       "invalid json",
+			},
+		},
+		UserID: userID,
+	}
+
+	expectedErrorMessage := fmt.Sprintf(`Resource for test "%s" is not valid json:`, req.Tests[0].Name)
+	t.Run("Create", func(t *testing.T) {
+		input := models.LambdaInput{CreatePolicy: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.Error(t, err)
+		assert.Equal(t, http.StatusBadRequest, statusCode)
+		assert.Contains(t, err.Error(), expectedErrorMessage)
+	})
+
+	t.Run("Modify", func(t *testing.T) {
+		input := models.LambdaInput{UpdatePolicy: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.Error(t, err)
+		assert.Equal(t, http.StatusBadRequest, statusCode)
+		assert.Contains(t, err.Error(), expectedErrorMessage)
+	})
+}
+
+// Tests that a rule cannot be saved if it is enabled and its tests fail.
+func saveEnabledRuleFailingTests(t *testing.T) {
+	t.Parallel()
+	ruleID := uuid.New().String()
+	defer batchDeleteRules(t, ruleID)
+
+	req := models.UpdateRuleInput{
+		Body:     "def rule(event): return event['key']",
+		Enabled:  true,
+		ID:       ruleID,
+		Severity: rule.Severity,
+		Tests: []models.UnitTest{
+			{
+				Name:           "This will fail",
+				ExpectedResult: false,
+				Resource:       `{"key":true}`,
+			}, {
+				Name:           "This will fail too",
+				ExpectedResult: true,
+				Resource:       `{}`,
+			}, {
+				Name:           "This will pass",
+				ExpectedResult: true,
+				Resource:       `{"key":true}`,
+			},
+		},
+		UserID: userID,
+	}
+
+	expectedErrorMessage := "cannot save an enabled rule with failing unit tests"
+	t.Run("Create", func(t *testing.T) {
+		input := models.LambdaInput{CreateRule: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.Error(t, err)
+		assert.Equal(t, http.StatusBadRequest, statusCode)
+		assert.Contains(t, err.Error(), expectedErrorMessage)
+	})
+
+	t.Run("Modify", func(t *testing.T) {
+		input := models.LambdaInput{UpdateRule: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.Error(t, err)
+		assert.Equal(t, http.StatusBadRequest, statusCode)
+		assert.Contains(t, err.Error(), expectedErrorMessage)
+	})
+}
+
+// Tests that a rule can be saved if it is enabled and its tests pass.
+// This is different than createRuleSuccess test. createRuleSuccess saves
+// a rule without tests.
+func saveEnabledRulePassingTests(t *testing.T) {
+	t.Parallel()
+	ruleID := uuid.New().String()
+	defer batchDeleteRules(t, ruleID)
+
+	req := models.UpdateRuleInput{
+		Body:     "def rule(event): return True",
+		Enabled:  true,
+		ID:       ruleID,
+		Severity: rule.Severity,
+		Tests: []models.UnitTest{
+			{
+				Name:           "Trigger alert",
+				ExpectedResult: true,
+				Resource:       `{}`,
+			}, {
+				Name:           "Trigger alert 2",
+				ExpectedResult: true,
+				Resource:       `{}`,
+			},
+		},
+		UserID: userID,
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		input := models.LambdaInput{CreateRule: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusCreated, statusCode)
+	})
+
+	t.Run("Modify", func(t *testing.T) {
+		input := models.LambdaInput{UpdateRule: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, statusCode)
+	})
+}
+
+func saveRuleInvalidTestInputJSON(t *testing.T) {
+	t.Parallel()
+	ruleID := uuid.New().String()
+	defer batchDeleteRules(t, ruleID)
+
+	req := models.UpdateRuleInput{
+		Body:     "def rule(event): return True",
+		Enabled:  true,
+		ID:       ruleID,
+		Severity: rule.Severity,
+		Tests: []models.UnitTest{
+			{
+				Name:           "Trigger alert",
+				ExpectedResult: true,
+				Resource:       "invalid json",
+			},
+		},
+		UserID: userID,
+	}
+
+	expectedErrorMessage := fmt.Sprintf(`Event for test "%s" is not valid json:`, req.Tests[0].Name)
+	t.Run("Create", func(t *testing.T) {
+		input := models.LambdaInput{CreateRule: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.Error(t, err)
+		assert.Equal(t, http.StatusBadRequest, statusCode)
+		assert.Contains(t, err.Error(), expectedErrorMessage)
+	})
+
+	t.Run("Modify", func(t *testing.T) {
+		input := models.LambdaInput{UpdateRule: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.Error(t, err)
+		assert.Equal(t, http.StatusBadRequest, statusCode)
+		assert.Contains(t, err.Error(), expectedErrorMessage)
+	})
+}
+
+// Tests a disabled policy can be saved even if its tests fail.
+func saveDisabledRuleFailingTests(t *testing.T) {
+	t.Parallel()
+	ruleID := uuid.New().String()
+	defer batchDeleteRules(t, ruleID)
+
+	req := models.UpdateRuleInput{
+		Body:     "def rule(event): return True",
+		Enabled:  false,
+		ID:       ruleID,
+		Severity: rule.Severity,
+		Tests: []models.UnitTest{
+			{
+				Name:           "This will fail",
+				ExpectedResult: false,
+				Resource:       `{}`,
+			},
+		},
+		UserID: userID,
+	}
+
+	t.Run("Create", func(t *testing.T) {
+		input := models.LambdaInput{CreateRule: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusCreated, statusCode)
+	})
+
+	t.Run("Modify", func(t *testing.T) {
+		input := models.LambdaInput{UpdateRule: &req}
+		statusCode, err := apiClient.Invoke(&input, nil)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, statusCode)
+	})
 }
 
 func createRuleSuccess(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.CreateRule(&operations.CreateRuleParams{
-		Body: &models.UpdateRule{
+	input := models.LambdaInput{
+		CreateRule: &models.CreateRuleInput{
 			Body:               rule.Body,
+			DedupPeriodMinutes: rule.DedupPeriodMinutes,
 			Description:        rule.Description,
 			Enabled:            rule.Enabled,
 			ID:                 rule.ID,
 			LogTypes:           rule.LogTypes,
+			OutputIDs:          rule.OutputIDs,
 			Severity:           rule.Severity,
+			Tags:               rule.Tags,
+			Threshold:          rule.Threshold,
 			UserID:             userID,
-			DedupPeriodMinutes: rule.DedupPeriodMinutes,
 		},
-		HTTPClient: httpClient,
-	})
-
+	}
+	var result models.Rule
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, statusCode)
 
-	require.NoError(t, result.Payload.Validate(nil))
-	assert.NotZero(t, result.Payload.CreatedAt)
-	assert.NotZero(t, result.Payload.LastModified)
+	assert.NotZero(t, result.CreatedAt)
+	assert.NotZero(t, result.LastModified)
 
-	rule.CreatedAt = result.Payload.CreatedAt
-	rule.CreatedBy = userID
-	rule.LastModified = result.Payload.LastModified
-	rule.LastModifiedBy = userID
-	rule.Tags = []string{} // nil was converted to empty list
-	rule.VersionID = result.Payload.VersionID
-	assert.Equal(t, rule, result.Payload)
+	expectedRule := *rule
+	expectedRule.CreatedAt = result.CreatedAt
+	expectedRule.CreatedBy = userID
+	expectedRule.LastModified = result.LastModified
+	expectedRule.LastModifiedBy = userID
+	expectedRule.VersionID = result.VersionID
+	assert.Equal(t, expectedRule, result)
+	rule = &result
+}
+
+// Create policy fail when policy contains invalid ResourceTypes
+func testFailCreateRuleInvalidLogType(t *testing.T) {
+	logTypes := []string{
+		"AWS.CloudTrailInvalidLogtype",
+	}
+	tags := []string{
+		"AWS",
+		"Identity and Access Management",
+	}
+	input := models.LambdaInput{
+		CreateRule: &models.CreateRuleInput{
+			Body:               rule.Body,
+			DedupPeriodMinutes: rule.DedupPeriodMinutes,
+			Description:        "--INVALID-LOGTYPES-RULE--",
+			DisplayName:        "--INVALID-LOGTYPES-RULE--",
+			Enabled:            rule.Enabled,
+			ID:                 "AWS.CloudTrail.ConsoleLoginInvalidRule",
+			LogTypes:           logTypes,
+			OutputIDs:          []string{},
+			Severity:           rule.Severity,
+			Tags:               tags,
+			Threshold:          rule.Threshold,
+			UserID:             "test-panther-user",
+		},
+	}
+	var result models.Rule
+	statusCode, err := apiClient.Invoke(&input, &result)
+	assert.Equal(t, http.StatusBadRequest, statusCode)
+	assert.Error(t, err)
+
+	errStr := "rule contains invalid log type: AWS.CloudTrailInvalidLogtype"
+	errMsg := fmt.Sprintf("panther-analysis-api: unsuccessful status code 400: %s", errStr)
+	assert.Equal(t, errMsg, err.Error())
+}
+
+func createDataModel(t *testing.T) {
+	t.Parallel()
+
+	for _, model := range dataModels {
+		input := models.LambdaInput{
+			CreateDataModel: &models.CreateDataModelInput{
+				Body:        model.Body,
+				Description: model.Description,
+				Enabled:     model.Enabled,
+				ID:          model.ID,
+				LogTypes:    model.LogTypes,
+				Mappings:    model.Mappings,
+				UserID:      userID,
+			},
+		}
+		var result models.DataModel
+		statusCode, err := apiClient.Invoke(&input, &result)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusCreated, statusCode)
+
+		assert.NotZero(t, result.CreatedAt)
+		assert.NotZero(t, result.LastModified)
+
+		model.CreatedAt = result.CreatedAt
+		model.CreatedBy = userID
+		model.LastModified = result.LastModified
+		model.LastModifiedBy = userID
+		model.VersionID = result.VersionID
+		assert.Equal(t, *model, result)
+	}
+
+	// This should fail because it tries to create a DataModel
+	// for a logType that already has a DataModel enabled
+	input := models.LambdaInput{
+		CreateDataModel: &models.CreateDataModelInput{
+			Body:        "def get_source_ip(event): return 'source_ip'\n",
+			Description: "Example LogType Schema",
+			Enabled:     true,
+			ID:          "AnotherDataModelTypeAnalysis",
+			LogTypes:    []string{"Crowdstrike.DNSRequest"},
+			Mappings:    []models.DataModelMapping{},
+		},
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, statusCode)
+
+	// This should fail because it attempts to add a mapping with both a field and a method
+	input = models.LambdaInput{
+		CreateDataModel: &models.CreateDataModelInput{
+			Body:        "def get_source_ip(event): return 'source_ip'\n",
+			Description: "Example LogType Schema",
+			Enabled:     true,
+			ID:          "AnotherDataModelTypeAnalysis",
+			LogTypes:    []string{"Unique.Events"},
+			Mappings: []models.DataModelMapping{
+				{
+					Name:   "source_ip",
+					Path:   "src_ip",
+					Method: "get_source_ip",
+				},
+			},
+		},
+	}
+	statusCode, err = apiClient.Invoke(&input, nil)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, statusCode)
+}
+
+// Verify Fail on create data model where data model LogTypes contains an invalid log type.
+func testFailCreateDataModelInvalidLogType(t *testing.T) {
+	invalidDataModel := &models.CreateDataModelInput{
+		Body:        "def get_source_ip(event): return 'source_ip'\n",
+		Description: "A Data Model with an invalid log type for testing",
+		DisplayName: "INVALIDDATAMODEL",
+		Enabled:     true,
+		ID:          "INVALIDLOGTYPEDataModelTypeAnalysis",
+		LogTypes:    []string{"OneLogin.INVALIDEvents"},
+		Mappings: []models.DataModelMapping{
+			{
+				Name: "source_ip",
+				Path: "ipAddress",
+			},
+		},
+		UserID: "test-panther-user",
+	}
+	input := models.LambdaInput{
+		CreateDataModel: invalidDataModel,
+	}
+	var result models.DataModel
+	statusCode, err := apiClient.Invoke(&input, &result)
+	assert.Equal(t, http.StatusBadRequest, statusCode)
+	assert.Error(t, err)
+
+	errStr := "dataModel contains invalid log type: OneLogin.INVALIDEvents"
+	errMsg := fmt.Sprintf("panther-analysis-api: unsuccessful status code 400: %s", errStr)
+	assert.Equal(t, errMsg, err.Error())
 }
 
 func createGlobalSuccess(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.CreateGlobal(&operations.CreateGlobalParams{
-		Body: &models.UpdateGlobal{
+	input := models.LambdaInput{
+		CreateGlobal: &models.CreateGlobalInput{
 			Body:        global.Body,
 			Description: global.Description,
 			ID:          global.ID,
 			UserID:      userID,
 		},
-		HTTPClient: httpClient,
-	})
-
+	}
+	var result models.Global
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, statusCode)
 
-	require.NoError(t, result.Payload.Validate(nil))
-	assert.NotZero(t, result.Payload.CreatedAt)
-	assert.NotZero(t, result.Payload.LastModified)
+	assert.NotZero(t, result.CreatedAt)
+	assert.NotZero(t, result.LastModified)
 
-	global.CreatedAt = result.Payload.CreatedAt
+	global.CreatedAt = result.CreatedAt
 	global.CreatedBy = userID
-	global.LastModified = result.Payload.LastModified
+	global.LastModified = result.LastModified
 	global.LastModifiedBy = userID
 	global.Tags = []string{} // nil was converted to empty list
-	global.VersionID = result.Payload.VersionID
-	assert.Equal(t, global, result.Payload)
+	global.VersionID = result.VersionID
+	assert.Equal(t, *global, result)
 }
 
 func getNotFound(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.GetPolicy(&operations.GetPolicyParams{
-		PolicyID:   "does-not-exist",
-		HTTPClient: httpClient,
-	})
-	assert.Nil(t, result)
+	input := models.LambdaInput{
+		GetPolicy: &models.GetPolicyInput{ID: "does-not-exist"},
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
 	require.Error(t, err)
-	require.IsType(t, &operations.GetPolicyNotFound{}, err)
+	assert.Equal(t, http.StatusNotFound, statusCode)
 }
 
 // Get the latest policy version (from Dynamo)
 func getLatest(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.GetPolicy(&operations.GetPolicyParams{
-		PolicyID:   string(policy.ID),
-		HTTPClient: httpClient,
-	})
+	input := models.LambdaInput{
+		GetPolicy: &models.GetPolicyInput{ID: policy.ID},
+	}
+	var result models.Policy
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
-	assert.NoError(t, result.Payload.Validate(nil))
-	assert.Equal(t, policy, result.Payload)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, *policy, result)
 }
 
 // Get a specific policy version (from S3)
 func getVersion(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.GetPolicy(&operations.GetPolicyParams{
-		PolicyID:   string(policy.ID),
-		VersionID:  aws.String(string(policy.VersionID)),
-		HTTPClient: httpClient,
-	})
+
+	// first get the version now as latest
+	input := models.LambdaInput{
+		GetPolicy: &models.GetPolicyInput{ID: policy.ID},
+	}
+	var result models.Policy
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
-	assert.NoError(t, result.Payload.Validate(nil))
-	assert.Equal(t, policy, result.Payload)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	versionedPolicy = &result // remember for later in delete tests, since it will change
+
+	// now look it up
+	input.GetPolicy.VersionID = result.VersionID
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, *policy, result)
 }
 
-// Get a rule
 func getRule(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.GetRule(&operations.GetRuleParams{
-		RuleID:     string(rule.ID),
-		HTTPClient: httpClient,
-	})
+	input := models.LambdaInput{
+		GetRule: &models.GetRuleInput{ID: rule.ID},
+	}
+	var result models.Rule
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
-	assert.NoError(t, result.Payload.Validate(nil))
-	assert.Equal(t, rule, result.Payload)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, *rule, result)
 }
 
-// Get a global
+func getDataModel(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		GetDataModel: &models.GetDataModelInput{ID: dataModel.ID},
+	}
+	var result models.DataModel
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, *dataModel, result)
+}
+
 func getGlobal(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.GetGlobal(&operations.GetGlobalParams{
-		GlobalID:   string(global.ID),
-		HTTPClient: httpClient,
-	})
+	input := models.LambdaInput{
+		GetGlobal: &models.GetGlobalInput{ID: global.ID},
+	}
+	var result models.Global
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
-	assert.NoError(t, result.Payload.Validate(nil))
-	assert.Equal(t, global, result.Payload)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, *global, result)
 }
 
 // GetRule with a policy ID returns 404 not found
 func getRuleWrongType(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.GetRule(&operations.GetRuleParams{
-		RuleID:     string(policy.ID),
-		HTTPClient: httpClient,
-	})
-	assert.Nil(t, result)
+	input := models.LambdaInput{
+		GetRule: &models.GetRuleInput{ID: policy.ID},
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
 	require.Error(t, err)
-	require.IsType(t, &operations.GetRuleNotFound{}, err)
-}
-
-func modifyInvalid(t *testing.T) {
-	t.Parallel()
-	result, err := apiClient.Operations.ModifyPolicy(&operations.ModifyPolicyParams{
-		// missing fields
-		Body:       &models.UpdatePolicy{},
-		HTTPClient: httpClient,
-	})
-	assert.Nil(t, result)
-	require.Error(t, err)
-	require.IsType(t, &operations.ModifyPolicyBadRequest{}, err)
+	assert.Equal(t, http.StatusNotFound, statusCode)
 }
 
 func modifyNotFound(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.ModifyPolicy(&operations.ModifyPolicyParams{
-		Body: &models.UpdatePolicy{
+	input := models.LambdaInput{
+		UpdatePolicy: &models.UpdatePolicyInput{
 			Body:     "def policy(resource): return False",
 			Enabled:  policy.Enabled,
 			ID:       "DOES.NOT.EXIST",
 			Severity: policy.Severity,
 			UserID:   userID,
 		},
-		HTTPClient: httpClient,
-	})
-	assert.Nil(t, result)
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
 	require.Error(t, err)
-	require.IsType(t, &operations.ModifyPolicyNotFound{}, err)
+	assert.Equal(t, http.StatusNotFound, statusCode)
 }
 
 func modifySuccess(t *testing.T) {
 	t.Parallel()
-	policy.Description = "A new and modified description!"
-	policy.Tests = []*models.UnitTest{
+	// things we will change
+	expectedPolicy := *policy
+	expectedPolicy.Description = "A new and modified description!"
+	expectedPolicy.Tests = []models.UnitTest{
 		{
 			Name:           "This will be True",
-			ResourceType:   "AWS.S3.Bucket",
 			ExpectedResult: true,
 			Resource:       `{}`,
 		},
 	}
-	result, err := apiClient.Operations.ModifyPolicy(&operations.ModifyPolicyParams{
-		Body: &models.UpdatePolicy{
+	input := models.LambdaInput{
+		UpdatePolicy: &models.UpdatePolicyInput{
 			AutoRemediationID:         policy.AutoRemediationID,
 			AutoRemediationParameters: policy.AutoRemediationParameters,
 			Body:                      policy.Body,
-			Description:               policy.Description,
+			Description:               expectedPolicy.Description,
 			DisplayName:               policy.DisplayName,
 			Enabled:                   policy.Enabled,
 			ID:                        policy.ID,
+			OutputIDs:                 policy.OutputIDs,
+			Reference:                 policy.Reference,
+			Reports:                   policy.Reports,
 			ResourceTypes:             policy.ResourceTypes,
+			Runbook:                   policy.Runbook,
 			Severity:                  policy.Severity,
 			Suppressions:              policy.Suppressions,
 			Tags:                      policy.Tags,
-			Tests:                     policy.Tests,
+			Tests:                     expectedPolicy.Tests,
 			UserID:                    userID,
 		},
-		HTTPClient: httpClient,
-	})
+	}
+	var result models.Policy
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
 
-	policy.LastModified = result.Payload.LastModified
-	policy.VersionID = result.Payload.VersionID
-	assert.Equal(t, policy, result.Payload)
+	// these get assigned
+	assert.NotEmpty(t, result.LastModified)
+	assert.NotEmpty(t, result.VersionID)
+	expectedPolicy.LastModified = result.LastModified
+	expectedPolicy.VersionID = result.VersionID
+	assert.Equal(t, expectedPolicy, result)
 }
 
 // Modify a rule
 func modifyRule(t *testing.T) {
 	t.Parallel()
-	rule.Description = "SkyNet integration"
-	rule.DedupPeriodMinutes = 60
+	// these are changes
+	expectedRule := *rule
+	expectedRule.Description = "SkyNet integration"
+	expectedRule.DedupPeriodMinutes = 60
+	expectedRule.Threshold = rule.Threshold + 1
 
-	result, err := apiClient.Operations.ModifyRule(&operations.ModifyRuleParams{
-		Body: &models.UpdateRule{
+	input := models.LambdaInput{
+		UpdateRule: &models.UpdateRuleInput{
 			Body:               rule.Body,
-			Description:        rule.Description,
+			DedupPeriodMinutes: expectedRule.DedupPeriodMinutes,
+			Description:        expectedRule.Description,
+			DisplayName:        rule.DisplayName,
 			Enabled:            rule.Enabled,
 			ID:                 rule.ID,
 			LogTypes:           rule.LogTypes,
+			OutputIDs:          rule.OutputIDs,
+			Reference:          rule.Reference,
+			Reports:            rule.Reports,
+			Runbook:            rule.Runbook,
 			Severity:           rule.Severity,
+			Tags:               rule.Tags,
+			Tests:              rule.Tests,
+			Threshold:          expectedRule.Threshold,
 			UserID:             userID,
-			DedupPeriodMinutes: rule.DedupPeriodMinutes,
 		},
-		HTTPClient: httpClient,
-	})
-
+	}
+	var result models.Rule
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
 
-	require.NoError(t, result.Payload.Validate(nil))
-	assert.NotZero(t, result.Payload.CreatedAt)
-	assert.NotZero(t, result.Payload.LastModified)
+	assert.NotEmpty(t, result.LastModified)
+	assert.NotEmpty(t, result.VersionID)
 
-	rule.LastModified = result.Payload.LastModified
-	rule.VersionID = result.Payload.VersionID
-	assert.Equal(t, rule, result.Payload)
+	expectedRule.LastModified = result.LastModified
+	expectedRule.VersionID = result.VersionID
+	assert.Equal(t, expectedRule, result)
+}
+
+func modifyDataModel(t *testing.T) {
+	t.Parallel()
+	dataModel.Description = "A new description"
+	dataModel.Body = "def get_source_ip(event): return src_ip\n"
+
+	input := models.LambdaInput{
+		UpdateDataModel: &models.UpdateDataModelInput{
+			Body:        dataModel.Body,
+			Description: dataModel.Description,
+			DisplayName: dataModel.DisplayName,
+			Enabled:     dataModel.Enabled,
+			ID:          dataModel.ID,
+			LogTypes:    dataModel.LogTypes,
+			Mappings:    dataModel.Mappings,
+			UserID:      userID,
+		},
+	}
+	var result models.DataModel
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	assert.NotEmpty(t, result.LastModified)
+	assert.NotEmpty(t, result.VersionID)
+
+	dataModel.LastModified = result.LastModified
+	dataModel.VersionID = result.VersionID
+	assert.Equal(t, *dataModel, result)
+
+	// verify can update logtypes to overlap if enabled is false
+	originalLogTypes := dataModel.LogTypes
+	dataModel.Enabled = false
+	dataModel.LogTypes = dataModelTwo.LogTypes
+
+	input.UpdateDataModel.Enabled = dataModel.Enabled
+	input.UpdateDataModel.LogTypes = dataModel.LogTypes
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	dataModel.LastModified = result.LastModified
+	dataModel.VersionID = result.VersionID
+	assert.Equal(t, *dataModel, result)
+
+	// change logtype back
+	dataModel.Enabled = true
+	dataModel.LogTypes = originalLogTypes
+	input.UpdateDataModel.Enabled = dataModel.Enabled
+	input.UpdateDataModel.LogTypes = dataModel.LogTypes
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	dataModel.LastModified = result.LastModified
+	dataModel.VersionID = result.VersionID
+	assert.Equal(t, *dataModel, result)
+
+	// Updating the logtypes that would create two data models
+	// that cover the same logtypes fails
+	input.UpdateDataModel.LogTypes = dataModelTwo.LogTypes
+	statusCode, err = apiClient.Invoke(&input, nil)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusBadRequest, statusCode)
 }
 
 // Modify a global
@@ -774,623 +1657,1526 @@ func modifyGlobal(t *testing.T) {
 	global.Description = "Now returns False"
 	global.Body = "def helper_is_true(truthy): return truthy is False\n"
 
-	result, err := apiClient.Operations.ModifyGlobal(&operations.ModifyGlobalParams{
-		Body: &models.UpdateGlobal{
+	input := models.LambdaInput{
+		UpdateGlobal: &models.UpdateGlobalInput{
 			Body:        global.Body,
 			Description: global.Description,
 			ID:          global.ID,
+			Tags:        global.Tags,
 			UserID:      userID,
 		},
-		HTTPClient: httpClient,
-	})
-
+	}
+	var result models.Global
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
 
-	require.NoError(t, result.Payload.Validate(nil))
-	assert.NotZero(t, result.Payload.CreatedAt)
-	assert.NotZero(t, result.Payload.LastModified)
+	assert.NotEmpty(t, result.LastModified)
+	assert.NotEmpty(t, result.VersionID)
 
-	global.LastModified = result.Payload.LastModified
-	global.VersionID = result.Payload.VersionID
-	assert.Equal(t, global, result.Payload)
+	global.LastModified = result.LastModified
+	global.VersionID = result.VersionID
+	assert.Equal(t, *global, result)
 }
 
 func suppressNotFound(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.Suppress(&operations.SuppressParams{
-		Body: &models.Suppress{
-			PolicyIds:        []models.ID{"no-such-id"},
-			ResourcePatterns: models.Suppressions{"s3:.*"},
+	input := models.LambdaInput{
+		Suppress: &models.SuppressInput{
+			PolicyIDs:        []string{"no-such-id"},
+			ResourcePatterns: []string{"s3:.*"},
 		},
-		HTTPClient: httpClient,
-	})
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
 	require.NoError(t, err)
 	// a policy which doesn't exist logs a warning but doesn't return an API error
-	assert.Equal(t, &operations.SuppressOK{}, result)
+	assert.Equal(t, http.StatusOK, statusCode)
 }
 
 func suppressSuccess(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.Suppress(&operations.SuppressParams{
-		Body: &models.Suppress{
-			PolicyIds:        []models.ID{policy.ID},
-			ResourcePatterns: models.Suppressions{"labs.*", "dev|staging"},
+	input := models.LambdaInput{
+		Suppress: &models.SuppressInput{
+			PolicyIDs:        []string{policy.ID},
+			ResourcePatterns: []string{"new-suppression", "and-another"},
 		},
-		HTTPClient: httpClient,
-	})
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
 	require.NoError(t, err)
-	assert.Equal(t, &operations.SuppressOK{}, result)
+	assert.Equal(t, http.StatusOK, statusCode)
 
 	// Verify suppressions were added correctly
-	getResult, err := apiClient.Operations.GetPolicy(&operations.GetPolicyParams{
-		PolicyID:   string(policy.ID),
-		HTTPClient: httpClient,
-	})
+	input = models.LambdaInput{
+		GetPolicy: &models.GetPolicyInput{ID: policy.ID},
+	}
+	var result models.Policy
+	statusCode, err = apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
-	sort.Strings(getResult.Payload.Suppressions)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	sort.Strings(result.Suppressions)
 	// It was added to the existing suppressions
-	assert.Equal(t, models.Suppressions{"dev|staging", "labs.*", "panther.*"}, getResult.Payload.Suppressions)
+	assert.Equal(t, []string{"and-another", "new-suppression", "panther.*"}, result.Suppressions)
 }
 
 func bulkUploadInvalid(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.BulkUpload(
-		&operations.BulkUploadParams{HTTPClient: httpClient})
-	assert.Nil(t, result)
+	input := models.LambdaInput{
+		BulkUpload: &models.BulkUploadInput{},
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
 	require.Error(t, err)
-	require.IsType(t, &operations.BulkUploadBadRequest{}, err)
+	assert.Equal(t, http.StatusBadRequest, statusCode)
 }
 
 func bulkUploadSuccess(t *testing.T) {
 	t.Parallel()
-
-	require.NoError(t, shutil.ZipDirectory(policiesRoot, policiesZipLocation, true))
-	zipFile, err := os.Open(policiesZipLocation)
+	require.NoError(t, shutil.ZipDirectory(analysesRoot, analysesZipLocation, true))
+	zipFile, err := os.Open(analysesZipLocation)
 	require.NoError(t, err)
 	content, err := ioutil.ReadAll(bufio.NewReader(zipFile))
 	require.NoError(t, err)
 
+	// cleaning up added Rule
+	defer batchDeleteRules(t, "Rule.Always.True")
+
 	encoded := base64.StdEncoding.EncodeToString(content)
-	result, err := apiClient.Operations.BulkUpload(&operations.BulkUploadParams{
-		Body: &models.BulkUpload{
-			Data:   models.Base64zipfile(encoded),
-			UserID: userID,
-		},
-		HTTPClient: httpClient,
-	})
-
-	require.NoError(t, err)
-
-	expected := &models.BulkUploadResult{
-		ModifiedPolicies: aws.Int64(1),
-		NewPolicies:      aws.Int64(2),
-		TotalPolicies:    aws.Int64(3),
-
-		ModifiedRules: aws.Int64(0),
-		NewRules:      aws.Int64(0),
-		TotalRules:    aws.Int64(0),
-
-		ModifiedGlobals: aws.Int64(0),
-		NewGlobals:      aws.Int64(0),
-		TotalGlobals:    aws.Int64(0),
+	input := models.LambdaInput{
+		BulkUpload: &models.BulkUploadInput{Data: encoded, UserID: userID},
 	}
-	assert.Equal(t, expected, result.Payload)
+	var result models.BulkUploadOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.BulkUploadOutput{
+		ModifiedPolicies: 1,
+		NewPolicies:      2,
+		TotalPolicies:    3,
+
+		ModifiedRules: 0,
+		NewRules:      1,
+		TotalRules:    1,
+
+		ModifiedGlobals: 0,
+		NewGlobals:      0,
+		TotalGlobals:    0,
+
+		ModifiedDataModels: 0,
+		NewDataModels:      1,
+		TotalDataModels:    1,
+	}
+	require.Equal(t, expected, result)
 
 	// Verify the existing policy was updated - the created fields were unchanged
-	getResult, err := apiClient.Operations.GetPolicy(&operations.GetPolicyParams{
-		PolicyID:   string(policy.ID),
-		HTTPClient: httpClient,
-	})
+	input = models.LambdaInput{
+		GetPolicy: &models.GetPolicyInput{ID: policy.ID},
+	}
+	var getResult models.Policy
+	_, err = apiClient.Invoke(&input, &getResult)
 	require.NoError(t, err)
 
-	assert.NoError(t, getResult.Payload.Validate(nil))
-	assert.True(t, time.Time(getResult.Payload.LastModified).After(time.Time(policy.LastModified)))
-	assert.NotEqual(t, getResult.Payload.VersionID, policy.VersionID)
-	assert.NotEmpty(t, getResult.Payload.VersionID)
-	policy.AutoRemediationParameters = map[string]string{"hello": "goodbye"}
-	policy.Description = "Matches every resource\n"
-	policy.LastModified = getResult.Payload.LastModified
-	policy.Tests[0].Resource = `{"Bucket":"empty"}`
-	policy.Suppressions = []string{}
-	policy.VersionID = getResult.Payload.VersionID
-	assert.Equal(t, policy, getResult.Payload)
+	assert.True(t, getResult.LastModified.After(policy.LastModified))
+	assert.NotEqual(t, getResult.VersionID, policy.VersionID)
+	assert.NotEmpty(t, getResult.VersionID)
+
+	expectedPolicy := *policy
+	expectedPolicy.AutoRemediationID = "fix-it"
+	expectedPolicy.AutoRemediationParameters = map[string]string{"hello": "goodbye"}
+	expectedPolicy.CreatedAt = getResult.CreatedAt
+	expectedPolicy.CreatedBy = getResult.CreatedBy
+	expectedPolicy.Description = "Matches every resource\n"
+	expectedPolicy.LastModifiedBy = getResult.LastModifiedBy
+	expectedPolicy.LastModified = getResult.LastModified
+	expectedPolicy.OutputIDs = []string{}
+	expectedPolicy.ResourceTypes = []string{"AWS.S3.Bucket"}
+	expectedPolicy.Suppressions = []string{"panther.*"}
+	expectedPolicy.Tags = []string{}
+	expectedPolicy.Tests = expectedPolicy.Tests[:1]
+	expectedPolicy.Tests[0].Resource = `{"Bucket":"empty"}`
+	expectedPolicy.VersionID = getResult.VersionID
+	assert.Equal(t, expectedPolicy, getResult)
+
+	// Now reset global policy so subsequent tests have a reference
+	policy = &getResult
 
 	// Verify newly created policy #1
-	getResult, err = apiClient.Operations.GetPolicy(&operations.GetPolicyParams{
-		PolicyID:   string(policyFromBulk.ID),
-		HTTPClient: httpClient,
-	})
+	input.GetPolicy.ID = policyFromBulk.ID
+	_, err = apiClient.Invoke(&input, &policyFromBulk)
 	require.NoError(t, err)
 
-	assert.NoError(t, getResult.Payload.Validate(nil))
-	assert.NotZero(t, getResult.Payload.CreatedAt)
-	assert.NotZero(t, getResult.Payload.LastModified)
-	policyFromBulk.CreatedAt = getResult.Payload.CreatedAt
-	policyFromBulk.LastModified = getResult.Payload.LastModified
-	policyFromBulk.Suppressions = []string{}
-	policyFromBulk.VersionID = getResult.Payload.VersionID
+	assert.NotZero(t, policyFromBulk.CreatedAt)
+	assert.NotZero(t, policyFromBulk.LastModified)
 
-	// Verify the resource string is the same as we expect, by unmarshaling it into its object map
-	for i, test := range policyFromBulk.Tests {
-		var expected map[string]interface{}
-		var actual map[string]interface{}
-		require.NoError(t, jsoniter.UnmarshalFromString(string(test.Resource), &expected))
-		require.NoError(t, jsoniter.UnmarshalFromString(string(getResult.Payload.Tests[i].Resource), &actual))
-		assert.Equal(t, expected, actual)
-		test.Resource = getResult.Payload.Tests[i].Resource
-	}
-
-	assert.Equal(t, policyFromBulk, getResult.Payload)
+	cloudtrailBody, err := ioutil.ReadFile(path.Join(analysesRoot, "policy_aws_cloudtrail_log_validation_enabled.py"))
+	require.NoError(t, err)
+	assert.Equal(t, policyFromBulk.Body, string(cloudtrailBody))
+	assert.Len(t, policyFromBulk.Tests, 2)
 
 	// Verify newly created policy #2
-	getResult, err = apiClient.Operations.GetPolicy(&operations.GetPolicyParams{
-		PolicyID:   string(policyFromBulkJSON.ID),
-		HTTPClient: httpClient,
-	})
+	input.GetPolicy.ID = policyFromBulkJSON.ID
+	_, err = apiClient.Invoke(&input, &policyFromBulkJSON)
 	require.NoError(t, err)
+	assert.Equal(t, "Matches every resource", policyFromBulkJSON.Description)
+	assert.Equal(t, "Test:Policy:JSON", policyFromBulkJSON.ID)
 
-	assert.NoError(t, getResult.Payload.Validate(nil))
-	assert.NotZero(t, getResult.Payload.CreatedAt)
-	assert.NotZero(t, getResult.Payload.LastModified)
-	policyFromBulkJSON.CreatedAt = getResult.Payload.CreatedAt
-	policyFromBulkJSON.LastModified = getResult.Payload.LastModified
-	policyFromBulkJSON.Suppressions = []string{}
-	policyFromBulkJSON.Tags = []string{}
-	policyFromBulkJSON.VersionID = getResult.Payload.VersionID
-
-	// Verify the resource string is the same as we expect, by unmarshaling it into its object map
-	for i, test := range policyFromBulkJSON.Tests {
-		var expected map[string]interface{}
-		var actual map[string]interface{}
-		require.NoError(t, jsoniter.UnmarshalFromString(string(test.Resource), &expected))
-		require.NoError(t, jsoniter.UnmarshalFromString(string(getResult.Payload.Tests[i].Resource), &actual))
-		assert.Equal(t, expected, actual)
-		test.Resource = getResult.Payload.Tests[i].Resource
+	// Verify newly created Rule
+	expectedNewRule := models.Rule{
+		AnalysisType:       models.TypeRule,
+		DedupPeriodMinutes: 480,
+		Description:        "Test rule",
+		DisplayName:        "Rule Always True display name",
+		Enabled:            true,
+		ID:                 "Rule.Always.True",
+		LogTypes:           []string{"CiscoUmbrella.DNS"},
+		OutputIDs:          []string{},
+		Reports:            map[string][]string{},
+		Runbook:            "Test runbook",
+		Severity:           compliancemodels.SeverityLow,
+		Tags:               []string{"DNS"},
+		Tests:              []models.UnitTest{},
+		Threshold:          42,
 	}
 
-	assert.Equal(t, policyFromBulkJSON, getResult.Payload)
+	input = models.LambdaInput{
+		GetRule: &models.GetRuleInput{ID: expectedNewRule.ID},
+	}
+	var getRule models.Rule
+	_, err = apiClient.Invoke(&input, &getRule)
+	require.NoError(t, err)
+
+	// Setting the below to the value received
+	// since we have no control over them
+	expectedNewRule.CreatedAt = getRule.CreatedAt
+	expectedNewRule.CreatedBy = getRule.CreatedBy
+	expectedNewRule.LastModified = getRule.LastModified
+	expectedNewRule.LastModifiedBy = getRule.LastModifiedBy
+	expectedNewRule.VersionID = getRule.VersionID
+	expectedNewRule.Body = getRule.Body
+	assert.Equal(t, expectedNewRule, getRule)
+	// Checking if the body contains the provide `rule` function (the body contains licence information that we are not interested in)
+	assert.Contains(t, getRule.Body, "def rule(event):\n    return True\n")
+
+	// Verify newly created DataModel
+	input = models.LambdaInput{
+		GetDataModel: &models.GetDataModelInput{ID: dataModelFromBulkYML.ID},
+	}
+	var getDataModel models.DataModel
+	_, err = apiClient.Invoke(&input, &getDataModel)
+	require.NoError(t, err)
+
+	// setting updated values
+	dataModelFromBulkYML.CreatedAt = getDataModel.CreatedAt
+	dataModelFromBulkYML.CreatedBy = getDataModel.CreatedBy
+	dataModelFromBulkYML.LastModified = getDataModel.LastModified
+	dataModelFromBulkYML.LastModifiedBy = getDataModel.LastModifiedBy
+	dataModelFromBulkYML.VersionID = getDataModel.VersionID
+	assert.Equal(t, *dataModelFromBulkYML, getDataModel)
 }
 
-func listNotFound(t *testing.T) {
+func listPolicies(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.ListPolicies(&operations.ListPoliciesParams{
-		HTTPClient: httpClient,
-	})
-	require.NoError(t, err)
-
-	expected := &models.PolicyList{
-		Paging: &models.Paging{
-			ThisPage:   aws.Int64(0),
-			TotalItems: aws.Int64(0),
-			TotalPages: aws.Int64(0),
-		},
-		Policies: []*models.PolicySummary{},
+	input := models.LambdaInput{
+		ListPolicies: &models.ListPoliciesInput{},
 	}
-	assert.Equal(t, expected, result.Payload)
-}
-
-func listSuccess(t *testing.T) {
-	t.Parallel()
-	result, err := apiClient.Operations.ListPolicies(&operations.ListPoliciesParams{
-		HTTPClient: httpClient,
-	})
+	var result models.ListPoliciesOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
 
-	expected := &models.PolicyList{
-		Paging: &models.Paging{
-			ThisPage:   aws.Int64(1),
-			TotalItems: aws.Int64(3),
-			TotalPages: aws.Int64(1),
+	expected := models.ListPoliciesOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 3,
+			TotalPages: 1,
 		},
-		Policies: []*models.PolicySummary{ // sorted by severity descending (ID tiebreaker)
-			{
-				AutoRemediationID:         policyFromBulk.AutoRemediationID,
-				AutoRemediationParameters: policyFromBulk.AutoRemediationParameters,
-				ComplianceStatus:          models.ComplianceStatusPASS,
-				DisplayName:               policyFromBulk.DisplayName,
-				Enabled:                   policyFromBulk.Enabled,
-				ID:                        policyFromBulk.ID,
-				LastModified:              policyFromBulk.LastModified,
-				ResourceTypes:             policyFromBulk.ResourceTypes,
-				Severity:                  policyFromBulk.Severity,
-				Suppressions:              policyFromBulk.Suppressions,
-				Tags:                      policyFromBulk.Tags,
-			},
-			{
-				AutoRemediationID:         policy.AutoRemediationID,
-				AutoRemediationParameters: policy.AutoRemediationParameters,
-				ComplianceStatus:          models.ComplianceStatusPASS,
-				DisplayName:               policy.DisplayName,
-				Enabled:                   policy.Enabled,
-				ID:                        policy.ID,
-				LastModified:              policy.LastModified,
-				ResourceTypes:             policy.ResourceTypes,
-				Severity:                  policy.Severity,
-				Suppressions:              policy.Suppressions,
-				Tags:                      policy.Tags,
-			},
-			{
-				AutoRemediationID:         policyFromBulkJSON.AutoRemediationID,
-				AutoRemediationParameters: policyFromBulkJSON.AutoRemediationParameters,
-				ComplianceStatus:          models.ComplianceStatusPASS,
-				DisplayName:               policyFromBulkJSON.DisplayName,
-				Enabled:                   policyFromBulkJSON.Enabled,
-				ID:                        policyFromBulkJSON.ID,
-				LastModified:              policyFromBulkJSON.LastModified,
-				ResourceTypes:             policyFromBulkJSON.ResourceTypes,
-				Severity:                  policyFromBulkJSON.Severity,
-				Suppressions:              policyFromBulkJSON.Suppressions,
-				Tags:                      policyFromBulkJSON.Tags,
-			},
+		Policies: []models.Policy{ // sorted by id
+			*policyFromBulk,     // AWS.CloudTrail.Log.Validation.Enabled
+			*policy,             // Test:Policy
+			*policyFromBulkJSON, // Test:Policy:JSON
 		},
 	}
-	assert.Equal(t, expected, result.Payload)
+	assert.Equal(t, expected, result)
 }
 
 func listFiltered(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.ListPolicies(&operations.ListPoliciesParams{
-		Enabled:        aws.Bool(true),
-		HasRemediation: aws.Bool(true),
-		NameContains:   aws.String("json"), // policyFromBulkJSON only
-		ResourceTypes:  []string{"AWS.S3.Bucket"},
-		Severity:       aws.String(string(models.SeverityMEDIUM)),
-		HTTPClient:     httpClient,
-	})
-	require.NoError(t, err)
-
-	expected := &models.PolicyList{
-		Paging: &models.Paging{
-			ThisPage:   aws.Int64(1),
-			TotalItems: aws.Int64(1),
-			TotalPages: aws.Int64(1),
-		},
-		Policies: []*models.PolicySummary{
-			{
-				AutoRemediationID:         policyFromBulkJSON.AutoRemediationID,
-				AutoRemediationParameters: policyFromBulkJSON.AutoRemediationParameters,
-				ComplianceStatus:          models.ComplianceStatusPASS,
-				DisplayName:               policyFromBulkJSON.DisplayName,
-				Enabled:                   policyFromBulkJSON.Enabled,
-				ID:                        policyFromBulkJSON.ID,
-				LastModified:              policyFromBulkJSON.LastModified,
-				ResourceTypes:             policyFromBulkJSON.ResourceTypes,
-				Severity:                  policyFromBulkJSON.Severity,
-				Suppressions:              policyFromBulkJSON.Suppressions,
-				Tags:                      policyFromBulkJSON.Tags,
-			},
+	input := models.LambdaInput{
+		ListPolicies: &models.ListPoliciesInput{
+			Enabled:        aws.Bool(true),
+			HasRemediation: aws.Bool(true),
+			NameContains:   "json", // policyFromBulkJSON only
+			ResourceTypes:  []string{"AWS.S3.Bucket"},
+			Severity:       []compliancemodels.Severity{compliancemodels.SeverityMedium},
+			CreatedBy:      userID,
 		},
 	}
-	assert.Equal(t, expected, result.Payload)
+	var result models.ListPoliciesOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListPoliciesOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 1,
+			TotalPages: 1,
+		},
+		Policies: []models.Policy{*policyFromBulkJSON},
+	}
+	assert.Equal(t, expected, result)
+}
+
+func listFilteredNoUser(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		ListPolicies: &models.ListPoliciesInput{
+			Enabled:        aws.Bool(true),
+			HasRemediation: aws.Bool(true),
+			NameContains:   "json", // policyFromBulkJSON only
+			ResourceTypes:  []string{"AWS.S3.Bucket"},
+			Severity:       []compliancemodels.Severity{compliancemodels.SeverityMedium},
+			CreatedBy:      "nil",
+		},
+	}
+	var result models.ListPoliciesOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListPoliciesOutput{
+		Paging: models.Paging{
+			ThisPage:   0,
+			TotalItems: 0,
+			TotalPages: 0,
+		},
+		Policies: []models.Policy{},
+	}
+	assert.Equal(t, expected, result)
+}
+
+func listFilteredMultiple(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		ListPolicies: &models.ListPoliciesInput{
+			Enabled:        aws.Bool(true),
+			HasRemediation: aws.Bool(true),
+			NameContains:   "json", // policyFromBulkJSON only
+			ResourceTypes:  []string{"AWS.S3.Bucket"},
+			Severity:       []compliancemodels.Severity{compliancemodels.SeverityLow, compliancemodels.SeverityMedium},
+		},
+	}
+	var result models.ListPoliciesOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListPoliciesOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 1,
+			TotalPages: 1,
+		},
+		Policies: []models.Policy{*policyFromBulkJSON},
+	}
+	assert.Equal(t, expected, result)
 }
 
 func listPaging(t *testing.T) {
 	t.Parallel()
 	// Page 1
-	result, err := apiClient.Operations.ListPolicies(&operations.ListPoliciesParams{
-		PageSize:   aws.Int64(1),
-		SortBy:     aws.String("id"),
-		SortDir:    aws.String("descending"),
-		HTTPClient: httpClient,
-	})
-	require.NoError(t, err)
-
-	expected := &models.PolicyList{
-		Paging: &models.Paging{
-			ThisPage:   aws.Int64(1),
-			TotalItems: aws.Int64(3),
-			TotalPages: aws.Int64(3),
-		},
-		Policies: []*models.PolicySummary{
-			{
-				AutoRemediationID:         policyFromBulkJSON.AutoRemediationID,
-				AutoRemediationParameters: policyFromBulkJSON.AutoRemediationParameters,
-				ComplianceStatus:          models.ComplianceStatusPASS,
-				DisplayName:               policyFromBulkJSON.DisplayName,
-				Enabled:                   policyFromBulkJSON.Enabled,
-				ID:                        policyFromBulkJSON.ID,
-				LastModified:              policyFromBulkJSON.LastModified,
-				ResourceTypes:             policyFromBulkJSON.ResourceTypes,
-				Severity:                  policyFromBulkJSON.Severity,
-				Suppressions:              policyFromBulkJSON.Suppressions,
-				Tags:                      policyFromBulkJSON.Tags,
-			},
+	input := models.LambdaInput{
+		ListPolicies: &models.ListPoliciesInput{
+			PageSize: 1,
+			SortBy:   "id",
+			SortDir:  "descending",
 		},
 	}
-	assert.Equal(t, expected, result.Payload)
+	var result models.ListPoliciesOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListPoliciesOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 3,
+			TotalPages: 3,
+		},
+		Policies: []models.Policy{*policyFromBulkJSON},
+	}
+	assert.Equal(t, expected, result)
 
 	// Page 2
-	result, err = apiClient.Operations.ListPolicies(&operations.ListPoliciesParams{
-		Page:       aws.Int64(2),
-		PageSize:   aws.Int64(1),
-		SortBy:     aws.String("id"),
-		SortDir:    aws.String("descending"),
-		HTTPClient: httpClient,
-	})
+	input.ListPolicies.Page = 2
+	result = models.ListPoliciesOutput{}
+	statusCode, err = apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
 
-	expected = &models.PolicyList{
-		Paging: &models.Paging{
-			ThisPage:   aws.Int64(2),
-			TotalItems: aws.Int64(3),
-			TotalPages: aws.Int64(3),
+	expected = models.ListPoliciesOutput{
+		Paging: models.Paging{
+			ThisPage:   2,
+			TotalItems: 3,
+			TotalPages: 3,
 		},
-		Policies: []*models.PolicySummary{
-			{
-				AutoRemediationID:         policy.AutoRemediationID,
-				AutoRemediationParameters: policy.AutoRemediationParameters,
-				ComplianceStatus:          models.ComplianceStatusPASS,
-				DisplayName:               policy.DisplayName,
-				Enabled:                   policy.Enabled,
-				ID:                        policy.ID,
-				LastModified:              policy.LastModified,
-				ResourceTypes:             policy.ResourceTypes,
-				Severity:                  policy.Severity,
-				Suppressions:              policy.Suppressions,
-				Tags:                      policy.Tags,
-			},
-		},
+		Policies: []models.Policy{*policy},
 	}
-	assert.Equal(t, expected, result.Payload)
+	assert.Equal(t, expected, result)
 
 	// Page 3
-	result, err = apiClient.Operations.ListPolicies(&operations.ListPoliciesParams{
-		Page:       aws.Int64(3),
-		PageSize:   aws.Int64(1),
-		SortBy:     aws.String("id"),
-		SortDir:    aws.String("descending"),
-		HTTPClient: httpClient,
-	})
+	input.ListPolicies.Page = 3
+	result = models.ListPoliciesOutput{}
+	statusCode, err = apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
 
-	expected = &models.PolicyList{
-		Paging: &models.Paging{
-			ThisPage:   aws.Int64(3),
-			TotalItems: aws.Int64(3),
-			TotalPages: aws.Int64(3),
+	expected = models.ListPoliciesOutput{
+		Paging: models.Paging{
+			ThisPage:   3,
+			TotalItems: 3,
+			TotalPages: 3,
 		},
-		Policies: []*models.PolicySummary{
+		Policies: []models.Policy{*policyFromBulk},
+	}
+	assert.Equal(t, expected, result)
+}
+
+func listProjection(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		ListPolicies: &models.ListPoliciesInput{
+			// Select only a subset of fields
+			Fields: []string{"id", "displayName"},
+		},
+	}
+	var result models.ListPoliciesOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	// Empty lists/maps will always be initialized in the response
+	emptyPolicy := models.Policy{
+		AnalysisType:              models.TypePolicy,
+		AutoRemediationParameters: map[string]string{},
+		OutputIDs:                 []string{},
+		Reports:                   map[string][]string{},
+		ResourceTypes:             []string{},
+		Suppressions:              []string{},
+		Tags:                      []string{},
+		Tests:                     []models.UnitTest{},
+	}
+
+	firstItem := emptyPolicy
+	firstItem.ID = policyFromBulk.ID
+	firstItem.DisplayName = policyFromBulk.DisplayName
+
+	secondItem := emptyPolicy
+	secondItem.ID = policy.ID
+	secondItem.DisplayName = policy.DisplayName
+
+	thirdItem := emptyPolicy
+	thirdItem.ID = policyFromBulkJSON.ID
+	thirdItem.DisplayName = policyFromBulkJSON.DisplayName
+
+	expected := models.ListPoliciesOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 3,
+			TotalPages: 1,
+		},
+		Policies: []models.Policy{firstItem, secondItem, thirdItem},
+	}
+	assert.Equal(t, expected, result)
+}
+
+func listRules(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		ListRules: &models.ListRulesInput{},
+	}
+	var result models.ListRulesOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListRulesOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 1,
+			TotalPages: 1,
+		},
+		Rules: []models.Rule{*rule},
+	}
+	assert.Equal(t, expected, result)
+}
+
+func listGlobals(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		ListGlobals: &models.ListGlobalsInput{},
+	}
+	var result models.ListGlobalsOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListGlobalsOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 1,
+			TotalPages: 1,
+		},
+		Globals: []models.Global{*global},
+	}
+	assert.Equal(t, expected, result)
+}
+
+func listDataModels(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		ListDataModels: &models.ListDataModelsInput{},
+	}
+	var result models.ListDataModelsOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListDataModelsOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 4,
+			TotalPages: 1,
+		},
+		Models: []models.DataModel{
+			*dataModel, *dataModelTwo, *dataModelFromBulkYML, *dataModelDisabled,
+		},
+	}
+	assert.Equal(t, expected, result)
+}
+
+func listEnabledDataModels(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		ListDataModels: &models.ListDataModelsInput{
+			Enabled: aws.Bool(true),
+		},
+	}
+	var result models.ListDataModelsOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListDataModelsOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 3,
+			TotalPages: 1,
+		},
+		Models: []models.DataModel{
+			*dataModel, *dataModelTwo, *dataModelFromBulkYML,
+		},
+	}
+	assert.Equal(t, expected, result)
+}
+
+func listSortedDataModels(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		ListDataModels: &models.ListDataModelsInput{
+			SortBy: "enabled",
+		},
+	}
+	var result models.ListDataModelsOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListDataModelsOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 4,
+			TotalPages: 1,
+		},
+		Models: []models.DataModel{
+			*dataModel, *dataModelTwo, *dataModelFromBulkYML, *dataModelDisabled,
+		},
+	}
+	assert.Equal(t, expected, result)
+
+	input = models.LambdaInput{
+		ListDataModels: &models.ListDataModelsInput{
+			SortBy: "lastModified",
+		},
+	}
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected = models.ListDataModelsOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 4,
+			TotalPages: 1,
+		},
+		Models: []models.DataModel{
+			*dataModel, *dataModelTwo, *dataModelDisabled, *dataModelFromBulkYML,
+		},
+	}
+	assert.Equal(t, expected, result)
+}
+
+func listDetections(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		ListDetections: &models.ListDetectionsInput{
+			SortBy: "id",
+		},
+	}
+	var result models.ListDetectionsOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListDetectionsOutput{
+		Paging: models.Paging{
+			ThisPage: 1,
+			// 3 policies, 1 rule
+			TotalItems: 4,
+			TotalPages: 1,
+		},
+		// Expected:
+		// AWS.CloudTrail.Log.Validation.Enabled
+		// NonEmptyEvent
+		// Test:Policy
+		// Test:Policy:JSON
+
+		// Actual
+		// Test:Policy - AlwaysTrue
+		// Test:Policy:JSON
+		// AWS.CloudTrail.Log.Validation.Enabled
+		// NonEmptyEvent
+		Detections: []models.Detection{
 			{
 				AutoRemediationID:         policyFromBulk.AutoRemediationID,
 				AutoRemediationParameters: policyFromBulk.AutoRemediationParameters,
-				ComplianceStatus:          models.ComplianceStatusPASS,
+				ComplianceStatus:          policyFromBulk.ComplianceStatus,
+				Suppressions:              policyFromBulk.Suppressions,
+				AnalysisType:              models.TypePolicy,
+				ResourceTypes:             policyFromBulk.ResourceTypes,
+				LogTypes:                  []string{},
+				Body:                      policyFromBulk.Body,
+				CreatedAt:                 policyFromBulk.CreatedAt,
+				CreatedBy:                 policyFromBulk.CreatedBy,
+				Description:               policyFromBulk.Description,
 				DisplayName:               policyFromBulk.DisplayName,
 				Enabled:                   policyFromBulk.Enabled,
 				ID:                        policyFromBulk.ID,
 				LastModified:              policyFromBulk.LastModified,
-				ResourceTypes:             policyFromBulk.ResourceTypes,
+				LastModifiedBy:            policyFromBulk.LastModifiedBy,
+				OutputIDs:                 policyFromBulk.OutputIDs,
+				Reference:                 policyFromBulk.Reference,
+				Reports:                   policyFromBulk.Reports,
+				Runbook:                   policyFromBulk.Runbook,
 				Severity:                  policyFromBulk.Severity,
-				Suppressions:              policyFromBulk.Suppressions,
 				Tags:                      policyFromBulk.Tags,
+				Tests:                     policyFromBulk.Tests,
+				VersionID:                 policyFromBulk.VersionID,
+			},
+			{
+				AutoRemediationParameters: make(map[string]string),
+				Suppressions:              []string{},
+				DedupPeriodMinutes:        rule.DedupPeriodMinutes,
+				Threshold:                 rule.Threshold,
+				AnalysisType:              models.TypeRule,
+				ResourceTypes:             []string{},
+				LogTypes:                  rule.LogTypes,
+				Body:                      rule.Body,
+				CreatedAt:                 rule.CreatedAt,
+				CreatedBy:                 rule.CreatedBy,
+				Description:               rule.Description,
+				DisplayName:               rule.DisplayName,
+				Enabled:                   rule.Enabled,
+				ID:                        rule.ID,
+				LastModified:              rule.LastModified,
+				LastModifiedBy:            rule.LastModifiedBy,
+				OutputIDs:                 rule.OutputIDs,
+				Reference:                 rule.Reference,
+				Reports:                   rule.Reports,
+				Runbook:                   rule.Runbook,
+				Severity:                  rule.Severity,
+				Tags:                      rule.Tags,
+				Tests:                     rule.Tests,
+				VersionID:                 rule.VersionID,
+			},
+			{
+				AutoRemediationID:         policy.AutoRemediationID,
+				AutoRemediationParameters: policy.AutoRemediationParameters,
+				ComplianceStatus:          policy.ComplianceStatus,
+				Suppressions:              policy.Suppressions,
+				AnalysisType:              models.TypePolicy,
+				ResourceTypes:             policy.ResourceTypes,
+				LogTypes:                  []string{},
+				Body:                      policy.Body,
+				CreatedAt:                 policy.CreatedAt,
+				CreatedBy:                 policy.CreatedBy,
+				Description:               policy.Description,
+				DisplayName:               policy.DisplayName,
+				Enabled:                   policy.Enabled,
+				ID:                        policy.ID,
+				LastModified:              policy.LastModified,
+				LastModifiedBy:            policy.LastModifiedBy,
+				OutputIDs:                 policy.OutputIDs,
+				Reference:                 policy.Reference,
+				Reports:                   policy.Reports,
+				Runbook:                   policy.Runbook,
+				Severity:                  policy.Severity,
+				Tags:                      policy.Tags,
+				Tests:                     policy.Tests,
+				VersionID:                 policy.VersionID,
+			},
+			{
+				AutoRemediationID:         policyFromBulkJSON.AutoRemediationID,
+				AutoRemediationParameters: policyFromBulkJSON.AutoRemediationParameters,
+				ComplianceStatus:          policyFromBulkJSON.ComplianceStatus,
+				Suppressions:              policyFromBulkJSON.Suppressions,
+				AnalysisType:              models.TypePolicy,
+				ResourceTypes:             policyFromBulkJSON.ResourceTypes,
+				LogTypes:                  []string{},
+				Body:                      policyFromBulkJSON.Body,
+				CreatedAt:                 policyFromBulkJSON.CreatedAt,
+				CreatedBy:                 policyFromBulkJSON.CreatedBy,
+				Description:               policyFromBulkJSON.Description,
+				DisplayName:               policyFromBulkJSON.DisplayName,
+				Enabled:                   policyFromBulkJSON.Enabled,
+				ID:                        policyFromBulkJSON.ID,
+				LastModified:              policyFromBulkJSON.LastModified,
+				LastModifiedBy:            policyFromBulkJSON.LastModifiedBy,
+				OutputIDs:                 policyFromBulkJSON.OutputIDs,
+				Reference:                 policyFromBulkJSON.Reference,
+				Reports:                   policyFromBulkJSON.Reports,
+				Runbook:                   policyFromBulkJSON.Runbook,
+				Severity:                  policyFromBulkJSON.Severity,
+				Tags:                      policyFromBulkJSON.Tags,
+				Tests:                     policyFromBulkJSON.Tests,
+				VersionID:                 policyFromBulkJSON.VersionID,
 			},
 		},
 	}
-	assert.Equal(t, expected, result.Payload)
+	assert.Equal(t, expected, result)
 }
 
-// List rules (not policies)
-func listRules(t *testing.T) {
+func listDetectionsFiltered(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.ListRules(&operations.ListRulesParams{
-		HTTPClient: httpClient,
-	})
-	require.NoError(t, err)
-
-	expected := &models.RuleList{
-		Paging: &models.Paging{
-			ThisPage:   aws.Int64(1),
-			TotalItems: aws.Int64(1),
-			TotalPages: aws.Int64(1),
+	input := models.LambdaInput{
+		ListDetections: &models.ListDetectionsInput{
+			Enabled:        aws.Bool(true),
+			HasRemediation: aws.Bool(true),
+			NameContains:   "json", // policyFromBulkJSON only
+			ResourceTypes:  []string{"AWS.S3.Bucket"},
+			Severity:       []compliancemodels.Severity{compliancemodels.SeverityMedium},
+			CreatedBy:      userID,
+			SortBy:         "id",
 		},
-		Rules: []*models.RuleSummary{
+	}
+	var result models.ListDetectionsOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListDetectionsOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 1,
+			TotalPages: 1,
+		},
+		Detections: []models.Detection{
 			{
-				DisplayName:  rule.DisplayName,
-				Enabled:      rule.Enabled,
-				ID:           rule.ID,
-				LastModified: rule.LastModified,
-				LogTypes:     rule.LogTypes,
-				Severity:     rule.Severity,
-				Tags:         rule.Tags,
+				AutoRemediationID:         policyFromBulkJSON.AutoRemediationID,
+				AutoRemediationParameters: policyFromBulkJSON.AutoRemediationParameters,
+				ComplianceStatus:          policyFromBulkJSON.ComplianceStatus,
+				Suppressions:              policyFromBulkJSON.Suppressions,
+				AnalysisType:              models.TypePolicy,
+				ResourceTypes:             policyFromBulkJSON.ResourceTypes,
+				LogTypes:                  []string{},
+				Body:                      policyFromBulkJSON.Body,
+				CreatedAt:                 policyFromBulkJSON.CreatedAt,
+				CreatedBy:                 policyFromBulkJSON.CreatedBy,
+				Description:               policyFromBulkJSON.Description,
+				DisplayName:               policyFromBulkJSON.DisplayName,
+				Enabled:                   policyFromBulkJSON.Enabled,
+				ID:                        policyFromBulkJSON.ID,
+				LastModified:              policyFromBulkJSON.LastModified,
+				LastModifiedBy:            policyFromBulkJSON.LastModifiedBy,
+				OutputIDs:                 policyFromBulkJSON.OutputIDs,
+				Reference:                 policyFromBulkJSON.Reference,
+				Reports:                   policyFromBulkJSON.Reports,
+				Runbook:                   policyFromBulkJSON.Runbook,
+				Severity:                  policyFromBulkJSON.Severity,
+				Tags:                      policyFromBulkJSON.Tags,
+				Tests:                     policyFromBulkJSON.Tests,
+				VersionID:                 policyFromBulkJSON.VersionID,
 			},
 		},
 	}
-	assert.Equal(t, expected, result.Payload)
+	assert.Equal(t, expected, result)
 }
 
-func getEnabledEmpty(t *testing.T) {
+func listDetectionsComplianceProjection(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.GetEnabledPolicies(&operations.GetEnabledPoliciesParams{
-		HTTPClient: httpClient,
-		Type:       string(models.AnalysisTypePOLICY),
-	})
+	input := models.LambdaInput{
+		ListDetections: &models.ListDetectionsInput{
+			// Select only a subset of fields
+			Fields: []string{"id", "displayName", "complianceStatus"},
+			SortBy: "id",
+		},
+	}
+	var result models.ListDetectionsOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
-	assert.Equal(t, &models.EnabledPolicies{Policies: []*models.EnabledPolicy{}}, result.Payload)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	// Empty lists/maps will always be initialized in the response
+	emptyPolicy := models.Detection{
+		AutoRemediationParameters: map[string]string{},
+		OutputIDs:                 []string{},
+		Reports:                   map[string][]string{},
+		ResourceTypes:             []string{},
+		LogTypes:                  []string{},
+		Suppressions:              []string{},
+		Tags:                      []string{},
+		Tests:                     []models.UnitTest{},
+	}
+
+	firstItem := emptyPolicy
+	firstItem.AnalysisType = models.TypePolicy
+	firstItem.ID = policyFromBulk.ID
+	firstItem.DisplayName = policyFromBulk.DisplayName
+	firstItem.ComplianceStatus = policyFromBulk.ComplianceStatus
+
+	secondItem := emptyPolicy
+	secondItem.AnalysisType = models.TypePolicy
+	secondItem.ID = policy.ID
+	secondItem.DisplayName = policy.DisplayName
+	secondItem.ComplianceStatus = policy.ComplianceStatus
+
+	thirdItem := emptyPolicy
+	thirdItem.AnalysisType = models.TypePolicy
+	thirdItem.ID = policyFromBulkJSON.ID
+	thirdItem.DisplayName = policyFromBulkJSON.DisplayName
+	thirdItem.ComplianceStatus = policyFromBulkJSON.ComplianceStatus
+
+	fourthItem := emptyPolicy
+	fourthItem.AnalysisType = models.TypeRule
+	fourthItem.ID = rule.ID
+	fourthItem.DisplayName = rule.DisplayName
+
+	expected := models.ListDetectionsOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 4,
+			TotalPages: 1,
+		},
+		Detections: []models.Detection{firstItem, fourthItem, secondItem, thirdItem},
+	}
+	assert.Equal(t, expected, result)
 }
 
-func getEnabledPolicies(t *testing.T) {
+func listDetectionsAnalysisTypeFilter(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.GetEnabledPolicies(&operations.GetEnabledPoliciesParams{
-		HTTPClient: httpClient,
-		Type:       string(models.AnalysisTypePOLICY),
-	})
+	input := models.LambdaInput{
+		ListDetections: &models.ListDetectionsInput{
+			AnalysisTypes: []models.DetectionType{models.TypeRule},
+			SortBy:        "id",
+		},
+	}
+	var result models.ListDetectionsOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
 
-	expected := &models.EnabledPolicies{
-		Policies: []*models.EnabledPolicy{
+	expected := models.ListDetectionsOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 1,
+			TotalPages: 1,
+		},
+		Detections: []models.Detection{
 			{
-				Body:          policy.Body,
-				ID:            policy.ID,
-				ResourceTypes: policy.ResourceTypes,
-				Severity:      policy.Severity, // Tags not included because they are empty
-				VersionID:     policy.VersionID,
-			},
-			{
-				Body:          policyFromBulkJSON.Body,
-				ID:            policyFromBulkJSON.ID,
-				ResourceTypes: policyFromBulkJSON.ResourceTypes,
-				Severity:      policyFromBulkJSON.Severity,
-				VersionID:     policyFromBulkJSON.VersionID,
-			},
-			{
-				Body:          policyFromBulk.Body,
-				ID:            policyFromBulk.ID,
-				ResourceTypes: policyFromBulk.ResourceTypes,
-				Severity:      policyFromBulk.Severity,
-				VersionID:     policyFromBulk.VersionID,
+				AutoRemediationParameters: make(map[string]string),
+				Suppressions:              []string{},
+				DedupPeriodMinutes:        rule.DedupPeriodMinutes,
+				Threshold:                 rule.Threshold,
+				AnalysisType:              models.TypeRule,
+				ResourceTypes:             []string{},
+				LogTypes:                  rule.LogTypes,
+				Body:                      rule.Body,
+				CreatedAt:                 rule.CreatedAt,
+				CreatedBy:                 rule.CreatedBy,
+				Description:               rule.Description,
+				DisplayName:               rule.DisplayName,
+				Enabled:                   rule.Enabled,
+				ID:                        rule.ID,
+				LastModified:              rule.LastModified,
+				LastModifiedBy:            rule.LastModifiedBy,
+				OutputIDs:                 rule.OutputIDs,
+				Reference:                 rule.Reference,
+				Reports:                   rule.Reports,
+				Runbook:                   rule.Runbook,
+				Severity:                  rule.Severity,
+				Tags:                      rule.Tags,
+				Tests:                     rule.Tests,
+				VersionID:                 rule.VersionID,
 			},
 		},
 	}
+	assert.Equal(t, expected, result)
 
-	assert.Equal(t, expected, result.Payload)
-}
-
-// Get enabled rules (instead of policies)
-func getEnabledRules(t *testing.T) {
-	t.Parallel()
-	result, err := apiClient.Operations.GetEnabledPolicies(&operations.GetEnabledPoliciesParams{
-		Type:       string(models.AnalysisTypeRULE),
-		HTTPClient: httpClient,
-	})
+	input = models.LambdaInput{
+		ListDetections: &models.ListDetectionsInput{
+			AnalysisTypes: []models.DetectionType{models.TypePolicy},
+			SortBy:        "id",
+		},
+	}
+	statusCode, err = apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
 
-	expected := &models.EnabledPolicies{
-		Policies: []*models.EnabledPolicy{
+	expected = models.ListDetectionsOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 3,
+			TotalPages: 1,
+		},
+		Detections: []models.Detection{
 			{
-				Body:               rule.Body,
-				ID:                 rule.ID,
-				ResourceTypes:      rule.LogTypes,
-				Severity:           rule.Severity,
-				VersionID:          rule.VersionID,
-				DedupPeriodMinutes: rule.DedupPeriodMinutes,
+				AutoRemediationID:         policyFromBulk.AutoRemediationID,
+				AutoRemediationParameters: policyFromBulk.AutoRemediationParameters,
+				ComplianceStatus:          policyFromBulk.ComplianceStatus,
+				Suppressions:              policyFromBulk.Suppressions,
+				AnalysisType:              models.TypePolicy,
+				ResourceTypes:             policyFromBulk.ResourceTypes,
+				LogTypes:                  []string{},
+				Body:                      policyFromBulk.Body,
+				CreatedAt:                 policyFromBulk.CreatedAt,
+				CreatedBy:                 policyFromBulk.CreatedBy,
+				Description:               policyFromBulk.Description,
+				DisplayName:               policyFromBulk.DisplayName,
+				Enabled:                   policyFromBulk.Enabled,
+				ID:                        policyFromBulk.ID,
+				LastModified:              policyFromBulk.LastModified,
+				LastModifiedBy:            policyFromBulk.LastModifiedBy,
+				OutputIDs:                 policyFromBulk.OutputIDs,
+				Reference:                 policyFromBulk.Reference,
+				Reports:                   policyFromBulk.Reports,
+				Runbook:                   policyFromBulk.Runbook,
+				Severity:                  policyFromBulk.Severity,
+				Tags:                      policyFromBulk.Tags,
+				Tests:                     policyFromBulk.Tests,
+				VersionID:                 policyFromBulk.VersionID,
+			},
+			{
+				AutoRemediationID:         policy.AutoRemediationID,
+				AutoRemediationParameters: policy.AutoRemediationParameters,
+				ComplianceStatus:          policy.ComplianceStatus,
+				Suppressions:              policy.Suppressions,
+				AnalysisType:              models.TypePolicy,
+				ResourceTypes:             policy.ResourceTypes,
+				LogTypes:                  []string{},
+				Body:                      policy.Body,
+				CreatedAt:                 policy.CreatedAt,
+				CreatedBy:                 policy.CreatedBy,
+				Description:               policy.Description,
+				DisplayName:               policy.DisplayName,
+				Enabled:                   policy.Enabled,
+				ID:                        policy.ID,
+				LastModified:              policy.LastModified,
+				LastModifiedBy:            policy.LastModifiedBy,
+				OutputIDs:                 policy.OutputIDs,
+				Reference:                 policy.Reference,
+				Reports:                   policy.Reports,
+				Runbook:                   policy.Runbook,
+				Severity:                  policy.Severity,
+				Tags:                      policy.Tags,
+				Tests:                     policy.Tests,
+				VersionID:                 policy.VersionID,
+			},
+			{
+				AutoRemediationID:         policyFromBulkJSON.AutoRemediationID,
+				AutoRemediationParameters: policyFromBulkJSON.AutoRemediationParameters,
+				ComplianceStatus:          policyFromBulkJSON.ComplianceStatus,
+				Suppressions:              policyFromBulkJSON.Suppressions,
+				AnalysisType:              models.TypePolicy,
+				ResourceTypes:             policyFromBulkJSON.ResourceTypes,
+				LogTypes:                  []string{},
+				Body:                      policyFromBulkJSON.Body,
+				CreatedAt:                 policyFromBulkJSON.CreatedAt,
+				CreatedBy:                 policyFromBulkJSON.CreatedBy,
+				Description:               policyFromBulkJSON.Description,
+				DisplayName:               policyFromBulkJSON.DisplayName,
+				Enabled:                   policyFromBulkJSON.Enabled,
+				ID:                        policyFromBulkJSON.ID,
+				LastModified:              policyFromBulkJSON.LastModified,
+				LastModifiedBy:            policyFromBulkJSON.LastModifiedBy,
+				OutputIDs:                 policyFromBulkJSON.OutputIDs,
+				Reference:                 policyFromBulkJSON.Reference,
+				Reports:                   policyFromBulkJSON.Reports,
+				Runbook:                   policyFromBulkJSON.Runbook,
+				Severity:                  policyFromBulkJSON.Severity,
+				Tags:                      policyFromBulkJSON.Tags,
+				Tests:                     policyFromBulkJSON.Tests,
+				VersionID:                 policyFromBulkJSON.VersionID,
 			},
 		},
 	}
-	assert.Equal(t, expected, result.Payload)
+	assert.Equal(t, expected, result)
 }
 
-func deleteInvalid(t *testing.T) {
+func listDetectionsComplianceFilter(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.DeletePolicies(&operations.DeletePoliciesParams{
-		Body:       &models.DeletePolicies{},
-		HTTPClient: httpClient,
-	})
-	assert.Nil(t, result)
-	require.Error(t, err)
-	require.IsType(t, &operations.DeletePoliciesBadRequest{}, err)
+	input := models.LambdaInput{
+		ListDetections: &models.ListDetectionsInput{
+			// Select only a subset of fields
+			Fields:           []string{"id", "displayName", "complianceStatus"},
+			ComplianceStatus: compliancemodels.StatusPass,
+			SortBy:           "id",
+		},
+	}
+	var result models.ListDetectionsOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	// Empty lists/maps will always be initialized in the response
+	emptyDetection := models.Detection{
+		AutoRemediationParameters: map[string]string{},
+		OutputIDs:                 []string{},
+		Reports:                   map[string][]string{},
+		ResourceTypes:             []string{},
+		LogTypes:                  []string{},
+		Suppressions:              []string{},
+		Tags:                      []string{},
+		Tests:                     []models.UnitTest{},
+	}
+
+	firstItem := emptyDetection
+	firstItem.AnalysisType = models.TypePolicy
+	firstItem.ID = policyFromBulk.ID
+	firstItem.DisplayName = policyFromBulk.DisplayName
+	firstItem.ComplianceStatus = policyFromBulk.ComplianceStatus
+
+	secondItem := emptyDetection
+	secondItem.AnalysisType = models.TypePolicy
+	secondItem.ID = policy.ID
+	secondItem.DisplayName = policy.DisplayName
+	secondItem.ComplianceStatus = policy.ComplianceStatus
+
+	thirdItem := emptyDetection
+	thirdItem.AnalysisType = models.TypePolicy
+	thirdItem.ID = policyFromBulkJSON.ID
+	thirdItem.DisplayName = policyFromBulkJSON.DisplayName
+	thirdItem.ComplianceStatus = policyFromBulkJSON.ComplianceStatus
+
+	expected := models.ListDetectionsOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 3,
+			TotalPages: 1,
+		},
+		Detections: []models.Detection{firstItem, secondItem, thirdItem},
+	}
+	assert.Equal(t, expected, result)
 }
 
 // Delete a set of policies that don't exist - returns OK
 func deleteNotExists(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.DeletePolicies(&operations.DeletePoliciesParams{
-		Body: &models.DeletePolicies{
-			Policies: []*models.DeleteEntry{
-				{
-					ID: "does-not-exist",
-				},
-				{
-					ID: "also-does-not-exist",
-				},
-			},
-		},
-		HTTPClient: httpClient,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, &operations.DeletePoliciesOK{}, result)
+	batchDeletePolicies(t, "does-not-exist", "also-does-not-exist")
 }
 
-func deleteSuccess(t *testing.T) {
+func deletePolicies(t *testing.T) {
 	t.Parallel()
-	result, err := apiClient.Operations.DeletePolicies(&operations.DeletePoliciesParams{
-		Body: &models.DeletePolicies{
-			Policies: []*models.DeleteEntry{
-				{
-					ID: policy.ID,
-				},
-				{
-					ID: policyFromBulk.ID,
-				},
-				{
-					ID: policyFromBulkJSON.ID,
-				},
-				{
-					ID: rule.ID,
-				},
-			},
-		},
-		HTTPClient: httpClient,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, &operations.DeletePoliciesOK{}, result)
+	batchDeletePolicies(t, policy.ID, policyFromBulk.ID, policyFromBulkJSON.ID)
 
 	// Trying to retrieve the deleted policy should now return 404
-	_, err = apiClient.Operations.GetPolicy(&operations.GetPolicyParams{
-		PolicyID:   string(policy.ID),
-		HTTPClient: httpClient,
-	})
-	require.Error(t, err)
-	require.IsType(t, &operations.GetPolicyNotFound{}, err)
+	input := models.LambdaInput{
+		GetPolicy: &models.GetPolicyInput{ID: policy.ID},
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
+	assert.Error(t, err)
+	assert.Equal(t, http.StatusNotFound, statusCode)
 
 	// But retrieving an older version will still work
-	getResult, err := apiClient.Operations.GetPolicy(&operations.GetPolicyParams{
-		PolicyID:   string(policy.ID),
-		VersionID:  aws.String(string(policy.VersionID)),
-		HTTPClient: httpClient,
-	})
+	input.GetPolicy = &models.GetPolicyInput{
+		ID:        versionedPolicy.ID,
+		VersionID: versionedPolicy.VersionID,
+	}
+	var result models.Policy
+	statusCode, err = apiClient.Invoke(&input, &result)
 	require.NoError(t, err)
-	assert.Equal(t, policy, getResult.Payload)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, *versionedPolicy, result)
 
-	// List operations should be empty
-	emptyPaging := &models.Paging{
-		ThisPage:   aws.Int64(0),
-		TotalItems: aws.Int64(0),
-		TotalPages: aws.Int64(0),
+	// List operation should be empty
+	input = models.LambdaInput{
+		ListPolicies: &models.ListPoliciesInput{},
+	}
+	var policies models.ListPoliciesOutput
+
+	expected := models.ListPoliciesOutput{Policies: []models.Policy{}}
+	statusCode, err = apiClient.Invoke(&input, &policies)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, policies)
+}
+
+func deleteRules(t *testing.T) {
+	t.Parallel()
+	batchDeleteRules(t, rule.ID)
+
+	// Trying to retrieve the deleted rule should now return 404
+	input := models.LambdaInput{
+		GetRule: &models.GetRuleInput{ID: rule.ID},
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
+	assert.Error(t, err)
+	assert.Equal(t, http.StatusNotFound, statusCode)
+
+	// List operation should be empty
+	input = models.LambdaInput{
+		ListRules: &models.ListRulesInput{},
+	}
+	var result models.ListRulesOutput
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, models.ListRulesOutput{Rules: []models.Rule{}}, result)
+}
+
+func deleteDataModels(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		DeleteDataModels: &models.DeleteDataModelsInput{
+			Entries: make([]models.DeleteEntry, 0, len(dataModels)+1),
+		},
+	}
+	for _, model := range dataModels {
+		input.DeleteDataModels.Entries = append(
+			input.DeleteDataModels.Entries, models.DeleteEntry{ID: model.ID})
+	}
+	input.DeleteDataModels.Entries = append(
+		input.DeleteDataModels.Entries, models.DeleteEntry{ID: dataModelFromBulkYML.ID})
+
+	statusCode, err := apiClient.Invoke(&input, nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	// List operation should be empty
+	input = models.LambdaInput{
+		ListDataModels: &models.ListDataModelsInput{},
+	}
+	var result models.ListDataModelsOutput
+
+	expected := models.ListDataModelsOutput{Models: []models.DataModel{}}
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, result)
+}
+
+func deleteGlobals(t *testing.T) {
+	t.Parallel()
+	input := models.LambdaInput{
+		DeleteGlobals: &models.DeleteGlobalsInput{
+			Entries: []models.DeleteEntry{{ID: global.ID}},
+		},
+	}
+	statusCode, err := apiClient.Invoke(&input, nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	// Trying to retrieve the deleted policy should now return 404
+	input = models.LambdaInput{
+		GetGlobal: &models.GetGlobalInput{ID: global.ID},
+	}
+	statusCode, err = apiClient.Invoke(&input, nil)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusNotFound, statusCode)
+
+	// List operation is empty
+	input = models.LambdaInput{
+		ListGlobals: &models.ListGlobalsInput{},
+	}
+	var result models.ListGlobalsOutput
+
+	expected := models.ListGlobalsOutput{Globals: []models.Global{}}
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, expected, result)
+}
+
+func batchDeletePolicies(t *testing.T, policyID ...string) {
+	input := models.LambdaInput{
+		DeletePolicies: &models.DeletePoliciesInput{
+			Entries: make([]models.DeleteEntry, len(policyID)),
+		},
 	}
 
-	policyList, err := apiClient.Operations.ListPolicies(&operations.ListPoliciesParams{
-		HTTPClient: httpClient,
-	})
-	require.NoError(t, err)
-	expectedPolicyList := &models.PolicyList{Paging: emptyPaging, Policies: []*models.PolicySummary{}}
-	assert.Equal(t, expectedPolicyList, policyList.Payload)
+	for i, pid := range policyID {
+		input.DeletePolicies.Entries[i].ID = pid
+	}
 
-	ruleList, err := apiClient.Operations.ListRules(&operations.ListRulesParams{
-		HTTPClient: httpClient,
-	})
+	statusCode, err := apiClient.Invoke(&input, nil)
 	require.NoError(t, err)
-	expectedRuleList := &models.RuleList{Paging: emptyPaging, Rules: []*models.RuleSummary{}}
-	assert.Equal(t, expectedRuleList, ruleList.Payload)
+	assert.Equal(t, http.StatusOK, statusCode)
 }
 
-func deleteGlobal(t *testing.T) {
-	t.Parallel()
-	result, err := apiClient.Operations.DeleteGlobals(&operations.DeleteGlobalsParams{
-		Body: &models.DeletePolicies{
-			Policies: []*models.DeleteEntry{
-				{
-					ID: global.ID,
-				},
-			},
+func batchDeleteRules(t *testing.T, ruleID ...string) {
+	input := models.LambdaInput{
+		DeleteRules: &models.DeleteRulesInput{
+			Entries: make([]models.DeleteEntry, len(ruleID)),
 		},
-		HTTPClient: httpClient,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, &operations.DeleteGlobalsOK{}, result)
+	}
 
-	// Trying to retrieve the deleted policy should now return 404
-	_, err = apiClient.Operations.GetGlobal(&operations.GetGlobalParams{
-		GlobalID:   string(global.ID),
-		HTTPClient: httpClient,
-	})
+	for i, pid := range ruleID {
+		input.DeleteRules.Entries[i].ID = pid
+	}
+
+	statusCode, err := apiClient.Invoke(&input, nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+}
+
+// Validate a bulk upload failure where policies in bulk data contain invalid Resource Types
+func bulkUploadInvalidPolicyResourceTypesFail(t *testing.T) {
+	t.Parallel()
+	// zipFsSourcePath is the path where the zip contents are located. All files will be zipped
+	zipFsSourcePath := path.Join(bulkTestDataDirPath, bulkInvalidPolicyResourceTypeDir)
+
+	// Zip all the files in source path to destination path
+	result, _, err := BulkZipUploadHelper(t, zipFsSourcePath)
 	require.Error(t, err)
-	require.IsType(t, &operations.GetGlobalNotFound{}, err)
 
-	// But retrieving an older version will still work
-	getResult, err := apiClient.Operations.GetGlobal(&operations.GetGlobalParams{
-		GlobalID:   string(global.ID),
-		VersionID:  aws.String(string(global.VersionID)),
-		HTTPClient: httpClient,
-	})
+	// This is an empty BulkUpload Output
+	expected := models.BulkUploadOutput{}
+	require.Equal(t, expected, *result)
+}
+
+// validate fail of bulk upload where upload zip contains a rule with an invalid log type
+func bulkUploadInvalidRuleLogtypeFail(t *testing.T) {
+	t.Parallel()
+	// zipFsSourcePath is the path where the zip contents are located. All files will be zipped
+	zipFsSourcePath := filepath.Join(bulkTestDataDirPath, bulkInvalidRuleLogTypeDir)
+
+	// Zip all the files in source path to destination path
+	result, _, err := BulkZipUploadHelper(t, zipFsSourcePath)
+	require.Error(t, err)
+
+	// This is an empty BulkUpload Output
+	expected := models.BulkUploadOutput{}
+	require.Equal(t, expected, *result)
+}
+
+// validate fail of bulk upload where upload zip contains a rule with an invalid log type
+func bulkUploadInvalidDatamodelLogtypeFail(t *testing.T) {
+	t.Parallel()
+	// zipFsSourcePath is the path where the zip contents are located. All files will be zipped
+	ruleInvalidLTZipPath := filepath.Join(bulkTestDataDirPath, bulkInvalidDatamodelTypeDir)
+
+	// Zip all the files in source path to destination path
+	result, _, err := BulkZipUploadHelper(t, ruleInvalidLTZipPath)
+	require.Error(t, err) // Invalid rule logtypes test. Expect an error
+
+	// Empty BulkUpload Output. All fields initialized to zero value
+	expected := models.BulkUploadOutput{}
+	require.Equal(t, expected, *result)
+}
+
+// Utility Methods:
+
+// Bulk Data upload helper Zips files in the fsSourcePath to ./<basename(fsSourcePath)>.zip
+// then attempts to upload them to the analysis service
+// BulkZipUploadHelper returns an error because some tests are intended to fail. Acceptable Errors
+// are never expected when managing the files so the test will fail if the error originates from
+// anything besides invoking the service client upload invokation.
+func BulkZipUploadHelper(t *testing.T, fsSourcePath string) (*models.BulkUploadOutput, int, error) {
+	srcPathBaseName := filepath.Base(fsSourcePath)            // Get the base name
+	fsDstName := srcPathBaseName + ".zip"                     // Add the zip extension
+	err := shutil.ZipDirectory(fsSourcePath, fsDstName, true) // Zip the contents source -> dst
 	require.NoError(t, err)
-	assert.Equal(t, global, getResult.Payload)
+	zipFile, err := os.Open(fsDstName)
+	require.NoError(t, err)
+	content, err := ioutil.ReadAll(bufio.NewReader(zipFile))
+	require.NoError(t, err)
+	encoded := base64.StdEncoding.EncodeToString(content)
+	// Invoke bulk upload content
+	uploadContent := &models.BulkUploadInput{Data: encoded, UserID: userID}
+	input := models.LambdaInput{BulkUpload: uploadContent}
+	var output models.BulkUploadOutput
+	statusCode, err := apiClient.Invoke(&input, &output)
+	return &output, statusCode, err
+}
+
+func pollPacks(t *testing.T) {
+	// test success
+	// no packs exist yet
+	input := models.LambdaInput{
+		ListPacks: &models.ListPacksInput{},
+	}
+	var result models.ListPacksOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListPacksOutput{
+		Paging: models.Paging{
+			ThisPage:   0,
+			TotalItems: 0,
+			TotalPages: 0,
+		},
+		Packs: []models.Pack{},
+	}
+	assert.Equal(t, expected, result)
+	assert.NoError(t, err)
+	// poll for packs from well known release version
+	input = models.LambdaInput{
+		PollPacks: &models.PollPacksInput{
+			VersionID: packVersionID,
+		},
+	}
+	statusCode, err = apiClient.Invoke(&input, nil)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	// packs should now exist and are disabled
+	input = models.LambdaInput{
+		ListPacks: &models.ListPacksInput{},
+	}
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	packOriginalReleaseStandardSet.CreatedAt = result.Packs[0].CreatedAt
+	packOriginalReleaseStandardSet.LastModified = result.Packs[0].LastModified
+	expected = models.ListPacksOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 1,
+			TotalPages: 1,
+		},
+		Packs: []models.Pack{
+			*packOriginalReleaseStandardSet,
+		},
+	}
+	assert.Equal(t, expected, result)
+	assert.NoError(t, err)
+
+	// test detection removed from a pack ??
+
+	// test detection added to a pack ??
+}
+
+func getPack(t *testing.T) {
+	// success
+	input := models.LambdaInput{
+		GetPack: &models.GetPackInput{ID: packOriginalReleaseStandardSet.ID},
+	}
+	var result models.Pack
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, *packOriginalReleaseStandardSet, result)
+
+	// does not exist
+	input = models.LambdaInput{
+		GetPack: &models.GetPackInput{ID: "id.does.not.exist"},
+	}
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.Error(t, err)
+	assert.Equal(t, http.StatusNotFound, statusCode)
+}
+
+func listPacks(t *testing.T) {
+	// success: no filter
+	input := models.LambdaInput{
+		ListPacks: &models.ListPacksInput{},
+	}
+	var result models.ListPacksOutput
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+
+	expected := models.ListPacksOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 1,
+			TotalPages: 1,
+		},
+		Packs: []models.Pack{
+			*packOriginalReleaseStandardSet,
+		},
+	}
+	assert.Equal(t, expected, result)
+	// test name contains filter
+	input = models.LambdaInput{
+		ListPacks: &models.ListPacksInput{
+			NameContains: "universal",
+		},
+	}
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	expected = models.ListPacksOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 1,
+			TotalPages: 1,
+		},
+		Packs: []models.Pack{
+			*packOriginalReleaseStandardSet,
+		},
+	}
+	assert.Equal(t, expected, result)
+	assert.NoError(t, err)
+	// success: with enabled: false
+	input = models.LambdaInput{
+		ListPacks: &models.ListPacksInput{
+			Enabled: aws.Bool(false),
+		},
+	}
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	expected = models.ListPacksOutput{
+		Paging: models.Paging{
+			ThisPage:   1,
+			TotalItems: 1,
+			TotalPages: 1,
+		},
+		Packs: []models.Pack{
+			*packOriginalReleaseStandardSet,
+		},
+	}
+	assert.Equal(t, expected, result)
+	assert.NoError(t, err)
+	// success: with enabled: true
+	input = models.LambdaInput{
+		ListPacks: &models.ListPacksInput{
+			Enabled: aws.Bool(true),
+		},
+	}
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	expected = models.ListPacksOutput{
+		Paging: models.Paging{
+			ThisPage:   0,
+			TotalItems: 0,
+			TotalPages: 0,
+		},
+		Packs: []models.Pack{},
+	}
+	assert.Equal(t, expected, result)
+	assert.NoError(t, err)
+}
+
+func enumeratePack(t *testing.T) {
+	// no such pack
+	input := models.LambdaInput{
+		EnumeratePack: &models.EnumeratePackInput{
+			ID: "no.such.pack",
+		},
+	}
+	var result models.EnumeratePackOutput
+	_, err := apiClient.Invoke(&input, &result)
+	assert.Error(t, err)
+	// success: multi types
+	input = models.LambdaInput{
+		EnumeratePack: &models.EnumeratePackInput{
+			ID: packOriginalReleaseStandardSet.ID,
+		},
+	}
+	statusCode, err := apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, 2, len(result.Detections))
+	assert.Equal(t, 9, len(result.Models))
+	assert.Equal(t, 2, len(result.Globals))
+}
+
+func patchPack(t *testing.T) {
+	// enable pack
+	var result models.Pack
+	input := models.LambdaInput{
+		PatchPack: &models.PatchPackInput{
+			ID:        packOriginalReleaseStandardSet.ID,
+			Enabled:   true,
+			VersionID: packOriginalReleaseStandardSet.PackVersion.ID,
+			UserID:    userID,
+		},
+	}
+	packOriginalReleaseStandardSet.LastModifiedBy = userID
+	packOriginalReleaseStandardSet.Enabled = true
+	statusCode, err := apiClient.Invoke(&input, &result)
+	packOriginalReleaseStandardSet.LastModified = result.LastModified
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, *packOriginalReleaseStandardSet, result)
+	// lookup detection in pack and ensure enabled: true
+	getRuleInput := models.LambdaInput{
+		GetRule: &models.GetRuleInput{ID: "Standard.BruteForceByIP"},
+	}
+	var getRuleResult models.Rule
+	statusCode, err = apiClient.Invoke(&getRuleInput, &getRuleResult)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.True(t, result.Enabled)
+
+	// disable pack
+	input = models.LambdaInput{
+		PatchPack: &models.PatchPackInput{
+			ID:        packOriginalReleaseStandardSet.ID,
+			Enabled:   false,
+			VersionID: packOriginalReleaseStandardSet.PackVersion.ID,
+			UserID:    userID,
+		},
+	}
+	packOriginalReleaseStandardSet.Enabled = false
+	statusCode, err = apiClient.Invoke(&input, &result)
+	packOriginalReleaseStandardSet.LastModified = result.LastModified
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.Equal(t, *packOriginalReleaseStandardSet, result)
+	// lookup detection in pack and ensure enabled:true
+	getRuleInput = models.LambdaInput{
+		GetRule: &models.GetRuleInput{ID: "Standard.BruteForceByIP"},
+	}
+	statusCode, err = apiClient.Invoke(&getRuleInput, &getRuleResult)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	assert.False(t, result.Enabled)
+
+	/*TODO
+	// upgrade to newer well known version (v1.15.0) TODO
+	input = models.PatchPackInput{
+		PackVersion: models.Version{
+			ID:   12345,
+			Name: "v1.15.0", // TODO: fill in this info
+		},
+	}
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	//assert.Equal(t, *pack, result) // TODO: fill in with pack data; but EnabledVersion: upgraded version
+	// downgrade to older version (v1.14.0)
+	input = models.PatchPackInput{
+		PackVersion: models.Version{
+			ID:   12345,
+			Name: "v1.14.0", // TODO: fill in this info
+		},
+	}
+	statusCode, err = apiClient.Invoke(&input, &result)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, statusCode)
+	//assert.Equal(t, *pack, result) // TODO: fill in with pack data; but EnabledVersion: downgraded version
+	*/
 }

@@ -28,22 +28,33 @@ import (
 
 func TestAppendAnyAWSAccountIds(t *testing.T) {
 	event := AWSPantherLog{}
-	value := "a"
-	expectedAny := parsers.NewPantherAnyString()
-	parsers.AppendAnyString(expectedAny, value)
+	value := "012345678912"
+	expectedAny := parsers.PantherAnyString{value}
 	event.AppendAnyAWSAccountIds(value)
 	require.Equal(t, expectedAny, event.PantherAnyAWSAccountIds)
 
 	event = AWSPantherLog{}
 	event.AppendAnyAWSAccountIdPtrs(&value)
 	require.Equal(t, expectedAny, event.PantherAnyAWSAccountIds)
+
+	// these should fail validation
+	event = AWSPantherLog{}
+	value = "012345" // too short
+	expectedAny = nil
+	event.AppendAnyAWSAccountIds(value)
+	require.Equal(t, expectedAny, event.PantherAnyAWSAccountIds)
+
+	event = AWSPantherLog{}
+	value = "abc345678912" // not all numbers
+	expectedAny = nil
+	event.AppendAnyAWSAccountIds(value)
+	require.Equal(t, expectedAny, event.PantherAnyAWSAccountIds)
 }
 
 func TestAppendAnyAWSInstanceIds(t *testing.T) {
 	event := AWSPantherLog{}
 	value := "a"
-	expectedAny := parsers.NewPantherAnyString()
-	parsers.AppendAnyString(expectedAny, value)
+	expectedAny := parsers.PantherAnyString{value}
 	event.AppendAnyAWSInstanceIds(value)
 	require.Equal(t, expectedAny, event.PantherAnyAWSInstanceIds)
 
@@ -55,8 +66,7 @@ func TestAppendAnyAWSInstanceIds(t *testing.T) {
 func TestAppendAnyAWSARNs(t *testing.T) {
 	event := AWSPantherLog{}
 	value := "a"
-	expectedAny := parsers.NewPantherAnyString()
-	parsers.AppendAnyString(expectedAny, value)
+	expectedAny := parsers.PantherAnyString{value}
 	event.AppendAnyAWSARNs(value)
 	require.Equal(t, expectedAny, event.PantherAnyAWSARNs)
 
@@ -68,8 +78,7 @@ func TestAppendAnyAWSARNs(t *testing.T) {
 func TestAppendAnyAWSTags(t *testing.T) {
 	event := AWSPantherLog{}
 	value := "a"
-	expectedAny := parsers.NewPantherAnyString()
-	parsers.AppendAnyString(expectedAny, value)
+	expectedAny := parsers.PantherAnyString{value}
 	event.AppendAnyAWSTags(value)
 	require.Equal(t, expectedAny, event.PantherAnyAWSTags)
 

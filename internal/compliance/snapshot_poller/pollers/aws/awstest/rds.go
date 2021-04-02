@@ -60,7 +60,7 @@ var (
 					HostedZoneId: aws.String("ABCDE1234"),
 				},
 				AllocatedStorage:      aws.Int64(20),
-				InstanceCreateTime:    ExampleDate,
+				InstanceCreateTime:    &ExampleTime,
 				PreferredBackupWindow: aws.String("07:31-08:01"),
 				BackupRetentionPeriod: aws.Int64(7),
 				VpcSecurityGroups: []*rds.VpcSecurityGroupMembership{
@@ -113,7 +113,7 @@ var (
 					},
 				},
 				PreferredMaintenanceWindow: aws.String("thu:12:02-thu:12:32"),
-				LatestRestorableTime:       ExampleDate,
+				LatestRestorableTime:       &ExampleTime,
 				MultiAZ:                    aws.Bool(false),
 				EngineVersion:              aws.String("5.7.22"),
 				AutoMinorVersionUpgrade:    aws.Bool(true),
@@ -139,20 +139,27 @@ var (
 			},
 		},
 	}
+	ExampleDescribeDBInstancesOutputContinue = &rds.DescribeDBInstancesOutput{
+		DBInstances: []*rds.DBInstance{
+			ExampleDescribeDBInstancesOutput.DBInstances[0],
+			ExampleDescribeDBInstancesOutput.DBInstances[0],
+		},
+		Marker: aws.String("1"),
+	}
 
 	ExampleDescribeDBSnapshotsOutput = &rds.DescribeDBSnapshotsOutput{
 		DBSnapshots: []*rds.DBSnapshot{
 			{
 				DBSnapshotIdentifier:             aws.String("rds:example-instance-2019-01-01-01-01"),
 				DBInstanceIdentifier:             aws.String("example-instance"),
-				SnapshotCreateTime:               ExampleDate,
+				SnapshotCreateTime:               &ExampleTime,
 				Engine:                           aws.String("mysql"),
 				AllocatedStorage:                 aws.Int64(20),
 				Status:                           aws.String("available"),
 				Port:                             aws.Int64(3306),
 				AvailabilityZone:                 aws.String("us-west-2a"),
 				VpcId:                            aws.String("vpc-asdfasdf"),
-				InstanceCreateTime:               ExampleDate,
+				InstanceCreateTime:               &ExampleTime,
 				MasterUsername:                   aws.String("superuser"),
 				EngineVersion:                    aws.String("5.7.22"),
 				LicenseModel:                     aws.String("general-public-license"),
@@ -225,7 +232,7 @@ var (
 // RDS mock
 
 // SetupMockRds is used to override the RDS Client initializer
-func SetupMockRds(sess *session.Session, cfg *aws.Config) interface{} {
+func SetupMockRds(_ *session.Session, _ *aws.Config) interface{} {
 	return MockRdsForSetup
 }
 

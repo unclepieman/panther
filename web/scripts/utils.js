@@ -16,9 +16,17 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-const { execSync } = require('child_process');
 const dotenv = require('dotenv');
 const chalk = require('chalk');
+const fs = require('fs');
+
+function overrideDotEnvVars(path) {
+  const envConfig = dotenv.parse(fs.readFileSync(path));
+  // eslint-disable-next-line
+  for (const k in envConfig) {
+    process.env[k] = envConfig[k];
+  }
+}
 
 function loadDotEnvVars(path) {
   const dotenvResult = dotenv.config({ path });
@@ -27,31 +35,41 @@ function loadDotEnvVars(path) {
   }
 }
 
-function getPantherDeploymentVersion() {
-  try {
-    return execSync('git describe --tags')
-      .toString()
-      .trim();
-  } catch (err) {
-    throw new Error(chalk.red(err.message));
-  }
-}
+function getAppTemplateParams() {
+  const PANTHER_CONFIG = {
+    AWS_REGION: process.env.AWS_REGION,
+    AWS_ACCOUNT_ID: process.env.AWS_ACCOUNT_ID,
+    NODE_ENV: process.env.NODE_ENV,
+    WEB_APPLICATION_GRAPHQL_API_ENDPOINT: process.env.WEB_APPLICATION_GRAPHQL_API_ENDPOINT,
+    WEB_APPLICATION_USER_POOL_CLIENT_ID: process.env.WEB_APPLICATION_USER_POOL_CLIENT_ID,
+    WEB_APPLICATION_USER_POOL_ID: process.env.WEB_APPLICATION_USER_POOL_ID,
+    PANTHER_COMMIT: process.env.PANTHER_COMMIT,
+    PANTHER_VERSION: process.env.PANTHER_VERSION,
+  };
 
-function validateRequiredEnv() {
-  const requiredEnvs = [
-    'AWS_ACCOUNT_ID',
-    'AWS_REGION',
-    'WEB_APPLICATION_GRAPHQL_API_ENDPOINT',
-    'WEB_APPLICATION_USER_POOL_CLIENT_ID',
-    'WEB_APPLICATION_USER_POOL_ID',
-  ];
-
-  const unsetVars = requiredEnvs.filter(env => process.env[env] === undefined);
-  if (unsetVars.length) {
-    throw new Error(chalk.red(`Couldn't find the following ENV vars: ${unsetVars.join(', ')}`));
+  const missingKeys = Object.keys(PANTHER_CONFIG).filter(key => PANTHER_CONFIG[key] === undefined);
+  if (missingKeys.length) {
+    throw new Error(chalk.red(`Couldn't find the following ENV vars: ${missingKeys.join(', ')}`));
   }
 
-  return true;
+  return { PANTHER_CONFIG };
 }
 
-module.exports = { loadDotEnvVars, getPantherDeploymentVersion, validateRequiredEnv };
+const getCacheControlForFileType = filepath => {
+  if (/favicon.*\.(png|svg|ico)/.test(filepath)) {
+    return 'max-age=604800,public,stale-while-revalidate=604800';
+  }
+
+  if (/\.(.*\.js|svg|jpg)/.test(filepath)) {
+    return 'max-age=31536000,public,immutable';
+  }
+
+  return 'no-cache';
+};
+
+module.exports = {
+  overrideDotEnvVars,
+  loadDotEnvVars,
+  getAppTemplateParams,
+  getCacheControlForFileType,
+};

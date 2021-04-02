@@ -17,20 +17,17 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: Sets up an SNS topic and subscribes it to Panther Log processing SQS queue.
 
-Metadata:
-  Version: v1.0.0
-
 Parameters:
   SnsTopicName:
     Type: String
-    Description: The name of the SNS topic
+    Description: The name of the new SNS Topic to create for receiving S3 notifications
     Default: panther-notifications-topic
   MasterAccountId:
     Type: String
-    Description: The AWS AccountId where you have deployed Panther
+    Description: The AWS Account ID of the Panther deployment
   PantherRegion:
     Type: String
-    Description: The region where you have deployed Panther.
+    Description: The AWS Region of the Panther deployment
     AllowedValues:
       - us-east-1
       - us-east-2

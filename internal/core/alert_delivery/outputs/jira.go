@@ -19,13 +19,15 @@ package outputs
  */
 
 import (
+	"context"
 	"encoding/base64"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
+	jsoniter "github.com/json-iterator/go"
 
-	outputmodels "github.com/panther-labs/panther/api/lambda/outputs/models"
-	alertmodels "github.com/panther-labs/panther/internal/core/alert_delivery/models"
+	deliverymodel "github.com/panther-labs/panther/api/lambda/delivery/models"
+	outputModels "github.com/panther-labs/panther/api/lambda/outputs/models"
 )
 
 const (
@@ -34,30 +36,34 @@ const (
 
 // Jira alert send an issue.
 func (client *OutputClient) Jira(
-	alert *alertmodels.Alert, config *outputmodels.JiraConfig) *AlertDeliveryError {
+	ctx context.Context, alert *deliverymodel.Alert, config *outputModels.JiraConfig) *AlertDeliveryResponse {
 
-	var tagsItem = aws.StringValueSlice(alert.Tags)
+	description := "*Description:* " + alert.AnalysisDescription
+	link := "\n [Click here to view in the Panther UI|" + generateURL(alert) + "]"
+	runBook := "\n *Runbook:* " + alert.Runbook
+	severity := "\n *Severity:* " + alert.Severity
+	tags := "\n *Tags:* " + strings.Join(alert.Tags, ", ")
+	// Best effort attempt to marshal Alert Context
+	marshaledContext, _ := jsoniter.MarshalToString(alert.Context)
+	alertContext := "\n *AlertContext:* " + marshaledContext
 
-	description := "*Description:* " + aws.StringValue(alert.PolicyDescription)
-	link := "\n [Click here to view in the Panther UI](" + generateURL(alert) + ")"
-	runBook := "\n *Runbook:* " + aws.StringValue(alert.Runbook)
-	severity := "\n *Severity:* " + aws.StringValue(alert.Severity)
-	tags := "\n *Tags:* " + strings.Join(tagsItem, ", ")
+	summary := removeNewLines(generateAlertTitle(alert))
 
 	fields := map[string]interface{}{
-		"summary":     generateAlertTitle(alert),
-		"description": description + link + runBook + severity + tags,
+		"summary":     summary,
+		"description": description + link + runBook + severity + tags + alertContext,
 		"project": map[string]*string{
-			"key": config.ProjectKey,
+			"key": aws.String(config.ProjectKey),
 		},
 		"issuetype": map[string]*string{
-			"name": config.Type,
+			"name": aws.String(config.Type),
 		},
+		"labels": aws.StringSlice(config.Labels),
 	}
 
-	if aws.StringValue(config.AssigneeID) != "" {
+	if config.AssigneeID != "" {
 		fields["assignee"] = map[string]*string{
-			"id": config.AssigneeID,
+			"id": aws.String(config.AssigneeID),
 		}
 	}
 
@@ -65,9 +71,9 @@ func (client *OutputClient) Jira(
 		"fields": fields,
 	}
 
-	auth := *config.UserName + ":" + *config.APIKey
+	auth := config.UserName + ":" + config.APIKey
 	basicAuthToken := "Basic " + base64.StdEncoding.EncodeToString([]byte(auth))
-	jiraRestURL := *config.OrgDomain + jiraEndpoint
+	jiraRestURL := config.OrgDomain + jiraEndpoint
 	requestHeader := map[string]string{
 		AuthorizationHTTPHeader: basicAuthToken,
 	}
@@ -77,5 +83,5 @@ func (client *OutputClient) Jira(
 		body:    jiraRequest,
 		headers: requestHeader,
 	}
-	return client.httpWrapper.post(postInput)
+	return client.httpWrapper.post(ctx, postInput)
 }

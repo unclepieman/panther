@@ -17,22 +17,37 @@
  */
 
 import React from 'react';
-import { Alert, Box, Card } from 'pouncejs';
+import { Alert, Box, Card, Flex, Text } from 'pouncejs';
 import { DEFAULT_LARGE_PAGE_SIZE } from 'Source/constants';
 import { extractErrorMessage } from 'Helpers/utils';
-import { useInfiniteScroll } from 'react-infinite-scroll-hook';
+import { ListAlertsInput } from 'Generated/schema';
+import useInfiniteScroll from 'Hooks/useInfiniteScroll';
+import useRequestParamsWithoutPagination from 'Hooks/useRequestParamsWithoutPagination';
 import TablePlaceholder from 'Components/TablePlaceholder';
+import NoResultsFound from 'Components/NoResultsFound';
 import ErrorBoundary from 'Components/ErrorBoundary';
+import isEmpty from 'lodash/isEmpty';
+import withSEO from 'Hoc/withSEO';
+import useTrackPageView from 'Hooks/useTrackPageView';
+import { PageViewEnum } from 'Helpers/analytics';
+import AlertCard from 'Components/cards/AlertCard';
+import { SelectAllCheckbox, withSelectContext } from 'Components/utils/SelectContext';
+import { compose } from 'Helpers/compose';
+import ListAlertsActions from 'Pages/ListAlerts/ListAlertsActions';
+import Panel from 'Components/Panel';
 import { useListAlerts } from './graphql/listAlerts.generated';
-import ListAlertsTable from './ListAlertsTable';
+import ListAlertBreadcrumbFilters from './ListAlertBreadcrumbFilters';
 import ListAlertsPageSkeleton from './Skeleton';
 import ListAlertsPageEmptyDataFallback from './EmptyDataFallback';
 
 const ListAlerts = () => {
+  useTrackPageView(PageViewEnum.ListAlerts);
+  const { requestParams } = useRequestParamsWithoutPagination<ListAlertsInput>();
   const { loading, error, data, fetchMore } = useListAlerts({
     fetchPolicy: 'cache-and-network',
     variables: {
       input: {
+        ...requestParams,
         pageSize: DEFAULT_LARGE_PAGE_SIZE,
       },
     },
@@ -40,26 +55,47 @@ const ListAlerts = () => {
 
   const alertItems = data?.alerts.alertSummaries || [];
   const lastEvaluatedKey = data?.alerts.lastEvaluatedKey || null;
+  const hasNextPage = !!data?.alerts?.lastEvaluatedKey;
 
-  const infiniteRef = useInfiniteScroll<HTMLDivElement>({
+  const alertIds = React.useMemo(() => alertItems.map(a => a.alertId), [alertItems.length]);
+
+  const { sentinelRef } = useInfiniteScroll<HTMLDivElement>({
     loading,
-    hasNextPage: !!data?.alerts?.lastEvaluatedKey,
-    checkInterval: 600,
-    threshold: 400,
+    threshold: 500,
     onLoadMore: () => {
       fetchMore({
         variables: {
-          input: { pageSize: DEFAULT_LARGE_PAGE_SIZE, exclusiveStartKey: lastEvaluatedKey },
+          input: {
+            ...requestParams,
+            pageSize: DEFAULT_LARGE_PAGE_SIZE,
+            exclusiveStartKey: lastEvaluatedKey,
+          },
         },
         updateQuery: (previousResult, { fetchMoreResult }) => {
+          // FIXME: Centralize this behavior for alert pagination, when apollo fixes a bug which
+          // causes wrong params to be passed to the merge function in type policies
+          // https://github.com/apollographql/apollo-client/issues/5951
+
+          // PreviousResults now contains cached data and could have the same records (alertIds)
+          // as the incoming results. Therefore, we must merge them and not just concatenate.
+
+          // Create a set of old alertIds
+          const oldAlertIds = new Set(
+            previousResult.alerts.alertSummaries.map(({ alertId }) => alertId)
+          );
+
+          // Create a new merged array. Don't update old cached values because it isn't necessary (yet).
+          const mergedAlertSummaries = [
+            ...previousResult.alerts.alertSummaries,
+            ...fetchMoreResult.alerts.alertSummaries.filter(
+              ({ alertId }) => !oldAlertIds.has(alertId)
+            ),
+          ];
+
           return {
             alerts: {
-              ...previousResult.alerts,
               ...fetchMoreResult.alerts,
-              alertSummaries: [
-                ...previousResult.alerts.alertSummaries,
-                ...fetchMoreResult.alerts.alertSummaries,
-              ],
+              alertSummaries: mergedAlertSummaries,
             },
           };
         },
@@ -71,39 +107,58 @@ const ListAlerts = () => {
     return <ListAlertsPageSkeleton />;
   }
 
-  if (error) {
-    return (
-      <Alert
-        mb={6}
-        variant="error"
-        title="Couldn't load your alerts"
-        description={
-          extractErrorMessage(error) ||
-          'There was an error when performing your request, please contact support@runpanther.io'
-        }
-      />
-    );
-  }
-
-  if (!alertItems.length) {
+  if (!alertItems.length && isEmpty(requestParams)) {
     return <ListAlertsPageEmptyDataFallback />;
   }
 
-  //  Check how many active filters exist by checking how many columns keys exist in the URL
+  const hasError = Boolean(error);
   return (
     <ErrorBoundary>
-      <div ref={infiniteRef}>
-        <Card mb={8}>
-          <ListAlertsTable items={alertItems} />
-          {loading && (
-            <Box p={8}>
-              <TablePlaceholder rowCount={10} />
-            </Box>
-          )}
+      {hasError && (
+        <Box mb={6}>
+          <Alert
+            variant="error"
+            title="Couldn't load your alerts"
+            description={
+              extractErrorMessage(error) ||
+              'There was an error when performing your request, please contact support@runpanther.io'
+            }
+          />
+        </Box>
+      )}
+      <ListAlertBreadcrumbFilters />
+      <Panel
+        title={
+          <Flex align="center" spacing={2} ml={4}>
+            <SelectAllCheckbox selectionItems={alertIds} />
+            <Text>Alerts</Text>
+          </Flex>
+        }
+        actions={<ListAlertsActions />}
+      >
+        <Card as="section" position="relative">
+          <Box position="relative">
+            <Flex direction="column" spacing={2}>
+              {alertItems.length ? (
+                alertItems.map(alert => (
+                  <AlertCard key={alert.alertId} alert={alert} selectionEnabled />
+                ))
+              ) : (
+                <Box my={8}>
+                  <NoResultsFound />
+                </Box>
+              )}
+            </Flex>
+            {hasNextPage && (
+              <Box py={8} ref={sentinelRef}>
+                <TablePlaceholder rowCount={10} />
+              </Box>
+            )}
+          </Box>
         </Card>
-      </div>
+      </Panel>
     </ErrorBoundary>
   );
 };
 
-export default ListAlerts;
+export default compose(withSEO({ title: 'Alerts' }), withSelectContext(), React.memo)(ListAlerts);

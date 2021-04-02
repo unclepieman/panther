@@ -19,19 +19,27 @@ package api
  */
 
 import (
-	"errors"
+	"context"
 	"fmt"
+	"strings"
 
+	"github.com/Masterminds/semver/v3"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
+	"github.com/aws/aws-sdk-go/aws/endpoints"
 	"github.com/aws/aws-sdk-go/service/kms"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3iface"
+	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sts"
+	"github.com/pkg/errors"
 	"go.uber.org/zap"
 
 	"github.com/panther-labs/panther/api/lambda/source/models"
 	"github.com/panther-labs/panther/pkg/genericapi"
+	"github.com/panther-labs/panther/pkg/stringset"
 )
 
 const (
@@ -42,116 +50,304 @@ const (
 )
 
 var (
-	evaluateIntegrationFunc       = evaluateIntegration
 	checkIntegrationInternalError = &genericapi.InternalError{Message: "Failed to validate source. Please try again later"}
 )
 
 // CheckIntegration adds a set of new integrations in a batch.
-func (API) CheckIntegration(input *models.CheckIntegrationInput) (*models.SourceIntegrationHealth, error) {
+func (api *API) CheckIntegration(input *models.CheckIntegrationInput) (*models.SourceIntegrationHealth, error) {
 	zap.L().Debug("beginning source configuration check")
-	out := &models.SourceIntegrationHealth{
-		AWSAccountID:    aws.StringValue(input.AWSAccountID),
-		IntegrationType: aws.StringValue(input.IntegrationType),
-	}
-
-	switch aws.StringValue(input.IntegrationType) {
+	switch input.IntegrationType {
 	case models.IntegrationTypeAWSScan:
-		_, out.AuditRoleStatus = getCredentialsWithStatus(fmt.Sprintf(auditRoleFormat,
-			*input.AWSAccountID, *sess.Config.Region))
-		if aws.BoolValue(input.EnableCWESetup) {
-			_, out.CWERoleStatus = getCredentialsWithStatus(fmt.Sprintf(cweRoleFormat,
-				*input.AWSAccountID, *sess.Config.Region))
-		}
-		if aws.BoolValue(input.EnableRemediation) {
-			_, out.RemediationRoleStatus = getCredentialsWithStatus(fmt.Sprintf(remediationRoleFormat,
-				*input.AWSAccountID, *sess.Config.Region))
-		}
-
+		return api.checkAwsScanIntegration(input), nil
 	case models.IntegrationTypeAWS3:
-		var roleCreds *credentials.Credentials
-		logProcessingRole := generateLogProcessingRoleArn(*input.AWSAccountID, *input.IntegrationLabel)
-		roleCreds, out.ProcessingRoleStatus = getCredentialsWithStatus(logProcessingRole)
-		if aws.BoolValue(out.ProcessingRoleStatus.Healthy) {
-			out.S3BucketStatus = checkBucket(roleCreds, input.S3Bucket)
-			out.KMSKeyStatus = checkKey(roleCreds, input.KmsKey)
-		}
+		return api.checkAwsS3Integration(input), nil
+	case models.IntegrationTypeSqs:
+		return api.checkSqsQueueHealth(input), nil
 	default:
 		return nil, checkIntegrationInternalError
 	}
-
-	return out, nil
 }
 
-func checkKey(roleCredentials *credentials.Credentials, key *string) models.SourceIntegrationItemStatus {
-	if key == nil {
+func (api *API) checkAwsScanIntegration(input *models.CheckIntegrationInput) *models.SourceIntegrationHealth {
+	out := &models.SourceIntegrationHealth{
+		IntegrationType: input.IntegrationType,
+		// Default to true, if these need to be checked and they are not healthy they will be overwritten
+		CWERoleStatus:         models.SourceIntegrationItemStatus{Healthy: true, Message: "Real time event setup is not enabled."},
+		RemediationRoleStatus: models.SourceIntegrationItemStatus{Healthy: true, Message: "Automatic remediation is not enabled."},
+	}
+	_, out.AuditRoleStatus = api.getCredentialsWithStatus(fmt.Sprintf(auditRoleFormat,
+		input.AWSAccountID, api.Config.Region))
+	if aws.BoolValue(input.EnableCWESetup) {
+		_, out.CWERoleStatus = api.getCredentialsWithStatus(fmt.Sprintf(cweRoleFormat,
+			input.AWSAccountID, api.Config.Region))
+	}
+	if aws.BoolValue(input.EnableRemediation) {
+		_, out.RemediationRoleStatus = api.getCredentialsWithStatus(fmt.Sprintf(remediationRoleFormat,
+			input.AWSAccountID, api.Config.Region))
+	}
+	return out
+}
+
+func (api *API) checkAwsS3Integration(input *models.CheckIntegrationInput) *models.SourceIntegrationHealth {
+	out := &models.SourceIntegrationHealth{
+		IntegrationType: input.IntegrationType,
+	}
+	var roleCreds *credentials.Credentials
+	logProcessingRole := generateLogProcessingRoleArn(input.AWSAccountID, input.IntegrationLabel)
+	roleCreds, out.ProcessingRoleStatus = api.getCredentialsWithStatus(logProcessingRole)
+
+	if !out.ProcessingRoleStatus.Healthy {
+		return out // can't run the next checks without a working IAM role
+	}
+
+	bucketStatus, bucketRegion := api.checkBucket(roleCreds, input.S3Bucket)
+	out.S3BucketStatus = bucketStatus
+	out.KMSKeyStatus = api.checkKey(roleCreds, input.KmsKey)
+
+	s3Client := s3.New(api.AwsSession, &aws.Config{
+		Credentials: roleCreds,
+		Region:      bucketRegion,
+	})
+	getObjectCheck, skipped := checkGetObject(s3Client, input)
+	if !skipped {
+		out.GetObjectStatus = &getObjectCheck
+	}
+
+	notificationsCheck, skipped := checkBucketNotifications(context.TODO(), s3Client, input, api.Config, *bucketRegion)
+	if !skipped {
+		out.BucketNotificationsStatus = &notificationsCheck
+	}
+	return out
+}
+
+func checkBucketNotifications(
+	ctx context.Context, s3Client s3iface.S3API, input *models.CheckIntegrationInput, config Config, bucketRegion string) (
+	h models.SourceIntegrationItemStatus, skipped bool) {
+
+	if !input.ManagedBucketNotifications {
+		return models.SourceIntegrationItemStatus{}, true
+	}
+
+	out, err := s3Client.GetBucketNotificationConfigurationWithContext(ctx, &s3.GetBucketNotificationConfigurationRequest{
+		Bucket:              &input.S3Bucket,
+		ExpectedBucketOwner: &input.AWSAccountID,
+	})
+	if err != nil {
+		return models.SourceIntegrationItemStatus{
+			Healthy:      false,
+			Message:      "Failed to get bucket notifications",
+			ErrorMessage: err.Error(),
+		}, false
+	}
+
+	topicARN := arn.ARN{
+		Partition: config.AWSPartition, // Note: Assume the onboarded bucket is in the same AWS partition as Panther
+		Service:   "sns",
+		Region:    bucketRegion,
+		AccountID: input.AWSAccountID,
+		Resource:  "panther-notifications-topic",
+	}.String()
+	// An SNS notification should exist for each one of the prefixes.
+	prefixes := reduceNoPrefixStrings(input.S3PrefixLogTypes.S3Prefixes())
+	var notFound []string // keep the prefixes which we didn't find notifications for
+	for _, p := range prefixes {
+		// search the prefix in the configurations
+		ok := false
+		for _, c := range out.TopicConfigurations {
+			if topicARN != aws.StringValue(c.TopicArn) {
+				continue
+			}
+			if !stringset.Contains(aws.StringValueSlice(c.Events), "s3:ObjectCreated:*") {
+				continue
+			}
+			if c.Filter == nil || c.Filter.Key == nil {
+				continue
+			}
+
+			// Check filter rules. The prefix should be an str prefix to p. Missing prefix is also fine if p is empty.
+			rulePrefix := ""
+			for _, r := range c.Filter.Key.FilterRules {
+				if strings.ToLower(aws.StringValue(r.Name)) == "prefix" {
+					rulePrefix = aws.StringValue(r.Value)
+				}
+			}
+			ok = strings.HasPrefix(p, rulePrefix)
+			if ok {
+				break
+			}
+		}
+		if !ok {
+			notFound = append(notFound, p) // checked all topic configs, couldn't find the prefix
+		}
+	}
+
+	if len(notFound) == 0 {
+		return models.SourceIntegrationItemStatus{
+			Healthy: true,
+			Message: "Bucket notifications are configured",
+		}, false
+	}
+	return models.SourceIntegrationItemStatus{
+		Healthy:      false,
+		Message:      "Bucket notifications are not properly configured",
+		ErrorMessage: fmt.Sprintf("Notifications are not configured for these prefixes: %+q", notFound),
+	}, false
+}
+
+// This function checks if the IAM identity of the s3Client has permissions to
+// read objects on the bucket.
+// For every s3 prefix in the input, it tries to read a random file on the bucket.
+// Even if the IAM role has permissions to read objects, the check may still fail due to a bucket policy or object ACL.
+// See https://github.com/panther-labs/panther/issues/2586 for details.
+func checkGetObject(s3Client s3iface.S3API, input *models.CheckIntegrationInput) (h models.SourceIntegrationItemStatus, skipped bool) {
+	// This check must only run for sources created in Panther >= 1.16, because it needs a new
+	// permission (s3.ListBucket) in the log processing role. The CFN stack of older sources doesn't have it.
+	minVersion := semver.MustParse("1.16.0-a") // 1.16.0-a < 1.16.0-dev (runs in dev env) < 1.16.0
+	if input.PantherVersion().LessThan(minVersion) {
+		return models.SourceIntegrationItemStatus{}, true
+	}
+
+	bucket, owner, s3Prefixes := input.S3Bucket, input.AWSAccountID, input.S3PrefixLogTypes.S3Prefixes()
+	prefixes := reduceNoPrefixStrings(s3Prefixes) // no need to check prefixes that overlap
+	for _, p := range prefixes {
+		err := checkGetObjectPrefix(s3Client, bucket, owner, p)
+		if err != nil {
+			return models.SourceIntegrationItemStatus{
+				Healthy:      false,
+				Message:      "Failed to read S3 object",
+				ErrorMessage: err.Error(),
+			}, false
+		}
+	}
+
+	return models.SourceIntegrationItemStatus{
+		Healthy: true,
+		Message: "We were able to read an object on the specified S3 bucket.",
+	}, false
+}
+
+func checkGetObjectPrefix(s3Client s3iface.S3API, bucket, owner, prefix string) error {
+	listOutput, err := s3Client.ListObjects(&s3.ListObjectsInput{
+		Bucket:              &bucket,
+		ExpectedBucketOwner: &owner,
+		Prefix:              &prefix,
+		MaxKeys:             aws.Int64(1),
+	})
+	if err != nil {
+		return errors.Wrap(err, "s3.ListObjects request failed")
+	}
+
+	if len(listOutput.Contents) == 0 {
+		return nil
+	}
+
+	s3Obj := listOutput.Contents[0]
+	_, err = s3Client.HeadObject(&s3.HeadObjectInput{
+		Bucket:              &bucket,
+		ExpectedBucketOwner: &owner,
+		Key:                 s3Obj.Key,
+	})
+	if err != nil {
+		return errors.Wrapf(err, "s3.HeadObject request failed for %s", *s3Obj.Key)
+	}
+	return nil
+}
+
+func (api *API) checkKey(roleCredentials *credentials.Credentials, key string) models.SourceIntegrationItemStatus {
+	if len(key) == 0 {
 		// KMS key is optional
 		return models.SourceIntegrationItemStatus{
-			Healthy: aws.Bool(true),
+			Healthy: true,
+			Message: "No KMS Key was specified.",
 		}
 	}
-	kmsClient := kms.New(sess, &aws.Config{Credentials: roleCredentials})
 
-	info, err := kmsClient.DescribeKey(&kms.DescribeKeyInput{KeyId: key})
+	keyARN, err := arn.Parse(key)
 	if err != nil {
 		return models.SourceIntegrationItemStatus{
-			Healthy:      aws.Bool(false),
-			ErrorMessage: aws.String(err.Error()),
+			Healthy:      false,
+			Message:      fmt.Sprintf("The KMS ARN '%s' is invalid", key),
+			ErrorMessage: err.Error(),
 		}
 	}
 
-	if !*info.KeyMetadata.Enabled {
+	conf := &aws.Config{
+		Credentials: roleCredentials,
+		Region:      &keyARN.Region, // KMS key could be in another region
+	}
+	kmsClient := kms.New(api.AwsSession, conf)
+	info, err := kmsClient.DescribeKey(&kms.DescribeKeyInput{KeyId: &key})
+	if err != nil {
+		return models.SourceIntegrationItemStatus{
+			Healthy:      false,
+			Message:      "An error occurred while trying to describe the specified KMS key.",
+			ErrorMessage: err.Error(),
+		}
+	}
+
+	if !aws.BoolValue(info.KeyMetadata.Enabled) {
 		// If the key is disabled, we should fail as well
 		return models.SourceIntegrationItemStatus{
-			Healthy:      aws.Bool(false),
-			ErrorMessage: aws.String("key disabled"),
+			Healthy:      false,
+			Message:      "The specified KMS Key is disabled.",
+			ErrorMessage: "",
 		}
 	}
 
 	return models.SourceIntegrationItemStatus{
-		Healthy: aws.Bool(true),
+		Healthy: true,
+		Message: "We were able to call kms:DescribeKey on the specified KMS key.",
 	}
 }
 
-func checkBucket(roleCredentials *credentials.Credentials, bucket *string) models.SourceIntegrationItemStatus {
-	s3Client := s3.New(sess, &aws.Config{Credentials: roleCredentials})
+func (api *API) checkBucket(roleCredentials *credentials.Credentials, bucket string) (models.SourceIntegrationItemStatus, *string) {
+	s3Client := s3.New(api.AwsSession, &aws.Config{Credentials: roleCredentials})
 
-	_, err := s3Client.GetBucketLocation(&s3.GetBucketLocationInput{Bucket: bucket})
+	out, err := s3Client.GetBucketLocation(&s3.GetBucketLocationInput{Bucket: &bucket})
 	if err != nil {
 		return models.SourceIntegrationItemStatus{
-			Healthy:      aws.Bool(false),
-			ErrorMessage: aws.String(err.Error()),
-		}
+			Healthy:      false,
+			Message:      "An error occurred while trying to get the region of the specified S3 bucket.",
+			ErrorMessage: err.Error(),
+		}, nil
 	}
 
-	return models.SourceIntegrationItemStatus{
-		Healthy: aws.Bool(true),
+	region := out.LocationConstraint
+	if region == nil {
+		region = aws.String(endpoints.UsEast1RegionID)
 	}
+	return models.SourceIntegrationItemStatus{
+		Healthy: true,
+		Message: "We were able to call s3:GetBucketLocation on the specified S3 bucket.",
+	}, region
 }
 
-func getCredentialsWithStatus(roleARN string) (*credentials.Credentials, models.SourceIntegrationItemStatus) {
+func (api *API) getCredentialsWithStatus(roleARN string) (*credentials.Credentials, models.SourceIntegrationItemStatus) {
 	zap.L().Debug("checking role", zap.String("roleArn", roleARN))
 	// Setup new credentials with the role
 	roleCredentials := stscreds.NewCredentials(
-		sess,
+		api.AwsSession,
 		roleARN,
 	)
 
 	// Use the role to make sure it's good
-	stsClient := sts.New(sess, aws.NewConfig().WithCredentials(roleCredentials))
+	stsClient := sts.New(api.AwsSession, aws.NewConfig().WithCredentials(roleCredentials))
 	_, err := stsClient.GetCallerIdentity(&sts.GetCallerIdentityInput{})
 	if err != nil {
 		return roleCredentials, models.SourceIntegrationItemStatus{
-			Healthy:      aws.Bool(false),
-			ErrorMessage: aws.String(err.Error()),
+			Healthy:      false,
+			Message:      fmt.Sprintf("We were unable to assume %s", roleARN),
+			ErrorMessage: err.Error(),
 		}
 	}
 
 	return roleCredentials, models.SourceIntegrationItemStatus{
-		Healthy: aws.Bool(true),
+		Healthy: true,
+		Message: fmt.Sprintf("We were able to successfully assume %s", roleARN),
 	}
 }
 
-func evaluateIntegration(api API, integration *models.CheckIntegrationInput) (string, bool, error) {
+func (api *API) evaluateIntegration(integration *models.CheckIntegrationInput) (string, bool, error) {
 	status, err := api.CheckIntegration(integration)
 	if err != nil {
 		zap.L().Error("integration failed configuration check",
@@ -161,34 +357,77 @@ func evaluateIntegration(api API, integration *models.CheckIntegrationInput) (st
 		return "", false, err
 	}
 
-	switch aws.StringValue(integration.IntegrationType) {
+	switch integration.IntegrationType {
 	case models.IntegrationTypeAWSScan:
-		if !aws.BoolValue(status.AuditRoleStatus.Healthy) {
-			return "cannot assume audit role", false, nil
+		if !status.AuditRoleStatus.Healthy {
+			return status.AuditRoleStatus.Message, false, nil
 		}
 
-		if aws.BoolValue(integration.EnableRemediation) && !aws.BoolValue(status.RemediationRoleStatus.Healthy) {
-			return "cannot assume remediation role", false, nil
+		if aws.BoolValue(integration.EnableRemediation) && !status.RemediationRoleStatus.Healthy {
+			return status.RemediationRoleStatus.Message, false, nil
 		}
 
-		if aws.BoolValue(integration.EnableCWESetup) && !aws.BoolValue(status.CWERoleStatus.Healthy) {
-			return "cannot assume cwe role", false, nil
+		if aws.BoolValue(integration.EnableCWESetup) && !status.CWERoleStatus.Healthy {
+			return status.CWERoleStatus.Message, false, nil
 		}
 		return "", true, nil
 	case models.IntegrationTypeAWS3:
-		if !aws.BoolValue(status.ProcessingRoleStatus.Healthy) {
-			return "cannot assume log processing role", false, nil
+		if !status.ProcessingRoleStatus.Healthy {
+			return status.ProcessingRoleStatus.Message, false, nil
 		}
 
-		if !aws.BoolValue(status.S3BucketStatus.Healthy) {
-			return "log processing role cannot access s3 bucket", false, nil
+		if !status.S3BucketStatus.Healthy {
+			return status.S3BucketStatus.Message, false, nil
 		}
 
-		if integration.KmsKey != nil {
-			return "log processing role cannot access kms key", aws.BoolValue(status.KMSKeyStatus.Healthy), nil
+		if !status.KMSKeyStatus.Healthy {
+			return status.KMSKeyStatus.Message, false, nil
 		}
+
+		if !status.GetObjectStatus.Healthy {
+			return status.GetObjectStatus.Message, false, nil
+		}
+
 		return "", true, nil
+	case models.IntegrationTypeSqs:
+		if !status.SqsStatus.Healthy {
+			return status.SqsStatus.Message, false, nil
+		}
+		return status.SqsStatus.Message, true, nil
+
 	default:
 		return "", false, errors.New("invalid integration type")
 	}
+}
+
+// Check the health of the SQS source
+func (api *API) checkSqsQueueHealth(input *models.CheckIntegrationInput) *models.SourceIntegrationHealth {
+	health := &models.SourceIntegrationHealth{
+		IntegrationType: input.IntegrationType,
+	}
+
+	// If the Queue URL is not populated, it means that the SQS queue has not yet been created
+	// In such a case, the health check can just return true, since there is no check to be performed.
+	// This can happen during the initial health-check performed by the frontend, since the health check
+	// is performed before the SQS queue is created.
+	if len(input.SqsConfig.QueueURL) == 0 {
+		health.SqsStatus.Healthy = true
+		health.SqsStatus.Message = "Queue does not exist yet (first time setup)."
+		return health
+	}
+
+	getAttributesInput := &sqs.GetQueueAttributesInput{
+		QueueUrl: &input.SqsConfig.QueueURL,
+	}
+	_, err := api.SqsClient.GetQueueAttributes(getAttributesInput)
+	if err != nil {
+		health.SqsStatus.Healthy = false
+		health.SqsStatus.Message = "An error occurred while trying to get the attributes of the specified SQS queue."
+		health.SqsStatus.ErrorMessage = err.Error()
+		return health
+	}
+
+	health.SqsStatus.Healthy = true
+	health.SqsStatus.Message = "We were able to call sqs:GetQueueAttributes on the specified SQS queue."
+	return health
 }
